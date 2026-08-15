@@ -80,8 +80,10 @@ export default async function DatasetPage({
 
           <div className="mt-8 space-y-6">
             <DataPreview
+              slug={dataset.slug}
               preview={preview}
               datasetName={dataset.name}
+              sourceName={dataset.region.split(" ")[0]}
               cadenceLabel={CADENCE_LABEL[dataset.cadence]}
             />
 
