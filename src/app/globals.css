@@ -1,0 +1,173 @@
+@import "tailwindcss";
+
+/*
+ * Dryos design tokens.
+ *
+ * Ink-blue black under an acid chartreuse-yellow. The cool cast in the ground
+ * is doing real work: it sits opposite the accent on the wheel, so the yellow
+ * reads as luminous rather than as another shade of the background. A neutral
+ * black would make the same accent look flat.
+ *
+ * The accent doubles as the healthy signal. That is safe here precisely because
+ * it is chartreuse rather than amber — it cannot be mistaken for the warning
+ * state the way a gold accent would be. Each status carries a `-dim` fill and a
+ * `-line` border so components never hand-mix a tint.
+ */
+@theme {
+  /* Wide value ramp — each step is a visible lift, so panels separate from the
+     page instead of reading as one flat sheet. */
+  --color-bg: #0a0d12;
+  --color-surface: #10141b;
+  --color-surface-2: #171d26;
+  --color-surface-3: #202834;
+  --color-line: #26303d;
+  --color-line-strong: #3d4b5c;
+
+  --color-ink: #eef2f7;
+  --color-muted: #9aa8ba;
+  --color-faint: #8998ab;
+
+  /* Accent — CTAs and selection. Also the healthy signal. */
+  --color-accent: #e8ff3d;
+  --color-accent-dim: #1d2810;
+  --color-accent-line: #4f6519;
+  --color-accent-ink: #0d1206;
+  --color-accent-hover: #f1ff74;
+
+  /* Recessed surface for code blocks — reads as inset against panels. */
+  --color-code: #070a0e;
+
+  --color-ok: #e8ff3d;
+  --color-ok-dim: #1d2810;
+  --color-ok-line: #4f6519;
+
+  --color-warn: #fbbf24;
+  --color-warn-dim: #2c2109;
+  --color-warn-line: #6e551a;
+
+  --color-stale: #fb8b5c;
+  --color-stale-dim: #2e1a12;
+  --color-stale-line: #713e27;
+
+  --color-fail: #f4666b;
+  --color-fail-dim: #2d1418;
+  --color-fail-line: #703036;
+
+  --color-info: #7dd3fc;
+  --color-info-dim: #0f2430;
+  --color-info-line: #2c5a72;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Page ground.
+ *
+ * Layered rather than tiled, so it reads as depth instead of wallpaper. Top to
+ * bottom: film grain for tactility, two sets of off-centre contour rings for an
+ * organic topographic feel, a warm pool of light bleeding from the upper left,
+ * a cooler counterweight on the right, and a vertical fall-off that sinks the
+ * bottom of the page. Panels sit opaque on top, so this shows mostly in the
+ * gutters — which is where depth is worth spending.
+ */
+.dr-page-bg {
+  background-color: var(--color-bg);
+  background-image:
+    /* 1 — film grain, for tactility */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.15'/%3E%3C/svg%3E"),
+    /* 2 — topographic contours from three centres, so the rings interfere
+           and never resolve into a regular pattern */
+      repeating-radial-gradient(
+        circle at 10% -6%,
+        rgba(232, 255, 61, 0.06) 0 1px,
+        transparent 1px 58px
+      ),
+    repeating-radial-gradient(
+      circle at 94% 18%,
+      rgba(238, 242, 247, 0.035) 0 1px,
+      transparent 1px 76px
+    ),
+    repeating-radial-gradient(
+      circle at 62% 120%,
+      rgba(125, 211, 252, 0.045) 0 1px,
+      transparent 1px 94px
+    ),
+    /* 3 — chartreuse light pooling in from the upper left */
+      radial-gradient(1100px 680px at 2% -12%, rgba(232, 255, 61, 0.09), transparent 64%),
+    /* 4 — cool pool low on the right, for a diagonal fall of light */
+      radial-gradient(900px 900px at 104% 88%, rgba(96, 150, 220, 0.1), transparent 62%),
+    /* 5 — cyan lift at the top right, keeps the ground from going flat navy */
+      radial-gradient(820px 640px at 96% 0%, rgba(125, 211, 252, 0.055), transparent 58%),
+    /* 6 — ground shadow: the page gets heavier as you scroll */
+      linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.16) 45%, rgba(0, 0, 0, 0.42) 100%);
+  background-repeat: repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat,
+    no-repeat, no-repeat;
+  background-size: 180px 180px, auto, auto, auto, auto, auto, auto, auto;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Thin scrollbars inside data panes so tables don't grow a chunky gutter. */
+.dr-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+.dr-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.dr-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 999px;
+}
+.dr-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes dr-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.dr-pulse {
+  animation: dr-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes dr-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.dr-rise {
+  animation: dr-rise 0.28s ease-out both;
+}
