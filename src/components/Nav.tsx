@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { VERTICALS } from "@/lib/verticals";
 import { Wordmark } from "./Logo";
+import { ThemeToggle } from "./ThemeToggle";
 import { ButtonLink, cx } from "./ui";
 
 export function Nav() {
@@ -112,7 +113,8 @@ export function Nav() {
           active={pathname.startsWith("/maintainers")}
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2.5">
+          <ThemeToggle />
           <ButtonLink href="/marketplace/energy" tone="primary" size="sm">
             Get early access
           </ButtonLink>
