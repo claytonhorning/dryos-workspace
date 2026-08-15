@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AccessPanel } from "@/components/AccessPanel";
 import { DataPreview } from "@/components/DataPreview";
+import { MaintainerCard } from "@/components/MaintainerCard";
 import { SchemaTable } from "@/components/DataTables";
 import { StatusBadge } from "@/components/HealthBadge";
 import { TierBadge } from "@/components/TierBadge";
 import { Chip, Panel, PanelHeader } from "@/components/ui";
 import { CADENCE_LABEL, SOURCE_BASIS_LABEL, compactNumber, formatWindow } from "@/lib/format";
 import { getDataset, getPreview, listDatasets } from "@/lib/repo";
+import { maintainerFor } from "@/lib/maintainers";
 import { verticalById } from "@/lib/verticals";
 
 export async function generateStaticParams() {
@@ -24,6 +26,7 @@ export default async function DatasetPage({
   const dataset = await getDataset(slug);
   if (!dataset) notFound();
   const preview = await getPreview(slug, 24);
+  const maintainer = maintainerFor(slug);
 
   const { telemetry } = dataset;
 
@@ -76,7 +79,11 @@ export default async function DatasetPage({
           </div>
 
           <div className="mt-8 space-y-6">
-            <DataPreview preview={preview} datasetName={dataset.name} />
+            <DataPreview
+              preview={preview}
+              datasetName={dataset.name}
+              cadenceLabel={CADENCE_LABEL[dataset.cadence]}
+            />
 
             <Panel>
               <p className="max-w-3xl text-[14.5px] leading-[1.75] text-muted">
@@ -98,21 +105,6 @@ export default async function DatasetPage({
                   {dataset.primaryKey.join(", ")}
                 </span>
               </div>
-            </Panel>
-
-            <Panel padded={false}>
-              <PanelHeader
-                title="What makes this source awkward"
-                subtitle="The reason this is worth buying rather than building. None of it is hard; all of it is tedious and easy to get subtly wrong."
-              />
-              <ul className="divide-y divide-line">
-                {dataset.sourceNotes.map((note) => (
-                  <li key={note} className="flex gap-3 px-5 py-3.5">
-                    <span className="mt-[7px] h-[3px] w-[3px] shrink-0 rounded-full bg-line-strong" />
-                    <p className="text-[13.5px] leading-relaxed text-muted">{note}</p>
-                  </li>
-                ))}
-              </ul>
             </Panel>
 
             <Panel padded={false}>
@@ -147,6 +139,7 @@ export default async function DatasetPage({
 
         <div className="lg:sticky lg:top-20">
           <AccessPanel dataset={dataset} />
+          {maintainer && <MaintainerCard maintainer={maintainer} />}
         </div>
       </div>
     </div>

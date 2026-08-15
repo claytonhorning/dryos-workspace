@@ -64,8 +64,6 @@ export interface Dataset {
   sourceName: string;
   sourceUrl: string;
   sourceBasis: SourceBasis;
-  /** How the source is awkward, and what the collector does about it. */
-  sourceNotes: string[];
 
   cadence: Cadence;
   /** Declared freshness window, in minutes. */
@@ -77,29 +75,47 @@ export interface Dataset {
   schema: SchemaField[];
   primaryKey: string[];
 
+  /** Indicative launch pricing, per offered tier. */
+  pricing: Partial<Record<ServingTier, TierPrice>>;
+
   status: DatasetStatus;
   telemetry: DatasetTelemetry;
 }
 
 export type DatasetCategory = "Market & Pricing";
 
-/** One settlement interval, aggregated across nodes. */
+/**
+ * One settlement interval, described by its timing rather than its values.
+ *
+ * The preview deliberately carries no prices. What a buyer needs to judge
+ * before paying is whether the data shows up when it is supposed to — the
+ * numbers themselves are what they are buying, not a free sample.
+ */
 export interface PreviewInterval {
   t: string;
-  lo: number | null;
-  avg: number | null;
-  hi: number | null;
+  /** When the ISO posted this interval. */
+  postedAt: string | null;
+  /** When Dryos had it. */
+  collectedAt: string | null;
   nodes: number;
-  /** Seconds between the interval and our collection of it. Measured. */
-  lagSeconds: number | null;
+  /** Seconds from interval to the source publishing it. */
+  postLagSeconds: number | null;
+  /** Seconds from interval to us having it. Drives the graph colour. */
+  collectLagSeconds: number | null;
 }
 
 export interface DatasetPreview {
   dataset: string;
   hours: number;
-  unit: string;
   freshnessSlaSeconds: number;
   /** Expected gap between collections, from the declared schedule. */
   cadenceSeconds: number | null;
   intervals: PreviewInterval[];
+}
+
+/** What a buyer pays on a given tier. A decision, not a measurement. */
+export interface TierPrice {
+  unitPriceUsd: number;
+  unit: string;
+  freeAllowance: string;
 }

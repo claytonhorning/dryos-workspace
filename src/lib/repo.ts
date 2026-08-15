@@ -43,8 +43,10 @@ function merge(local: Dataset, live: Record<string, unknown>): Dataset {
     tagline: t.tagline ?? local.tagline,
     schema: t.schema ?? local.schema,
     primaryKey: t.primaryKey ?? local.primaryKey,
-    availableTiers: t.tiers ?? local.availableTiers,
-    tier: t.defaultTier ?? local.tier,
+    // Tiers stay editorial: what we *offer* is a commercial decision, and
+    // the backend's list is what the collector could technically support.
+    availableTiers: local.availableTiers,
+    tier: local.tier,
     slaMinutes: t.freshnessSlaSeconds
       ? Math.round(t.freshnessSlaSeconds / 60)
       : local.slaMinutes,

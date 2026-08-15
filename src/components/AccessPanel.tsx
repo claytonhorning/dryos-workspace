@@ -26,27 +26,38 @@ export function AccessPanel({ dataset }: { dataset: Dataset }) {
     <div className="rounded-lg border border-line bg-surface">
       <div className="border-b border-line px-5 py-4">
         <div className="font-mono text-[10.5px] tracking-[0.12em] text-faint uppercase">
-          Planned delivery
+          Pricing
         </div>
-        <ul className="mt-3 space-y-2.5">
+        <ul className="mt-3 space-y-3">
           {tiers.map((id) => {
             const t = tierDef(id);
+            const price = dataset.pricing[id];
             return (
               <li key={id}>
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-[13px] font-medium text-ink">{t.name}</span>
-                  <span className="font-mono text-[11px] text-faint">{t.latencySlo}</span>
+                  {price && (
+                    <span className="font-mono text-[13px] text-accent tabular-nums">
+                      ${price.unitPriceUsd.toFixed(2)}
+                      <span className="text-[11px] text-faint"> / {price.unit}</span>
+                    </span>
+                  )}
                 </div>
-                <div className="mt-0.5 font-mono text-[11.5px] text-muted">
-                  {t.surfaces.join(" · ")}
+                <div className="mt-0.5 font-mono text-[11px] text-faint">
+                  {t.latencySlo}
                 </div>
+                {price && (
+                  <div className="mt-0.5 text-[11.5px] text-muted">
+                    {price.freeAllowance} free
+                  </div>
+                )}
               </li>
             );
           })}
         </ul>
         <p className="mt-3.5 border-t border-line pt-3 text-[12px] leading-relaxed text-faint">
-          Pricing is not set for this dataset yet. We would rather agree it with the
-          first few teams using it than publish a number we made up.
+          Introductory pricing, held for design partners. No seat, no minimum — stop
+          calling and you stop paying.
         </p>
       </div>
 
