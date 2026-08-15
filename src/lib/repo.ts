@@ -10,23 +10,93 @@
  * there is no code path here that can produce a number nobody measured.
  */
 import { catalogue } from "./catalogue";
-import type { Dataset, DatasetCategory } from "./types";
+import type { Dataset, DatasetCategory, DatasetPreview } from "./types";
 import type { VerticalId } from "./verticals";
 
 const API = process.env.DRYOS_API_URL;
 
+/**
+ * The API is authoritative for anything measured — status, telemetry, schema,
+ * tiers, SLA. The catalogue supplies editorial copy the backend has no business
+ * holding: region, description, why the source is awkward.
+ *
+ * Merging rather than replacing means a listing keeps its prose when the backend
+ * comes online, and keeps rendering honestly when it goes away.
+ */
+function merge(local: Dataset, live: Record<string, unknown>): Dataset {
+  const t = live as {
+    name?: string;
+    tagline?: string;
+    schema?: Dataset["schema"];
+    primaryKey?: string[];
+    tiers?: Dataset["availableTiers"];
+    defaultTier?: Dataset["tier"];
+    freshnessSlaSeconds?: number;
+    status?: Dataset["status"];
+    lastRunAt?: string | null;
+    rowCount?: number | null;
+    health?: Dataset["telemetry"]["health"];
+  };
+  return {
+    ...local,
+    name: t.name ?? local.name,
+    tagline: t.tagline ?? local.tagline,
+    schema: t.schema ?? local.schema,
+    primaryKey: t.primaryKey ?? local.primaryKey,
+    availableTiers: t.tiers ?? local.availableTiers,
+    tier: t.defaultTier ?? local.tier,
+    slaMinutes: t.freshnessSlaSeconds
+      ? Math.round(t.freshnessSlaSeconds / 60)
+      : local.slaMinutes,
+    status: t.status ?? local.status,
+    telemetry: {
+      lastRunAt: t.lastRunAt ?? null,
+      rowCount: t.rowCount ?? null,
+      health: t.health ?? null,
+      historyFrom: local.telemetry.historyFrom,
+    },
+  };
+}
+
 async function fetchCatalogue(): Promise<Dataset[]> {
   if (!API) return catalogue;
   try {
-    const res = await fetch(`${API}/v1/datasets`, { next: { revalidate: 60 } });
+    const res = await fetch(`${API}/v1/datasets`, { next: { revalidate: 30 } });
     if (!res.ok) throw new Error(`${res.status} from ${API}`);
-    const body = (await res.json()) as { datasets: Dataset[] };
-    return body.datasets;
+    const body = (await res.json()) as { datasets: Record<string, unknown>[] };
+    const bySlug = new Map(body.datasets.map((d) => [d.slug as string, d]));
+    return catalogue.map((d) => {
+      const live = bySlug.get(d.slug);
+      return live ? merge(d, live) : d;
+    });
   } catch (err) {
     // A backend that is down must not blank the marketing site. Serve the
-    // static mirror and say so in the log rather than throwing.
+    // static mirror — which carries no telemetry, so the page degrades to the
+    // honest pre-launch state rather than to stale numbers.
     console.warn(`[repo] falling back to static catalogue: ${err}`);
     return catalogue;
+  }
+}
+
+/**
+ * Recent data, aggregated per interval. Returns null when there is no backend
+ * or nothing collected — the caller renders the empty state rather than a chart
+ * of zeroes.
+ */
+export async function getPreview(
+  slug: string,
+  hours = 24,
+): Promise<DatasetPreview | null> {
+  if (!API) return null;
+  try {
+    const res = await fetch(`${API}/v1/datasets/${slug}/preview?hours=${hours}`, {
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as DatasetPreview;
+    return body.intervals.length ? body : null;
+  } catch {
+    return null;
   }
 }
 

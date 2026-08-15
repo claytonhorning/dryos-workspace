@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AccessPanel } from "@/components/AccessPanel";
+import { DataPreview } from "@/components/DataPreview";
 import { SchemaTable } from "@/components/DataTables";
 import { StatusBadge } from "@/components/HealthBadge";
 import { TierBadge } from "@/components/TierBadge";
 import { Chip, Panel, PanelHeader } from "@/components/ui";
 import { CADENCE_LABEL, SOURCE_BASIS_LABEL, compactNumber, formatWindow } from "@/lib/format";
-import { getDataset, listDatasets } from "@/lib/repo";
+import { getDataset, getPreview, listDatasets } from "@/lib/repo";
 import { verticalById } from "@/lib/verticals";
 
 export async function generateStaticParams() {
@@ -22,6 +23,7 @@ export default async function DatasetPage({
   const { slug } = await params;
   const dataset = await getDataset(slug);
   if (!dataset) notFound();
+  const preview = await getPreview(slug, 24);
 
   const { telemetry } = dataset;
 
@@ -74,6 +76,8 @@ export default async function DatasetPage({
           </div>
 
           <div className="mt-8 space-y-6">
+            <DataPreview preview={preview} datasetName={dataset.name} />
+
             <Panel>
               <p className="max-w-3xl text-[14.5px] leading-[1.75] text-muted">
                 {dataset.description}

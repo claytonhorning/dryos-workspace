@@ -82,3 +82,24 @@ export interface Dataset {
 }
 
 export type DatasetCategory = "Market & Pricing";
+
+/** One settlement interval, aggregated across nodes. */
+export interface PreviewInterval {
+  t: string;
+  lo: number | null;
+  avg: number | null;
+  hi: number | null;
+  nodes: number;
+  /** Seconds between the interval and our collection of it. Measured. */
+  lagSeconds: number | null;
+}
+
+export interface DatasetPreview {
+  dataset: string;
+  hours: number;
+  unit: string;
+  freshnessSlaSeconds: number;
+  /** Expected gap between collections, from the declared schedule. */
+  cadenceSeconds: number | null;
+  intervals: PreviewInterval[];
+}
