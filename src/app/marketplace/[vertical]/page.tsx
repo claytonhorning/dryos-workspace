@@ -68,10 +68,10 @@ export default async function VerticalPage({
           <div className="mt-7 rounded-lg border border-dashed border-line-strong bg-surface/60 px-5 py-4">
             <p className="text-[13.5px] leading-relaxed text-muted">
               <span className="text-ink">Neither collector is serving data yet.</span>{" "}
-              Both are written and their schemas are final; the parsers are being
-              reconciled against live responses before we schedule them. Everything below
-              is what they will emit — no row counts, no uptime and no health badges until
-              there is something real to measure.
+              The ERCOT parser is verified end to end against the live endpoint and passes
+              every validation check; the CAISO one is written but still being reconciled
+              against a real response. Everything below is what they emit — no row counts,
+              no uptime and no health badges until there is something real to measure.
             </p>
           </div>
 
