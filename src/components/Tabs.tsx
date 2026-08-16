@@ -59,7 +59,7 @@ export function Tabs({ tabs, initial }: { tabs: Tab[]; initial?: string }) {
       </div>
 
       {tabs.map((t) => (
-        <div key={t.id} hidden={t.id !== active} className="mt-6">
+        <div key={t.id} hidden={t.id !== active} className="mt-4">
           {t.content}
         </div>
       ))}

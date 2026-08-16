@@ -68,7 +68,7 @@ export default async function DatasetPage({
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
         <div className="min-w-0">
-          <div className="mt-8">
+          <div>
             <Tabs
               tabs={[
                 {
