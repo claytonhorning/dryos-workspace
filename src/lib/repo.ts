@@ -10,7 +10,12 @@
  * there is no code path here that can produce a number nobody measured.
  */
 import { catalogue } from "./catalogue";
-import type { Dataset, DatasetCategory, DatasetPreview } from "./types";
+import type {
+  Dataset,
+  DatasetCategory,
+  DatasetPreview,
+  DatasetSample,
+} from "./types";
 import type { VerticalId } from "./verticals";
 
 const API = process.env.DRYOS_API_URL;
@@ -106,6 +111,25 @@ export interface DatasetFilters {
   q?: string;
   vertical?: VerticalId;
   category?: DatasetCategory | "all";
+}
+
+export async function getSample(
+  slug: string,
+  node?: string,
+): Promise<DatasetSample | null> {
+  if (!API) return null;
+  try {
+    const qs = new URLSearchParams({ hours: "24" });
+    if (node) qs.set("node", node);
+    const res = await fetch(`${API}/v1/datasets/${slug}/sample?${qs}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as DatasetSample;
+    return body.points.length ? body : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listDatasets(filters: DatasetFilters = {}): Promise<Dataset[]> {

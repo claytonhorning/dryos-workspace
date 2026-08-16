@@ -119,3 +119,13 @@ export interface TierPrice {
   unit: string;
   freeAllowance: string;
 }
+
+/** A single node's price series — a worked example of what the rows contain. */
+export interface DatasetSample {
+  dataset: string;
+  node: string | null;
+  /** Trading hubs available to chart. */
+  nodes: string[];
+  unit: string;
+  points: { t: string; v: number | null }[];
+}

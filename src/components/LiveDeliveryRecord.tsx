@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { DatasetPreview, PreviewInterval } from "@/lib/types";
+import { DISPLAY_TZ_LABEL, clock, clockSeconds } from "@/lib/time";
 import { cx } from "./ui";
 
 const POLL_MS = 20_000;
@@ -76,6 +77,11 @@ export function LiveDeliveryRecord({
     [last, cadenceMs],
   );
 
+  // How many intervals the declared cadence says the window should contain.
+  // Showing collected-of-expected is the honest framing: 65 alone looks fine
+  // until you know 288 were due.
+  const expected = Math.max(iv.length, Math.round((preview.hours * 3600 * 1000) / cadenceMs));
+
   return (
     <>
       <div className="grid grid-cols-2 divide-x divide-y divide-line border-b border-line md:grid-cols-4 md:divide-y-0">
@@ -83,7 +89,7 @@ export function LiveDeliveryRecord({
         <Stat
           label="Next interval"
           value={countdown(nextDueMs, now)}
-          hint={nextDueMs ? `due ${utc(nextDueMs)} UTC` : "—"}
+          hint={nextDueMs ? `due ${clockSeconds(nextDueMs)} ${DISPLAY_TZ_LABEL}` : "—"}
           accent
         />
         <Stat
@@ -93,8 +99,8 @@ export function LiveDeliveryRecord({
         />
         <Stat
           label="Intervals"
-          value={String(iv.length)}
-          hint={`last ${preview.hours} hours`}
+          value={`${iv.length} / ${expected}`}
+          hint={`collected of expected, last ${preview.hours} h`}
         />
       </div>
 
@@ -200,9 +206,9 @@ export function CollectionGraph({ preview }: { preview: DatasetPreview }) {
             key={c.t}
             title={
               c.interval
-                ? `${utc(c.t)} UTC · posted ${fmt(c.interval.postLagSeconds)} after · ` +
+                ? `${clock(c.t)} ${DISPLAY_TZ_LABEL} · posted ${fmt(c.interval.postLagSeconds)} after · ` +
                   `collected ${fmt(c.interval.collectLagSeconds)} after`
-                : `${utc(c.t)} UTC · no data`
+                : `${clock(c.t)} ${DISPLAY_TZ_LABEL} · no data`
             }
             className={cx("h-3.5 w-3.5 rounded-[3px]", CELL_CLASS[c.state])}
           />
@@ -243,7 +249,7 @@ function RecentTable({ intervals }: { intervals: PreviewInterval[] }) {
       <table className="w-full min-w-[520px] text-left">
         <thead>
           <tr className="border-b border-line">
-            {["Interval (UTC)", "Source posted", "We had it"].map((h) => (
+            {[`Interval (${DISPLAY_TZ_LABEL})`, "Source posted", "We had it"].map((h) => (
               <th
                 key={h}
                 className="px-5 py-2.5 font-mono text-[10.5px] tracking-[0.12em] text-faint uppercase"
@@ -257,7 +263,7 @@ function RecentTable({ intervals }: { intervals: PreviewInterval[] }) {
           {intervals.map((i) => (
             <tr key={i.t} className="border-b border-line/60 last:border-0">
               <td className="px-5 py-2.5 font-mono text-[12.5px] whitespace-nowrap text-ink">
-                {utc(Date.parse(i.t))}
+                {clockSeconds(Date.parse(i.t))}
               </td>
               <td className="px-5 py-2.5 font-mono text-[12px] whitespace-nowrap text-muted">
                 +{fmt(i.postLagSeconds)}
@@ -293,6 +299,4 @@ function fmt(seconds: number | null): string {
   return `${(seconds / 3600).toFixed(1)}h`;
 }
 
-function utc(ms: number): string {
-  return new Date(ms).toISOString().slice(11, 16);
-}
+

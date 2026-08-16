@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { CADENCE_LABEL, formatWindow } from "@/lib/format";
 import { sortTiers, tierDef } from "@/lib/tiers";
 import type { Dataset } from "@/lib/types";
 import { Modal } from "./Modal";
@@ -55,34 +54,8 @@ export function AccessPanel({ dataset }: { dataset: Dataset }) {
             );
           })}
         </ul>
-        <p className="mt-3.5 border-t border-line pt-3 text-[12px] leading-relaxed text-faint">
-          Introductory pricing, held for design partners. No seat, no minimum — stop
-          calling and you stop paying.
-        </p>
       </div>
 
-      <div className="border-b border-line px-5 py-4">
-        <div className="flex items-baseline justify-between">
-          <span className="font-mono text-[10.5px] tracking-[0.12em] text-faint uppercase">
-            Declared cadence
-          </span>
-          <span className="font-mono text-[11.5px] text-ink">
-            {CADENCE_LABEL[dataset.cadence]}
-          </span>
-        </div>
-        <div className="mt-2 flex items-baseline justify-between">
-          <span className="font-mono text-[10.5px] tracking-[0.12em] text-faint uppercase">
-            Freshness SLA
-          </span>
-          <span className="font-mono text-[11.5px] text-ink">
-            {formatWindow(dataset.slaMinutes)}
-          </span>
-        </div>
-        <p className="mt-3 text-[12px] leading-relaxed text-muted">
-          The window is deliberately looser than the cadence, so one missed run is a
-          retry rather than a breach.
-        </p>
-      </div>
 
       <div className="p-5">
         <Button tone="primary" className="w-full" onClick={() => setOpen(true)}>

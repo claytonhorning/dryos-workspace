@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { AccessPanel } from "@/components/AccessPanel";
 import { DataPreview } from "@/components/DataPreview";
 import { MaintainerCard } from "@/components/MaintainerCard";
+import { SampleChart } from "@/components/SampleChart";
+import { Tabs } from "@/components/Tabs";
 import { SchemaTable } from "@/components/DataTables";
 import { StatusBadge } from "@/components/HealthBadge";
 import { TierBadge } from "@/components/TierBadge";
 import { Chip, Panel, PanelHeader } from "@/components/ui";
 import { CADENCE_LABEL, SOURCE_BASIS_LABEL, compactNumber, formatWindow } from "@/lib/format";
-import { getDataset, getPreview, listDatasets } from "@/lib/repo";
-import { maintainerFor } from "@/lib/maintainers";
+import { getDataset, getPreview, getSample, listDatasets } from "@/lib/repo";
 import { verticalById } from "@/lib/verticals";
 
 export async function generateStaticParams() {
@@ -26,7 +27,8 @@ export default async function DatasetPage({
   const dataset = await getDataset(slug);
   if (!dataset) notFound();
   const preview = await getPreview(slug, 24);
-  const maintainer = maintainerFor(slug);
+  const sample = await getSample(slug);
+  const apiUrl = process.env.NEXT_PUBLIC_DRYOS_API_URL ?? null;
 
   const { telemetry } = dataset;
 
@@ -78,70 +80,99 @@ export default async function DatasetPage({
             <Fact label="SLA window" value={formatWindow(dataset.slaMinutes)} />
           </div>
 
-          <div className="mt-8 space-y-6">
-            <DataPreview
-              slug={dataset.slug}
-              preview={preview}
-              datasetName={dataset.name}
-              sourceName={dataset.region.split(" ")[0]}
-              cadenceLabel={CADENCE_LABEL[dataset.cadence]}
+          <div className="mt-8">
+            <Tabs
+              tabs={[
+                {
+                  id: "delivery",
+                  label: "Track record",
+                  content: (
+                    <div className="space-y-6">
+                      <DataPreview
+                        slug={dataset.slug}
+                        preview={preview}
+                        datasetName={dataset.name}
+                        sourceName={dataset.region.split(" ")[0]}
+                        cadenceLabel={CADENCE_LABEL[dataset.cadence]}
+                      />
+                      {sample && (
+                        <SampleChart
+                          slug={dataset.slug}
+                          apiUrl={apiUrl}
+                          initial={sample}
+                        />
+                      )}
+                      <Panel>
+                        <p className="max-w-3xl text-[14.5px] leading-[1.75] text-muted">
+                          {dataset.description}
+                        </p>
+                      </Panel>
+                    </div>
+                  ),
+                },
+                {
+                  id: "schema",
+                  label: "Schema",
+                  badge: dataset.schema.length,
+                  content: (
+                    <Panel padded={false}>
+                      <PanelHeader
+                        title="Declared schema"
+                        subtitle="The contract. Every batch is validated against this before anything is promoted, and a nullable field has to say when and why it will be null."
+                      />
+                      <SchemaTable fields={dataset.schema} />
+                      <div className="border-t border-line px-5 py-3.5">
+                        <span className="font-mono text-[11px] tracking-[0.1em] text-faint uppercase">
+                          Primary key
+                        </span>
+                        <span className="ml-3 font-mono text-[12.5px] text-ink">
+                          {dataset.primaryKey.join(", ")}
+                        </span>
+                      </div>
+                    </Panel>
+                  ),
+                },
+                {
+                  id: "source",
+                  label: "Source",
+                  content: (
+                    <Panel padded={false}>
+                      <PanelHeader
+                        title="Sourcing and legal basis"
+                        subtitle="Reviewed per dataset before it goes live, not waved through by category."
+                      />
+                      <dl className="divide-y divide-line">
+                        <Row label="Source" value={dataset.sourceName} />
+                        <Row
+                          label="Endpoint"
+                          value={
+                            <a
+                              href={dataset.sourceUrl}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="font-mono text-[12.5px] text-accent underline-offset-4 hover:underline"
+                            >
+                              {dataset.sourceUrl}
+                            </a>
+                          }
+                        />
+                        <Row label="Basis" value={SOURCE_BASIS_LABEL[dataset.sourceBasis]} />
+                        <Row
+                          label="Cadence"
+                          value={`${CADENCE_LABEL[dataset.cadence]} · SLA ${formatWindow(dataset.slaMinutes)}`}
+                        />
+                      </dl>
+                    </Panel>
+                  ),
+                },
+              ]}
             />
-
-            <Panel>
-              <p className="max-w-3xl text-[14.5px] leading-[1.75] text-muted">
-                {dataset.description}
-              </p>
-            </Panel>
-
-            <Panel padded={false}>
-              <PanelHeader
-                title="Declared schema"
-                subtitle="The contract. Every batch is validated against this before anything is promoted, and a nullable field has to say when and why it will be null."
-              />
-              <SchemaTable fields={dataset.schema} />
-              <div className="border-t border-line px-5 py-3.5">
-                <span className="font-mono text-[11px] tracking-[0.1em] text-faint uppercase">
-                  Primary key
-                </span>
-                <span className="ml-3 font-mono text-[12.5px] text-ink">
-                  {dataset.primaryKey.join(", ")}
-                </span>
-              </div>
-            </Panel>
-
-            <Panel padded={false}>
-              <PanelHeader
-                title="Sourcing and legal basis"
-                subtitle="Reviewed per dataset before it goes live, not waved through by category."
-              />
-              <dl className="divide-y divide-line">
-                <Row label="Source" value={dataset.sourceName} />
-                <Row
-                  label="Endpoint"
-                  value={
-                    <a
-                      href={dataset.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="font-mono text-[12.5px] text-accent underline-offset-4 hover:underline"
-                    >
-                      {dataset.sourceUrl}
-                    </a>
-                  }
-                />
-                <Row label="Basis" value={SOURCE_BASIS_LABEL[dataset.sourceBasis]} />
-                <Row
-                  label="Cadence"
-                  value={`${CADENCE_LABEL[dataset.cadence]} · SLA ${formatWindow(dataset.slaMinutes)}`}
-                />
-              </dl>
-            </Panel>
           </div>
         </div>
 
         <div className="lg:sticky lg:top-20">
           <AccessPanel dataset={dataset} />
-          {maintainer && <MaintainerCard maintainer={maintainer} />}
+          <MaintainerCard />
         </div>
       </div>
     </div>
