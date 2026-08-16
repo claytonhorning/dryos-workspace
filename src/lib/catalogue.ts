@@ -13,9 +13,11 @@ import type { Dataset, SchemaField } from "./types";
  */
 
 /**
- * The shared LMP shape. Both ISOs publish locational prices; neither publishes
- * them in the same shape as the other, and normalising them onto one schema is
- * the actual product.
+ * The shared LMP shape. Every ISO publishes locational prices and no two publish
+ * them the same way; normalising onto one schema is the actual product. Only
+ * ERCOT is implemented today, and the columns a single ISO cannot fill are
+ * declared nullable with a reason rather than dropped — so adding the next ISO
+ * is additive rather than a schema break.
  */
 const LMP_SCHEMA: SchemaField[] = [
   {
@@ -29,32 +31,32 @@ const LMP_SCHEMA: SchemaField[] = [
   {
     name: "iso",
     type: "string",
-    description: "Publishing ISO. CAISO or ERCOT.",
+    description: "Publishing ISO.",
     nullable: false,
-    example: "CAISO",
+    example: "ERCOT",
   },
   {
     name: "market",
     type: "string",
     description: "Market the price cleared in. DAM (day-ahead) or RTM (real-time, SCED).",
     nullable: false,
-    example: "DAM",
+    example: "RTM",
   },
   {
     name: "node",
     type: "string",
     description: "Pricing node or settlement point identifier, as published by the ISO.",
     nullable: false,
-    example: "SLAP_PGP2-APND",
+    example: "HB_HOUSTON",
   },
   {
     name: "node_type",
     type: "string",
     description:
-      "Node classification. ERCOT is derived from the settlement point naming convention (HUB / LOAD_ZONE / DC_TIE / RESOURCE_NODE); CAISO from its node identifier suffix.",
+      "Node classification. For ERCOT this is derived from the settlement point naming convention: HUB / LOAD_ZONE / DC_TIE / RESOURCE_NODE.",
     nullable: true,
-    nullReason: "CAISO occasionally publishes a node whose suffix matches no known classification.",
-    example: "APND",
+    nullReason: "An ISO may publish a point whose identifier matches no known classification.",
+    example: "HB_HOUSTON",
   },
   {
     name: "lmp_total",
@@ -68,7 +70,7 @@ const LMP_SCHEMA: SchemaField[] = [
     type: "number",
     description: "Energy component, $/MWh.",
     nullable: true,
-    nullReason: "ERCOT settlement point prices are published without a component breakdown.",
+    nullReason: "ERCOT publishes settlement point prices without a component breakdown.",
     example: "39.12",
   },
   {
@@ -76,7 +78,7 @@ const LMP_SCHEMA: SchemaField[] = [
     type: "number",
     description: "Congestion component, $/MWh.",
     nullable: true,
-    nullReason: "ERCOT settlement point prices are published without a component breakdown.",
+    nullReason: "ERCOT publishes settlement point prices without a component breakdown.",
     example: "2.94",
   },
   {
@@ -84,7 +86,7 @@ const LMP_SCHEMA: SchemaField[] = [
     type: "number",
     description: "Loss component, $/MWh.",
     nullable: true,
-    nullReason: "ERCOT settlement point prices are published without a component breakdown.",
+    nullReason: "ERCOT publishes settlement point prices without a component breakdown.",
     example: "-0.23",
   },
   {
@@ -109,38 +111,13 @@ const NO_TELEMETRY = {
 
 export const catalogue: Dataset[] = [
   {
-    slug: "caiso-day-ahead-nodal-lmp",
-    vertical: "energy",
-    name: "CAISO Day-Ahead Nodal LMP",
-    tagline:
-      "Hourly day-ahead locational marginal prices for every CAISO pricing node, with energy, congestion and loss components broken out.",
-    description:
-      "The day-ahead market clears once daily and publishes nodal prices through OASIS. Getting them out cleanly is more work than it looks: the endpoint returns a ZIP wrapping a CSV, caps a request at 31 days and silently truncates past that rather than erroring, and hands back long-format rows that have to be pivoted to get one row per node-interval.",
-    category: "Market & Pricing",
-    region: "CAISO (California)",
-    sourceName: "CAISO OASIS",
-    sourceUrl: "http://oasis.caiso.com/oasisapi",
-    sourceBasis: "iso_public",
-    cadence: "daily",
-    slaMinutes: 30 * 60,
-    tier: "standard",
-    availableTiers: ["standard"],
-    pricing: {
-      standard: { unitPriceUsd: 0.3, unit: "1k rows", freeAllowance: "50k rows/mo" },
-    },
-    schema: LMP_SCHEMA,
-    primaryKey: PRIMARY_KEY,
-    status: "pending",
-    telemetry: NO_TELEMETRY,
-  },
-  {
     slug: "ercot-realtime-lmp",
     vertical: "energy",
     name: "ERCOT Real-Time LMPs by Settlement Point",
     tagline:
       "Locational marginal prices for all ~1,100 ERCOT settlement points — resource nodes, load zones, trading hubs and DC ties — from the latest SCED run, roughly every five minutes.",
     description:
-      "ERCOT's SCED engine prices every settlement point about every five minutes and publishes each run as a zipped CSV on the MIS. The collector walks the report listing, pulls every run published since the last watermark, and emits unambiguous UTC instants with settlement points classified — on the same column names as the CAISO feed. Verified end to end against the live endpoint: 1,118 settlement points per run, all validation checks passing.",
+      "ERCOT's SCED engine prices every settlement point about every five minutes and publishes each run as a zipped CSV on the MIS. The collector walks the report listing, pulls every run published since the last watermark, and emits unambiguous UTC instants with settlement points classified  Verified end to end against the live endpoint: 1,118 settlement points per run, all validation checks passing.",
     category: "Market & Pricing",
     region: "ERCOT (Texas)",
     sourceName: "ERCOT MIS · NP6-788-CD",

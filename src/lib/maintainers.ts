@@ -31,7 +31,7 @@ export const MAINTAINERS: Record<string, Maintainer> = {
     title: "Founder · operates the launch collectors",
     location: "United States",
     bio:
-      "Runs the ERCOT and CAISO collectors directly while Dryos is being built. " +
+      "Runs the ERCOT collector directly while Dryos is being built. " +
       "If a feed breaks, this is the person who gets the alert and the person who " +
       "answers you — there is no support tier in between.",
     since: "August 2026",
@@ -42,7 +42,6 @@ export const MAINTAINERS: Record<string, Maintainer> = {
 /** Which maintainer operates a given dataset. */
 export const DATASET_MAINTAINER: Record<string, string> = {
   "ercot-realtime-lmp": "in_house",
-  "caiso-day-ahead-nodal-lmp": "in_house",
 };
 
 export function maintainerFor(slug: string): Maintainer | undefined {

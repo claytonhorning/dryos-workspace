@@ -15,11 +15,11 @@ export const VERTICALS: Vertical[] = [
   {
     id: "energy",
     name: "Energy",
-    blurb: "ISO market prices — starting with CAISO and ERCOT day-ahead",
+    blurb: "ISO market prices — starting with ERCOT real-time LMPs",
     status: "live",
     expertise:
       "Which ISO renames a field between network model updates, and which tariff PDF actually governs a bill.",
-    examples: ["CAISO day-ahead nodal LMP", "ERCOT day-ahead settlement point prices"],
+    examples: ["ERCOT real-time LMPs by settlement point"],
   },
   {
     id: "property",

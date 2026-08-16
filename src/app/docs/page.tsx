@@ -45,16 +45,17 @@ export default function DocsPage() {
             />
             <CodeBlock
               title="query"
-              code={`curl "https://api.dryos.dev/v1/datasets/caiso-day-ahead-nodal-lmp/query\\
-?start=2026-08-01T00:00:00Z\\
-&node=SLAP_PGP2-APND\\
+              code={`curl "https://api.dryos.dev/v1/datasets/ercot-realtime-lmp/query\\
+?start=2026-08-15T00:00:00Z\\
+&node=HB_HOUSTON\\
 &limit=1000"`}
             />
             <p className="text-[13px] leading-relaxed text-muted">
-              Both ISOs return the same column names, so a query against{" "}
-              <span className="font-mono text-ink">ercot-day-ahead-spp</span> parses with
-              the same code. That is the point of the shared schema — ERCOT publishes no
-              component breakdown, so its component columns are null rather than absent.
+              Every ISO returns the same column names, so the next one parses with the
+              code you already wrote. That is the point of the shared schema — ERCOT
+              publishes no component breakdown, so its component columns come back null
+              rather than absent, and a feed that does have them is additive rather than
+              a break.
             </p>
           </div>
         </Panel>
@@ -66,27 +67,35 @@ export default function DocsPage() {
           />
           <div className="px-5 py-5">
             <CodeBlock
-              title="collectors/caiso_da_lmp.py"
-              code={`class CaisoDayAheadLmp(Collector):
+              title="collectors/ercot_rt_lmp.py"
+              code={`class ErcotRealtimeLmp(Collector):
     spec = CollectorSpec(
-        slug="caiso-day-ahead-nodal-lmp",
-        source_url=OASIS,
+        slug="ercot-realtime-lmp",
+        source_url="https://www.ercot.com/mp/data-products/...",
         basis=SourceBasis.ISO_PUBLIC,
 
-        schedule="0 22 * * *",
-        freshness_sla=timedelta(hours=30),
+        schedule="*/5 * * * *",
+        freshness_sla=timedelta(minutes=20),
+        verified=True,
 
         schema=LMP_SCHEMA,
         thresholds=Thresholds(
-            null_rate={"node_type": 0.05, "lmp_energy": 0.01},
-            row_count_tolerance=0.15,
+            # ERCOT publishes no component breakdown, so these are
+            # all-null by design rather than a defect.
+            null_rate={"lmp_energy": 1.0, "lmp_congestion": 1.0},
+            row_count_tolerance=0.05,
+            row_count_per="interval_start_utc",
             value_bands={"lmp_total": (-2_000.0, 6_000.0)},
         ),
+        # The source publishes a few seconds past the interval, so a
+        # cron on the boundary always just misses. Chase it instead.
+        poll=PollPolicy(enabled=True, every=timedelta(seconds=8)),
     )
 
     async def run(self, ctx: RunContext) -> pd.DataFrame:
-        resp = await ctx.fetch(OASIS, params=..., retries=3)
-        return normalise(ctx.unzip_single(resp.content))`}
+        docs = await self._list_csv_docs(ctx)
+        ...
+        return _normalise(pd.concat(frames, ignore_index=True))`}
             />
             <p className="mt-4 text-[13px] leading-relaxed text-muted">
               <span className="text-ink">run returns; it does not write.</span> A batch is

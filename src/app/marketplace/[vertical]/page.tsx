@@ -69,9 +69,8 @@ export default async function VerticalPage({
             <p className="text-[13.5px] leading-relaxed text-muted">
               <span className="text-ink">Neither collector is serving data yet.</span>{" "}
               The ERCOT parser is verified end to end against the live endpoint and passes
-              every validation check; the CAISO one is written but still being reconciled
-              against a real response. Everything below is what they emit — no row counts,
-              no uptime and no health badges until there is something real to measure.
+              every validation check against live data. Everything below is what it
+              emits — nothing here is a projection.
             </p>
           </div>
 

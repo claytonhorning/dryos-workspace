@@ -15,7 +15,7 @@ export default async function LandingPage() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 font-mono text-[11px] tracking-[0.12em] text-muted uppercase">
               <span className="h-1.5 w-1.5 rounded-full bg-line-strong" />
-              Pre-launch · building the first two collectors
+              Pre-launch · first collector live
             </div>
 
             <h1 className="mt-6 max-w-3xl text-[clamp(2.1rem,4.6vw,3.4rem)] leading-[1.04] font-semibold tracking-[-0.03em] text-ink">
@@ -54,9 +54,9 @@ export default async function LandingPage() {
             </div>
             <ul className="divide-y divide-line">
               <Status
-                state="doing"
-                label="Two collectors in development"
-                detail="CAISO and ERCOT day-ahead prices, normalised onto one schema."
+                state="done"
+                label="ERCOT real-time LMPs collecting"
+                detail="Every settlement point, chased from the source and validated before it lands — typically in our hands under 10 seconds after ERCOT posts it."
               />
               <Status
                 state="doing"
@@ -65,8 +65,8 @@ export default async function LandingPage() {
               />
               <Status
                 state="todo"
-                label="Not serving data yet"
-                detail="No API keys, no metering, no uptime to report. When there is, the numbers here will be measured rather than claimed."
+                label="Not selling access yet"
+                detail="No API keys and no metering, so nothing is billable. The delivery record on the listing is measured from real collections, not projected."
               />
               <Status
                 state="todo"
@@ -113,31 +113,32 @@ export default async function LandingPage() {
                 "One named maintainer whose only job is that source",
                 "They are paid per use — a broken collector earns them nothing",
                 "Automated validation catches the break before you do",
-                "Both ISOs on one schema, so you write one parser instead of none",
+                "One schema built to take the next ISO without breaking your integration",
               ]}
             />
           </div>
         </div>
       </section>
 
-      {/* ── The two datasets ───────────────────────────────────────── */}
+      {/* ── The dataset ─────────────────────────────────────────────── */}
       <section className="mx-auto max-w-[1240px] px-6 py-14">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-[24px] font-semibold tracking-[-0.02em] text-ink">
-              Starting with two
+              Starting with one, properly
             </h2>
             <p className="mt-1.5 max-w-2xl text-[14.5px] leading-relaxed text-muted">
-              Day-ahead prices from CAISO and ERCOT, emitted on one schema with one set
-              of column names. Every listing shows its declared schema, its source, its
-              legal basis and its freshness SLA before you commit to anything.
+              ERCOT real-time locational marginal prices, every settlement point,
+              about every five minutes. The listing shows its declared schema, its
+              source, its legal basis, its freshness SLA and its actual delivery
+              record before you commit to anything.
             </p>
           </div>
           <Link
             href="/marketplace/energy"
             className="text-[13.5px] text-accent underline-offset-4 hover:underline"
           >
-            Both datasets →
+            See the listing →
           </Link>
         </div>
 
@@ -240,7 +241,9 @@ function Status({
   label,
   detail,
 }: {
-  state: "doing" | "todo";
+  // `done` is deliberately distinct from `doing`: something that is actually
+  // running should not look the same as something in progress.
+  state: "done" | "doing" | "todo";
   label: string;
   detail: string;
 }) {
@@ -249,7 +252,9 @@ function Status({
       <span
         className={cx(
           "mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full",
-          state === "doing" ? "bg-accent" : "bg-line-strong",
+          state === "done" && "dr-pulse bg-ok",
+          state === "doing" && "bg-accent",
+          state === "todo" && "bg-line-strong",
         )}
       />
       <div>

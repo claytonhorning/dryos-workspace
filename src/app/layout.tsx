@@ -10,7 +10,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: "Dryos — buy data from the experts who maintain it",
   description:
-    "Governed energy data, operated by the person who knows the source. Starting with CAISO and ERCOT day-ahead prices on one schema.",
+    "Governed energy data, operated by the person who knows the source. Starting with ERCOT real-time locational marginal prices.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
