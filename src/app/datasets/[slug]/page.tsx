@@ -9,7 +9,7 @@ import { SchemaTable } from "@/components/DataTables";
 import { StatusBadge } from "@/components/HealthBadge";
 import { TierBadge } from "@/components/TierBadge";
 import { Chip, Panel, PanelHeader } from "@/components/ui";
-import { CADENCE_LABEL, SOURCE_BASIS_LABEL, compactNumber, formatWindow } from "@/lib/format";
+import { CADENCE_LABEL, SOURCE_BASIS_LABEL, formatWindow } from "@/lib/format";
 import { getDataset, getPreview, getSample, listDatasets } from "@/lib/repo";
 import { verticalById } from "@/lib/verticals";
 
@@ -29,8 +29,6 @@ export default async function DatasetPage({
   const preview = await getPreview(slug, 24);
   const sample = await getSample(slug);
   const apiUrl = process.env.NEXT_PUBLIC_DRYOS_API_URL ?? null;
-
-  const { telemetry } = dataset;
 
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-8">
@@ -70,16 +68,6 @@ export default async function DatasetPage({
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
         <div className="min-w-0">
-          <div className="grid grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface md:grid-cols-4 md:divide-y-0">
-            <Fact
-              label="Rows"
-              value={telemetry.rowCount === null ? null : compactNumber(telemetry.rowCount)}
-            />
-            <Fact label="History from" value={telemetry.historyFrom} />
-            <Fact label="Schema fields" value={String(dataset.schema.length)} />
-            <Fact label="SLA window" value={formatWindow(dataset.slaMinutes)} />
-          </div>
-
           <div className="mt-8">
             <Tabs
               tabs={[
@@ -174,19 +162,6 @@ export default async function DatasetPage({
           <AccessPanel dataset={dataset} />
           <MaintainerCard />
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Fact({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="px-5 py-4">
-      <div className="font-mono text-[10.5px] tracking-[0.12em] text-faint uppercase">
-        {label}
-      </div>
-      <div className="mt-1.5 text-[19px] font-semibold tabular-nums text-ink">
-        {value ?? <span className="text-[15px] font-normal text-faint">Not yet collected</span>}
       </div>
     </div>
   );
