@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { DatasetCard } from "@/components/DatasetCard";
+import { GateAnimation } from "@/components/GateAnimation";
 import { ButtonLink, Panel, cx } from "@/components/ui";
 import { listDatasets } from "@/lib/repo";
 import { VERTICALS } from "@/lib/verticals";
@@ -49,31 +50,20 @@ export default async function LandingPage() {
           <Panel padded={false} className="overflow-hidden">
             <div className="border-b border-line px-5 py-3">
               <span className="font-mono text-[10.5px] tracking-[0.12em] text-faint uppercase">
-                Where this actually is
+                How it works
               </span>
             </div>
-            <ul className="divide-y divide-line">
-              <Status
-                state="done"
-                label="ERCOT real-time LMPs collecting"
-                detail="Every settlement point, chased from the source and validated before it lands — typically in our hands under 10 seconds after ERCOT posts it."
+            <div className="px-3 pt-4 pb-2">
+              <GateAnimation
+                slug="ercot-realtime-lmp"
+                apiUrl={process.env.NEXT_PUBLIC_DRYOS_API_URL ?? null}
               />
-              <Status
-                state="doing"
-                label="Validation engine written"
-                detail="Schema conformance, null budgets, row-count anomaly, value bands, primary key and freshness — enforced before any batch is promoted."
-              />
-              <Status
-                state="todo"
-                label="Not selling access yet"
-                detail="No API keys and no metering, so nothing is billable. The delivery record on the listing is measured from real collections, not projected."
-              />
-              <Status
-                state="todo"
-                label="Onboarding the first teams by hand"
-                detail="We would rather agree pricing with the first few buyers than publish a number we invented."
-              />
-            </ul>
+            </div>
+            <p className="border-t border-line px-5 py-3.5 text-[12.5px] leading-relaxed text-muted">
+              Maintainers publish batches; every one is validated before it reaches a
+              buyer, and a batch that fails stops at the gate rather than going out
+              stale. One source is live today — the shape is the product.
+            </p>
           </Panel>
         </div>
       </section>
@@ -233,35 +223,6 @@ export default async function LandingPage() {
         </div>
       </section>
     </div>
-  );
-}
-
-function Status({
-  state,
-  label,
-  detail,
-}: {
-  // `done` is deliberately distinct from `doing`: something that is actually
-  // running should not look the same as something in progress.
-  state: "done" | "doing" | "todo";
-  label: string;
-  detail: string;
-}) {
-  return (
-    <li className="flex gap-3 px-5 py-3.5">
-      <span
-        className={cx(
-          "mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full",
-          state === "done" && "dr-pulse bg-ok",
-          state === "doing" && "bg-accent",
-          state === "todo" && "bg-line-strong",
-        )}
-      />
-      <div>
-        <div className="text-[13.5px] font-medium text-ink">{label}</div>
-        <p className="mt-1 text-[12.5px] leading-relaxed text-muted">{detail}</p>
-      </div>
-    </li>
   );
 }
 
