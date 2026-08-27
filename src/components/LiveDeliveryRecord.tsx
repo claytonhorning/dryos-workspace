@@ -200,7 +200,13 @@ export function CollectionGraph({ preview }: { preview: DatasetPreview }) {
 
   return (
     <div>
-      <div className="flex flex-wrap gap-[3px]">
+      {/*
+        The collector writes while the page renders, so the HTML pass and the
+        RSC payload can legitimately differ by one interval. The client's value
+        is the newer and correct one, and it repaints on the next poll anyway —
+        this is the "external changing data" case React's warning describes.
+      */}
+      <div className="flex flex-wrap gap-[3px]" suppressHydrationWarning>
         {cells.map((c) => (
           <span
             key={c.t}

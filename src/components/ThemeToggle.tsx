@@ -59,10 +59,12 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      // Rendered before hydration resolves the theme, so keep the label generic
-      // until we know which way round it is.
-      aria-label={theme ? `Switch to ${theme === "light" ? "dark" : "light"} mode` : "Switch theme"}
-      title={theme ? `Switch to ${theme === "light" ? "dark" : "light"} mode` : "Switch theme"}
+      // Constant, deliberately. Deriving the label from post-mount state means
+      // the server renders one string and the client swaps it on hydrate, which
+      // is a mismatch — and an accessible name that changes under a screen
+      // reader is worse than a stable one that describes the action.
+      aria-label="Toggle light and dark theme"
+      title="Toggle light and dark theme"
       className={cx(
         "grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line",
         "text-muted transition-colors hover:border-line-strong hover:text-ink",
