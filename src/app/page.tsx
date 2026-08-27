@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { DatasetCard } from "@/components/DatasetCard";
-import { GateAnimation } from "@/components/GateAnimation";
+import { GateScene } from "@/components/GateScene";
 import { ButtonLink, Panel, cx } from "@/components/ui";
 import { listDatasets } from "@/lib/repo";
 import { VERTICALS } from "@/lib/verticals";
@@ -48,21 +48,24 @@ export default async function LandingPage() {
 
           {/* What is actually true today. No metrics — nothing has run. */}
           <Panel padded={false} className="overflow-hidden">
-            <div className="border-b border-line px-5 py-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-3.5">
+              <span className="text-[15px] font-semibold tracking-[-0.01em] text-ink">
+                Feed your AI
+              </span>
               <span className="font-mono text-[10.5px] tracking-[0.12em] text-faint uppercase">
-                How it works
+                maintainers → dryos → applications
               </span>
             </div>
-            <div className="px-3 pt-4 pb-2">
-              <GateAnimation
-                slug="ercot-realtime-lmp"
-                apiUrl={process.env.NEXT_PUBLIC_DRYOS_API_URL ?? null}
-              />
-            </div>
+
+            <GateScene
+              slug="ercot-realtime-lmp"
+              apiUrl={process.env.NEXT_PUBLIC_DRYOS_API_URL ?? null}
+            />
+
             <p className="border-t border-line px-5 py-3.5 text-[12.5px] leading-relaxed text-muted">
-              Maintainers publish batches; every one is validated before it reaches a
-              buyer, and a batch that fails stops at the gate rather than going out
-              stale. One source is live today — the shape is the product.
+              Maintainers publish; Dryos validates every batch and handles delivery —
+              query API, bulk export or a warehouse share. A batch that fails the check
+              stops at the centre rather than reaching your model stale.
             </p>
           </Panel>
         </div>
