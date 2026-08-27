@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { DatasetCard } from "@/components/DatasetCard";
-import { GateScene } from "@/components/GateScene";
+import { GateHero } from "@/components/gate/GateHero";
 import { ButtonLink, Panel, cx } from "@/components/ui";
 import { listDatasets } from "@/lib/repo";
 import { VERTICALS } from "@/lib/verticals";
@@ -57,7 +57,7 @@ export default async function LandingPage() {
               </span>
             </div>
 
-            <GateScene
+            <GateHero
               slug="ercot-realtime-lmp"
               apiUrl={process.env.NEXT_PUBLIC_DRYOS_API_URL ?? null}
             />
