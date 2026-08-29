@@ -48,15 +48,6 @@ const PANELS: { id: PanelMode; label: string }[] = [
 const COLUMNS = (open: boolean) =>
   open ? "lg:grid-cols-[1fr_420px]" : "lg:grid-cols-1";
 
-/** What the agent is doing right now, in words a person would use. */
-const PHASE_LABEL: Record<string, string> = {
-  thinking: "Reading your screen…",
-  writing: "Writing the change…",
-  composing: "Generating the component…",
-  compiling: "Checking it builds…",
-  retrying: "That didn't build — trying again…",
-};
-
 /** One screen, running, with the tools that shaped it beside it. */
 export default function AppPage() {
   // `id` throughout is the page's id; the workspace only matters for links.
@@ -87,11 +78,6 @@ export default function AppPage() {
    *  silently, and silence about your own data is not reassuring. */
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
-  const [progress, setProgress] = useState<{
-    label: string;
-    detail?: string;
-  } | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [pullOpen, setPullOpen] = useState(false);
@@ -145,8 +131,6 @@ export default function AppPage() {
 
       setPending(true);
       setError(null);
-      setSaved(null);
-      setProgress({ label: PHASE_LABEL.composing });
       try {
         const res = await fetch(`/api/workspace/apps/${id}/edit`, {
           method: "POST",
@@ -167,11 +151,6 @@ export default function AppPage() {
         }
         await readNdjson(res, (e) => {
           switch (e.type) {
-            case "phase":
-              setProgress({
-                label: PHASE_LABEL[e.phase as string] ?? "Working…",
-              });
-              break;
             case "done":
               setApp(e.app as App);
               setSavedAt(Date.now());
@@ -190,7 +169,6 @@ export default function AppPage() {
         setError(err instanceof Error ? err.message : "That did not place.");
       } finally {
         setPending(false);
-        setProgress(null);
       }
     },
     [dragging, pending, id, attached],
@@ -202,8 +180,6 @@ export default function AppPage() {
       setEditing(null);
       setPending(true);
       setError(null);
-      setSaved(null);
-      setProgress({ label: PHASE_LABEL.composing });
       try {
         const res = await fetch(`/api/workspace/apps/${id}/edit`, {
           method: "POST",
@@ -226,14 +202,12 @@ export default function AppPage() {
           if (e.type === "done") {
             setApp(e.app as App);
             setSavedAt(Date.now());
-            setSaved("Added to the screen.");
           } else if (e.type === "failed" || e.type === "error") {
             setError(String(e.message));
           }
         });
       } finally {
         setPending(false);
-        setProgress(null);
       }
     },
     [id],
@@ -247,7 +221,7 @@ export default function AppPage() {
       body: JSON.stringify({ spec, name: spec.custom?.name ?? spec.kind }),
     });
     setSavedTick((n) => n + 1);
-    setSaved("Saved to your components.");
+    setSavedAt(Date.now());
   }, []);
 
   /**
@@ -259,6 +233,10 @@ export default function AppPage() {
    */
   const arrange = useCallback(
     async (body: Record<string, number>) => {
+      // A page without a manifest has nothing to write a layout into — the
+      // frame has already applied the gesture live, and posting the save
+      // would only surface a 409 for a change that cannot persist.
+      if (!app?.manifest) return;
       await fetch(`/api/workspace/apps/${id}/layout`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -266,7 +244,7 @@ export default function AppPage() {
       });
       setSavedAt(Date.now());
     },
-    [id],
+    [id, app?.manifest],
   );
 
   const resize = useCallback(
@@ -522,27 +500,18 @@ export default function AppPage() {
                   className="grid min-h-0 flex-1 auto-rows-min grid-rows-[1fr_1fr] gap-3"
                 >
                   {/*
-                    Placing a component and building one both report back, and the
-                    panel no longer has a chat to report into — so a strip appears
-                    above the column only while there is something to say.
+                    Only failures report here. Placing a component is
+                    deterministic and lands in about a second — the tile
+                    appearing on the screen is the report, and a banner
+                    narrating the compile was a box covering the panel to say
+                    nothing anyone was waiting to read.
                   */}
-                  {(pending || saved || error) && (
+                  {error && (
                     <div
-                      className={cx(
-                        "row-span-full flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-[12.5px]",
-                        error
-                          ? "border-warn-line bg-warn-dim text-warn"
-                          : "border-accent-line bg-accent-dim text-accent",
-                      )}
+                      className="row-span-full flex shrink-0 items-center gap-2 rounded-lg border border-warn-line bg-warn-dim px-3 py-2 text-[12.5px] text-warn"
                       style={{ gridRow: "auto" }}
                     >
-                      {pending && (
-                        <span className="dr-pulse h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-                      )}
-                      <span className="min-w-0 truncate">
-                        {error ??
-                          (pending ? (progress?.label ?? "Working…") : saved)}
-                      </span>
+                      <span className="min-w-0 truncate">{error}</span>
                     </div>
                   )}
 

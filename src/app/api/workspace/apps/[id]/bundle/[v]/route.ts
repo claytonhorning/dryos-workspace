@@ -1,4 +1,4 @@
-import { getApp } from "@/lib/workspace/store";
+import { getAppForFrame } from "@/lib/workspace/store";
 import { buildDocument } from "@/lib/workspace/runtime";
 
 /**
@@ -13,9 +13,13 @@ import { buildDocument } from "@/lib/workspace/runtime";
  * — the src genuinely changed — and it leaves the response cacheable per
  * revision rather than permanently uncacheable.
  */
-export async function GET(req: Request, { params }: { params: Promise<{ id: string; v: string }> }) {
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string; v: string }> },
+) {
   const { id, v } = await params;
-  const app = await getApp(id);
+  // Cookie-less by construction — see getAppForFrame.
+  const app = await getAppForFrame(id);
   if (!app) return new Response("Not found", { status: 404 });
 
   // `?preview=1` swaps in the self-serving shim: the frame generates its own
@@ -23,7 +27,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // `PREVIEW_SHIM` for why, and what it costs (nothing, which is the point).
   const preview = new URL(req.url).searchParams.get("preview") === "1";
 
-  return new Response(buildDocument(`/api/workspace/apps/${id}/script/${v}`, { preview }), {
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-  });
+  return new Response(
+    buildDocument(`/api/workspace/apps/${id}/script/${v}`, { preview }),
+    {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      },
+    },
+  );
 }

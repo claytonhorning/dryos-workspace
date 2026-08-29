@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { editApp } from "@/lib/workspace/agent";
+import { annexComponent } from "@/lib/workspace/annex";
 import { composeApp, describeComponent } from "@/lib/workspace/compose";
 import { compile } from "@/lib/workspace/runtime";
 import { ndjsonStream } from "@/lib/workspace/ndjson";
@@ -29,28 +30,36 @@ export const dynamic = "force-dynamic";
  * "chart this", and paying a model to retype the same forty lines is a cost with
  * no upside.
  */
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { id } = await params;
   const app = await getApp(id);
-  if (!app) return NextResponse.json({ error: "No such screen." }, { status: 404 });
+  if (!app)
+    return NextResponse.json({ error: "No such screen." }, { status: 404 });
 
-  const { intent, refs, component, options, custom, layout, at } = (await req.json()) as {
-    intent?: string;
-    refs?: DataRef[];
-    component?: ComponentKind;
-    options?: Record<string, string>;
-    /** A saved component's finished source, used verbatim. */
-    custom?: { name: string; code: string };
-    layout?: { w: number; h: number };
-    /** Where in the stack it was dropped. Appended when absent. */
-    at?: number;
-  };
+  const { intent, refs, component, options, custom, layout, at } =
+    (await req.json()) as {
+      intent?: string;
+      refs?: DataRef[];
+      component?: ComponentKind;
+      options?: Record<string, string>;
+      /** A saved component's finished source, used verbatim. */
+      custom?: { name: string; code: string };
+      layout?: { w: number; h: number };
+      /** Where in the stack it was dropped. Appended when absent. */
+      at?: number;
+    };
 
   const said = intent?.trim() ?? "";
   const def = component ? componentDef(component) : undefined;
 
   if (!said && !def) {
-    return NextResponse.json({ error: "Say what you want changed." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Say what you want changed." },
+      { status: 400 },
+    );
   }
 
   const chosen = refs ?? [];
@@ -60,7 +69,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (def && !custom) {
     const verdict = def.accepts(chosen);
     if (!verdict.ok) {
-      return NextResponse.json({ error: verdict.why ?? "That will not render." }, { status: 400 });
+      return NextResponse.json(
+        { error: verdict.why ?? "That will not render." },
+        { status: 400 },
+      );
     }
   }
 
@@ -71,7 +83,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
       // Dropped between two sections, so it is spliced in rather than pushed.
       const manifest = [...app.manifest!];
-      const where = Math.max(0, Math.min(at ?? manifest.length, manifest.length));
+      const where = Math.max(
+        0,
+        Math.min(at ?? manifest.length, manifest.length),
+      );
       manifest.splice(where, 0, {
         kind: def.kind,
         refs: chosen,
@@ -86,7 +101,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       send({ type: "phase", phase: "compiling" });
       const built = await compile(source);
       if (!built.js) {
-        send({ type: "failed", message: `The component did not compile: ${built.error}` });
+        send({
+          type: "failed",
+          message: `The component did not compile: ${built.error}`,
+        });
         return;
       }
 
@@ -104,7 +122,56 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     });
   }
 
-  /* ── The agent, seeded when a component was picked ─────────────────────── */
+  /* ── Deterministic still: no message, but the file is not regenerable ──── */
+  // A typed drop never reaches a model. Templates and model-edited pages have
+  // no manifest to splice into, so the generated tile is annexed beneath the
+  // page instead — same compile gate, same refusal on failure, zero tokens.
+  if (def && !said) {
+    return ndjsonStream(async (send) => {
+      send({ type: "phase", phase: "composing" });
+      let source: string;
+      try {
+        source = annexComponent(app.source, {
+          kind: def.kind,
+          refs: chosen,
+          options,
+          custom,
+          layout: layout ?? DEFAULT_LAYOUT[def.kind],
+        });
+      } catch (err) {
+        send({
+          type: "failed",
+          message: err instanceof Error ? err.message : "That did not place.",
+        });
+        return;
+      }
+
+      send({ type: "phase", phase: "compiling" });
+      const built = await compile(source);
+      if (!built.js) {
+        send({
+          type: "failed",
+          message: `The component did not compile: ${built.error}`,
+        });
+        return;
+      }
+
+      const updated = await addRevision(id, {
+        intent: custom
+          ? `Add the “${custom.name}” component.`
+          : describeComponent(def.kind, chosen),
+        refs: chosen.length ? chosen : undefined,
+        // Deliberately no manifest: the page was not regenerable before the
+        // drop and is not after it. The annex extends; it does not adopt.
+        source,
+        author: "you",
+        note: "Placed without a model — appended beneath the page.",
+      });
+      send({ type: "done", app: updated, composed: false });
+    });
+  }
+
+  /* ── The agent, for an actual sentence ─────────────────────────────────── */
   return ndjsonStream(async (send) => {
     const seed = def
       ? composeApp([
@@ -121,7 +188,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // The app is not composed, so there is no index to splice at — the position
     // becomes a sentence instead, which is the one form the agent can act on.
     const place =
-      def && at !== undefined ? (at === 0 ? " Put it at the top." : " Put it below what is already there.") : "";
+      def && at !== undefined
+        ? at === 0
+          ? " Put it at the top."
+          : " Put it below what is already there."
+        : "";
 
     const request = def
       ? `${custom ? `Add the “${custom.name}” component.` : describeComponent(def.kind, chosen)}${place}${said ? `\n\nThen: ${said}` : ""}`

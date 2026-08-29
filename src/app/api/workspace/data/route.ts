@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { supabaseServer } from "@/lib/supabase/server";
 import { record } from "@/lib/workspace/meter";
 import { isMockDataset, mockRows } from "@/lib/workspace/mockData";
 import { normaliseRow, resolveTime } from "@/lib/workspace/time";
@@ -54,6 +55,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ rows, count: rows.length, mock: true });
   }
 
+  /*
+    Attach the caller's identity for the backend to meter on — read locally
+    from the cookie, no auth-server round trip, because this route is polled by
+    every tile on a screen. A token inside a minute of expiry is withheld
+    instead of forwarded: the backend refuses stale credentials outright, and
+    an anonymous call is still served while auth is optional, so the screen
+    keeps drawing either way.
+  */
+  const supabase = await supabaseServer();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const auth =
+    session && (session.expires_at ?? 0) * 1000 - Date.now() > 60_000
+      ? { authorization: `Bearer ${session.access_token}` }
+      : undefined;
+
   try {
     const results = await Promise.all(
       nodes.map(async (node) => {
@@ -63,7 +81,7 @@ export async function POST(req: Request) {
         if (end) url.searchParams.set("end", end);
         url.searchParams.set("limit", String(limit));
 
-        const res = await fetch(url, { cache: "no-store" });
+        const res = await fetch(url, { cache: "no-store", headers: auth });
         if (!res.ok) {
           const detail = await res.text();
           throw new Error(

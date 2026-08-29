@@ -38,14 +38,16 @@ const LMP_SCHEMA: SchemaField[] = [
   {
     name: "market",
     type: "string",
-    description: "Market the price cleared in. DAM (day-ahead) or RTM (real-time, SCED).",
+    description:
+      "Market the price cleared in. DAM (day-ahead) or RTM (real-time, SCED).",
     nullable: false,
     example: "RTM",
   },
   {
     name: "node",
     type: "string",
-    description: "Pricing node or settlement point identifier, as published by the ISO.",
+    description:
+      "Pricing node or settlement point identifier, as published by the ISO.",
     nullable: false,
     example: "HB_HOUSTON",
   },
@@ -55,7 +57,8 @@ const LMP_SCHEMA: SchemaField[] = [
     description:
       "Node classification. For ERCOT this is derived from the settlement point naming convention: HUB / LOAD_ZONE / DC_TIE / RESOURCE_NODE.",
     nullable: true,
-    nullReason: "An ISO may publish a point whose identifier matches no known classification.",
+    nullReason:
+      "An ISO may publish a point whose identifier matches no known classification.",
     example: "HB_HOUSTON",
   },
   {
@@ -70,7 +73,8 @@ const LMP_SCHEMA: SchemaField[] = [
     type: "number",
     description: "Energy component, $/MWh.",
     nullable: true,
-    nullReason: "ERCOT publishes settlement point prices without a component breakdown.",
+    nullReason:
+      "ERCOT publishes settlement point prices without a component breakdown.",
     example: "39.12",
   },
   {
@@ -78,7 +82,8 @@ const LMP_SCHEMA: SchemaField[] = [
     type: "number",
     description: "Congestion component, $/MWh.",
     nullable: true,
-    nullReason: "ERCOT publishes settlement point prices without a component breakdown.",
+    nullReason:
+      "ERCOT publishes settlement point prices without a component breakdown.",
     example: "2.94",
   },
   {
@@ -86,7 +91,8 @@ const LMP_SCHEMA: SchemaField[] = [
     type: "number",
     description: "Loss component, $/MWh.",
     nullable: true,
-    nullReason: "ERCOT publishes settlement point prices without a component breakdown.",
+    nullReason:
+      "ERCOT publishes settlement point prices without a component breakdown.",
     example: "-0.23",
   },
   {
@@ -129,8 +135,46 @@ export const catalogue: Dataset[] = [
     tier: "realtime",
     availableTiers: ["standard", "realtime"],
     pricing: {
-      standard: { unitPriceUsd: 0.3, unit: "1k rows", freeAllowance: "50k rows/mo" },
-      realtime: { unitPriceUsd: 0.85, unit: "1k API calls", freeAllowance: "5k calls/mo" },
+      standard: {
+        unitPriceUsd: 0.3,
+        unit: "1k rows",
+        freeAllowance: "50k rows/mo",
+      },
+      realtime: {
+        unitPriceUsd: 0.85,
+        unit: "1k API calls",
+        freeAllowance: "5k calls/mo",
+      },
+    },
+    schema: LMP_SCHEMA,
+    primaryKey: PRIMARY_KEY,
+    status: "pending",
+    telemetry: NO_TELEMETRY,
+  },
+  {
+    slug: "ercot-dam-lmp",
+    vertical: "energy",
+    name: "ERCOT DAM Hourly LMPs by Bus",
+    tagline:
+      "Day-ahead hourly locational marginal prices for every ERCOT electrical bus — the cleared price for each hour of tomorrow, published once a day after the DAM run.",
+    description:
+      "ERCOT's day-ahead market clears once a day and publishes an hourly price for every electrical bus (~19,000) as a zipped CSV on the MIS, normally between 12:30 and 13:30 CT. The collector walks the NP4-183 report listing, converts hour-ending wall-clock times into unambiguous UTC interval starts — including the repeated hour of the autumn DST fold — and emits onto the same shared LMP schema as the real-time feed, so day-ahead and real-time join on the same columns.",
+    category: "Market & Pricing",
+    region: "ERCOT (Texas)",
+    sourceName: "ERCOT MIS · NP4-183-CD",
+    sourceUrl:
+      "https://www.ercot.com/mp/data-products/data-product-details?id=NP4-183-CD",
+    sourceBasis: "iso_public",
+    cadence: "daily",
+    slaMinutes: 1560,
+    tier: "standard",
+    availableTiers: ["archive", "standard"],
+    pricing: {
+      standard: {
+        unitPriceUsd: 0.3,
+        unit: "1k rows",
+        freeAllowance: "50k rows/mo",
+      },
     },
     schema: LMP_SCHEMA,
     primaryKey: PRIMARY_KEY,

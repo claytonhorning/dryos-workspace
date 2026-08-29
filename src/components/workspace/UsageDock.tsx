@@ -12,7 +12,8 @@ import {
 import type { UsageSummary, WindowUsage } from "@/lib/workspace/meter";
 
 /**
- * What this workspace is costing, down in the corner.
+ * What this workspace is costing, down in the bottom-left corner — the right
+ * corner belongs to the resize handle of whatever tile happens to end there.
  *
  * It sits over the screen rather than in the bar because it belongs to the
  * workspace, not to the product — and because a page runs edge to edge, so
@@ -69,7 +70,7 @@ export function UsageDock({
       <button
         onClick={() => setOpen(true)}
         title="What this workspace is costing"
-        className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-full border border-line bg-surface/90 px-3 py-1.5 font-mono text-[10.5px] shadow-lg shadow-black/30 backdrop-blur transition-colors hover:border-line-strong"
+        className="fixed bottom-4 left-4 z-30 inline-flex items-center gap-2 rounded-full border border-line bg-surface/90 px-3 py-1.5 font-mono text-[10.5px] shadow-lg shadow-black/30 backdrop-blur transition-colors hover:border-line-strong"
       >
         <span className="text-faint">
           {usage.today.queries.toLocaleString()} call
@@ -90,7 +91,7 @@ export function UsageDock({
   }
 
   return (
-    <div className="dr-rise fixed right-4 bottom-4 z-30 flex max-h-[70vh] w-[360px] flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/50">
+    <div className="dr-rise fixed bottom-4 left-4 z-30 flex max-h-[70vh] w-[360px] flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/50">
       <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
         <span className="truncate text-[13px] font-medium text-ink">
           {name ? `${name} · usage` : "Usage"}

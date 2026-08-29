@@ -1,5 +1,4 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import { supabaseServer } from "@/lib/supabase/server";
 import { type Schema, schemaFor } from "./catalog";
 
 /**
@@ -15,12 +14,12 @@ import { type Schema, schemaFor } from "./catalog";
  *   · A mock schema costs nothing. It is generated locally; charging for it
  *     would be charging for our own placeholder.
  *
- * A JSON file rather than a table, for the same reason the apps are files: this
- * is a proof of concept, and being able to read the ledger in an editor is
- * worth more right now than durability under concurrent writes.
+ * The ledger lives in Supabase now — one row per (day, screen, schema), owned
+ * by the user whose token made the query, incremented atomically by the
+ * `record_usage` function so concurrent polls never lose a line. Anonymous
+ * queries have no row to land on and are deliberately not counted: a ledger
+ * entry that cannot be billed to anyone is noise wearing the clothes of data.
  */
-
-const FILE = path.join(process.cwd(), ".workspace", "usage.json");
 
 export interface Entry {
   queries: number;
@@ -89,33 +88,20 @@ function monthToDate(): string[] {
 }
 
 async function read(): Promise<Ledger> {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await fs.readFile(FILE, "utf8"));
-  } catch {
-    return { days: {} };
-  }
+  const supabase = await supabaseServer();
+  const { data } = await supabase
+    .from("usage_entries")
+    .select("day, app_id, schema_id, queries, rows, tokens");
 
-  const days = (raw as Ledger)?.days ?? {};
   const out: Ledger = { days: {} };
-
-  // The ledger used to be day → schema → totals, with no screen in between.
-  // Those rows are real spending and should not be thrown away, so they move
-  // under the unattributed screen — which is the truth about them.
-  for (const [day, contents] of Object.entries(days)) {
-    const screens: Record<string, Record<string, Entry>> = {};
-    for (const [key, value] of Object.entries(contents as Record<string, unknown>)) {
-      const looksLikeEntry =
-        value && typeof value === "object" && typeof (value as Entry).queries === "number";
-      if (looksLikeEntry) {
-        (screens["-"] ??= {})[key] = value as Entry;
-      } else {
-        screens[key] = value as Record<string, Entry>;
-      }
-    }
-    out.days[day] = screens;
+  for (const r of data ?? []) {
+    const screens = (out.days[r.day] ??= {});
+    (screens[r.app_id] ??= {})[r.schema_id] = {
+      queries: Number(r.queries),
+      rows: Number(r.rows),
+      tokens: r.tokens,
+    };
   }
-
   return out;
 }
 
@@ -136,16 +122,14 @@ export async function record(
   if (!schema) return;
 
   try {
-    const ledger = await read();
-    const day = (ledger.days[today()] ??= {});
-    const screen = (day[appId || "-"] ??= {});
-    const entry = (screen[schema.id] ??= { queries: 0, rows: 0, tokens: 0 });
-    entry.queries += 1;
-    entry.rows += rows;
-    entry.tokens += cost(schema);
-
-    await fs.mkdir(path.dirname(FILE), { recursive: true });
-    await fs.writeFile(FILE, JSON.stringify(ledger, null, 2), "utf8");
+    const supabase = await supabaseServer();
+    await supabase.rpc("record_usage", {
+      p_day: today(),
+      p_app: appId || "-",
+      p_schema: schema.id,
+      p_rows: rows,
+      p_tokens: cost(schema),
+    });
   } catch {
     // Accounting is best-effort. The query already succeeded.
   }
@@ -157,7 +141,11 @@ export function cost(schema: Schema): number {
 }
 
 /** Roll a set of days up, optionally narrowed to a set of screens. */
-function windowOf(ledger: Ledger, days: string[], only?: Set<string>): WindowUsage {
+function windowOf(
+  ledger: Ledger,
+  days: string[],
+  only?: Set<string>,
+): WindowUsage {
   const totals = new Map<string, Entry>();
 
   for (const day of days) {

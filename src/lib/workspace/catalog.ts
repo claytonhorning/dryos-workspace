@@ -108,35 +108,32 @@ export const SCHEMAS: Schema[] = [
   {
     id: "energy.power.dayahead",
     path: ["Energy", "Power", "Day-ahead"],
-    name: "Day-ahead cleared prices",
-    availability: "mock",
-    cadence: { label: "daily, 14:00 CT", seconds: 86_400 },
+    name: "ERCOT day-ahead hourly LMP",
+    dataset: "ercot-dam-lmp",
+    availability: "live",
+    cadence: { label: "daily, ~12:35 CT", seconds: 86_400 },
     tokens: 0.5,
+    // Bus-level, not settlement points: NP4-183 prices every electrical bus,
+    // which is what ERCOT actually publishes hourly for the day-ahead market.
     entities: {
-      count: 1118,
-      label: "settlement points",
-      sample: ["HB_HOUSTON", "HB_NORTH", "LZ_WEST"],
+      count: 19_312,
+      label: "electrical buses",
+      sample: ["CADICKS_804V", "ADICKS__138C", "ADK_V_C"],
     },
     blurb:
-      "Hourly cleared prices from the day-ahead market, posted once for the following day. " +
-      "The basis every real-time spread is measured against.",
+      "Hourly cleared prices from the day-ahead market for every ERCOT electrical bus, " +
+      "posted once for the following day. Collected from ERCOT MIS (NP4-183), " +
+      "reconciled against the source file.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
     variables: [
       {
-        key: "dam_price",
+        key: "lmp_total",
         label: "Cleared price",
         unit: "$/MWh",
-        availability: "mock",
-        description: "Hourly day-ahead clearing price.",
+        availability: "live",
+        description: "Hourly day-ahead clearing price for the bus.",
+        // Preview-only — see the note on the real-time schema.
         mock: { base: 34, swing: 16, noise: 4 },
-      },
-      {
-        key: "dam_rt_basis",
-        label: "Basis to real-time",
-        unit: "$/MWh",
-        availability: "mock",
-        description:
-          "Day-ahead less the realised real-time average for the same hour.",
-        mock: { base: 0, swing: 9, noise: 3 },
       },
     ],
   },

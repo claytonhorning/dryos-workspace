@@ -1,6 +1,6 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { supabaseServer } from "@/lib/supabase/server";
+import { importLocalOnce } from "./import";
 import type { ComponentSpec } from "./components";
 
 /**
@@ -12,10 +12,11 @@ import type { ComponentSpec } from "./components";
  * only way that holds once a refinement is involved: nothing can reproduce an
  * agent's rewrite from `kind` and `options`.
  *
- * One JSON file, for the same reason the apps are files.
+ * One row per component with the spec as jsonb, owned by its author via RLS —
+ * the library is personal, which is also what makes it shareable later: a
+ * shared component would be someone else's row made visible, not a merge of
+ * two files.
  */
-
-const FILE = path.join(process.cwd(), ".workspace", "components.json");
 
 export interface SavedComponent extends ComponentSpec {
   id: string;
@@ -25,19 +26,19 @@ export interface SavedComponent extends ComponentSpec {
 }
 
 export async function listSaved(): Promise<SavedComponent[]> {
-  try {
-    const all = JSON.parse(await fs.readFile(FILE, "utf8")) as SavedComponent[];
-    return all.sort((a, b) => b.at - a.at);
-  } catch {
-    return [];
-  }
+  await importLocalOnce();
+  const supabase = await supabaseServer();
+  const { data } = await supabase
+    .from("components")
+    .select("data")
+    .order("at", { ascending: false });
+  return (data ?? []).map((r) => r.data as SavedComponent);
 }
 
 export async function saveComponent(
   spec: ComponentSpec,
   name: string,
 ): Promise<SavedComponent> {
-  const all = await listSaved();
   const saved: SavedComponent = {
     ...spec,
     id: randomUUID().slice(0, 8),
@@ -45,15 +46,19 @@ export async function saveComponent(
     author: "you",
     at: Date.now(),
   };
-  await fs.mkdir(path.dirname(FILE), { recursive: true });
-  await fs.writeFile(FILE, JSON.stringify([saved, ...all], null, 2), "utf8");
+  const supabase = await supabaseServer();
+  const { error } = await supabase
+    .from("components")
+    .upsert({ id: saved.id, data: saved, at: saved.at });
+  if (error) throw new Error(`could not save the component (${error.message})`);
   return saved;
 }
 
 export async function deleteSaved(id: string): Promise<boolean> {
-  const all = await listSaved();
-  const next = all.filter((c) => c.id !== id);
-  if (next.length === all.length) return false;
-  await fs.writeFile(FILE, JSON.stringify(next, null, 2), "utf8");
-  return true;
+  const supabase = await supabaseServer();
+  const { count } = await supabase
+    .from("components")
+    .delete({ count: "exact" })
+    .eq("id", id);
+  return (count ?? 0) > 0;
 }

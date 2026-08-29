@@ -1,62 +1,88 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
+import { supabaseServer } from "@/lib/supabase/server";
+import { importLocalOnce } from "./import";
 import type { ComponentSpec } from "./components";
 import type { App, AppSummary, Revision } from "./types";
 
 /**
- * File-backed app storage.
+ * App storage, in Supabase.
  *
- * One JSON file per app under `.workspace/`. A database would be more correct
- * and less useful right now — the whole point of this proof of concept is to
- * find out whether the loop feels right, and being able to open an app in an
- * editor, diff two of them, or delete the lot with `rm -rf` is worth more at
- * this stage than referential integrity.
+ * This replaced one JSON file per app under `.workspace/`. The files were the
+ * right call while the question was whether the loop feels right; the moment
+ * accounts existed, "whose workspace is this?" had no answer a filesystem
+ * could give. The shape survived the move intact: each row's `data` column is
+ * the whole App object, verbatim — the file went into a column, not into a
+ * schema — so everything downstream still reads and writes complete apps.
+ *
+ * Row-level security does the scoping. Every query runs with the caller's own
+ * session token, so this module never filters by user: a user who asks for an
+ * app they do not own gets nothing, enforced in the database rather than in
+ * whichever of these functions remembered to check.
  */
 
-const ROOT = path.join(process.cwd(), ".workspace", "apps");
-
-async function ensureRoot() {
-  await fs.mkdir(ROOT, { recursive: true });
-}
-
-function file(id: string) {
-  return path.join(ROOT, `${id}.json`);
+async function db() {
+  await importLocalOnce();
+  return supabaseServer();
 }
 
 export async function listApps(): Promise<AppSummary[]> {
-  await ensureRoot();
-  const names = (await fs.readdir(ROOT)).filter((n) => n.endsWith(".json"));
-  const apps = await Promise.all(
-    names.map(async (n) => {
-      const app = JSON.parse(await fs.readFile(path.join(ROOT, n), "utf8")) as App;
-      return {
-        id: app.id,
-        name: app.name,
-        template: app.template,
-        updatedAt: app.updatedAt,
-        revisions: app.history.length,
-        authors: [...new Set(app.history.map((r) => r.author))],
-        forkedFrom: app.forkedFrom,
-        sharedBy: app.sharedBy,
-      };
-    }),
+  const supabase = await db();
+  const { data } = await supabase
+    .from("apps")
+    .select("data")
+    .order("updated_at", { ascending: false });
+  return (data ?? []).map(({ data }) => {
+    const app = data as App;
+    return {
+      id: app.id,
+      name: app.name,
+      template: app.template,
+      updatedAt: app.updatedAt,
+      revisions: app.history.length,
+      authors: [...new Set(app.history.map((r) => r.author))],
+      forkedFrom: app.forkedFrom,
+      sharedBy: app.sharedBy,
+    };
+  });
+}
+
+/**
+ * An app for the sandbox frame, which cannot say who it is.
+ *
+ * The frame runs in an opaque origin, so its document and script requests
+ * carry no cookies and RLS sees nobody. This reads through the `app_bundle`
+ * function instead — security definer, exact id only — which keeps the bundle
+ * URL what it always was: a capability held by whoever has the link. Every
+ * other read in this file stays owner-scoped.
+ */
+export async function getAppForFrame(id: string): Promise<App | null> {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
   );
-  return apps.sort((a, b) => b.updatedAt - a.updatedAt);
+  const { data } = await supabase.rpc("app_bundle", { p_id: id });
+  return (data as App | null) ?? null;
 }
 
 export async function getApp(id: string): Promise<App | null> {
-  await ensureRoot();
-  try {
-    return JSON.parse(await fs.readFile(file(id), "utf8")) as App;
-  } catch {
-    return null;
-  }
+  const supabase = await db();
+  const { data } = await supabase
+    .from("apps")
+    .select("data")
+    .eq("id", id)
+    .maybeSingle();
+  return (data?.data as App) ?? null;
 }
 
 async function write(app: App) {
-  await ensureRoot();
-  await fs.writeFile(file(app.id), JSON.stringify(app, null, 2), "utf8");
+  const supabase = await supabaseServer();
+  const { error } = await supabase
+    .from("apps")
+    .upsert({ id: app.id, data: app, updated_at: app.updatedAt });
+  // Signed out (or RLS refusing) must fail loudly: pretending a save happened
+  // and returning the app would lose work the moment the tab closed.
+  if (error) throw new Error(`could not save the page (${error.message})`);
   return app;
 }
 
@@ -92,6 +118,7 @@ export async function createApp(input: {
       },
     ],
   };
+  await db();
   return write(app);
 }
 
@@ -118,7 +145,10 @@ export async function addRevision(
  * break something eventually, and the way back has to be as inspectable as the
  * way forward.
  */
-export async function revertTo(id: string, revisionId: string): Promise<App | null> {
+export async function revertTo(
+  id: string,
+  revisionId: string,
+): Promise<App | null> {
   const app = await getApp(id);
   if (!app) return null;
   const target = app.history.find((r) => r.id === revisionId);
@@ -142,14 +172,13 @@ export async function renameApp(id: string, name: string): Promise<App | null> {
 }
 
 export async function deleteApp(id: string): Promise<boolean> {
-  try {
-    await fs.unlink(file(id));
-    return true;
-  } catch {
-    return false;
-  }
+  const supabase = await db();
+  const { count } = await supabase
+    .from("apps")
+    .delete({ count: "exact" })
+    .eq("id", id);
+  return (count ?? 0) > 0;
 }
-
 
 /**
  * Move a tile, without writing a revision.

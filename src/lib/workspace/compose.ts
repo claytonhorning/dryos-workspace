@@ -11,11 +11,13 @@ import type { DataRef } from "./catalog";
  * it either matches the manifest or it does not compile.
  *
  * The cost of that choice is the rule in `store.ts`: once a model edits an app,
- * the manifest no longer describes it and is dropped. Typed additions after that
- * point go through the agent instead, seeded with the same generated code.
+ * the manifest no longer describes it and is dropped. Typed additions after
+ * that point go through `annex.ts` — appended beneath the page with their own
+ * namespaced runtime — because a typed drop is deterministic and paying a
+ * model to retype it was never the product.
  */
 
-const PREAMBLE = `import React, { useEffect, useMemo, useRef, useState } from "react";
+export const PREAMBLE = `import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * Generated from typed components. Every section below was assembled from a
