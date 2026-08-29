@@ -140,33 +140,62 @@ export const SCHEMAS: Schema[] = [
   {
     id: "energy.power.load",
     path: ["Energy", "Power", "Load"],
-    name: "System load & forecast",
-    availability: "mock",
-    cadence: { label: "every 15 min", seconds: 900 },
+    name: "Actual system load",
+    dataset: "ercot-actual-load-weather-zone",
+    availability: "live",
+    // Hourly rows, but ERCOT posts the whole prior day each morning — the
+    // cadence a chart should assume is the row cadence, not the publish one.
+    cadence: { label: "hourly, posted next day", seconds: 3_600 },
     tokens: 0.5,
     entities: {
-      count: 8,
+      count: 9,
       label: "weather zones",
-      sample: ["COAST", "NORTH_C", "WEST"],
+      sample: ["COAST", "NORTH_C", "TOTAL"],
     },
     blurb:
-      "Demand actuals against ERCOT's own short-term forecast, by weather zone. " +
-      "The denominator for scarcity.",
+      "Metered demand by weather zone, hourly, with ERCOT's own system total as " +
+      "its own row. The denominator for scarcity. Collected from ERCOT MIS " +
+      "(NP6-345), reconciled against the source file.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
     variables: [
       {
         key: "load_mw",
         label: "Actual load",
         unit: "MW",
-        availability: "mock",
-        description: "Metered demand for the zone.",
+        availability: "live",
+        description: "Hourly average metered demand for the zone.",
+        // Preview-only — see the note on the real-time schema.
         mock: { base: 9_400, swing: 3_100, noise: 220, floor: 0 },
       },
+    ],
+  },
+  {
+    id: "energy.power.loadforecast",
+    path: ["Energy", "Power", "Load forecast"],
+    name: "Seven-day load forecast",
+    dataset: "ercot-load-forecast-weather-zone",
+    availability: "live",
+    cadence: { label: "hourly, 7 days ahead", seconds: 3_600 },
+    tokens: 0.5,
+    entities: {
+      count: 9,
+      label: "weather zones",
+      sample: ["COAST", "NORTH_C", "TOTAL"],
+    },
+    blurb:
+      "ERCOT's own load forecast by weather zone, refreshed every hour, seven " +
+      "days out. Served as the newest view of each hour; every revision is " +
+      "kept. Collected from ERCOT MIS (NP3-561), reconciled against the source " +
+      "file.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
       {
-        key: "forecast_mw",
+        key: "load_mw",
         label: "Forecast load",
         unit: "MW",
-        availability: "mock",
-        description: "ERCOT short-term load forecast for the same interval.",
+        availability: "live",
+        description: "Forecast hourly average load for the zone.",
+        // Preview-only — see the note on the real-time schema.
         mock: { base: 9_400, swing: 3_000, noise: 90, floor: 0 },
       },
     ],
@@ -175,32 +204,32 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.genmix",
     path: ["Energy", "Power", "Generation mix"],
     name: "Fuel mix",
-    availability: "mock",
+    dataset: "ercot-fuel-mix",
+    availability: "live",
     cadence: { label: "every 5 min", seconds: 300 },
     tokens: 0.75,
     entities: {
-      count: 6,
+      count: 8,
       label: "fuel types",
-      sample: ["WIND", "SOLAR", "GAS_CC"],
+      sample: ["NATURAL_GAS", "WIND", "SOLAR"],
     },
     blurb:
-      "Output by fuel type across the interconnect. What is actually setting the price.",
+      "Output by fuel type across the interconnect, every five minutes. What is " +
+      "actually setting the price. Collected from ERCOT's dashboard feed, which " +
+      "retains two days — the history exists because this collector keeps " +
+      "running.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
     variables: [
       {
-        key: "output_mw",
+        key: "gen_mw",
         label: "Output",
         unit: "MW",
-        availability: "mock",
-        description: "Instantaneous generation for the fuel type.",
+        availability: "live",
+        description:
+          "Generation for the fuel type over the interval. Storage runs " +
+          "negative while charging.",
+        // Preview-only — see the note on the real-time schema.
         mock: { base: 6_200, swing: 4_800, noise: 300, floor: 0 },
-      },
-      {
-        key: "share_pct",
-        label: "Share of load",
-        unit: "%",
-        availability: "mock",
-        description: "Fraction of served demand from this fuel type.",
-        mock: { base: 18, swing: 14, noise: 1.5, floor: 0 },
       },
     ],
   },
