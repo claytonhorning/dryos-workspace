@@ -1,0 +1,137 @@
+import { useEffect, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+/** A day of prices at one node, and where the arbitrage sits. */
+export default function PriceShape() {
+  const [node, setNode] = useState("HB_HOUSTON");
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    dryos
+      .query({ dataset: "ercot-realtime-lmp", node, start: "-24h", limit: 400 })
+      .then((r) => { if (!cancelled) { setRows(r.rows); setError(null); } })
+      .catch((e) => { if (!cancelled) setError(e.message); });
+    return () => { cancelled = true; };
+  }, [node]);
+
+  const data = [...rows]
+    .map((r) => ({ t: Date.parse(r.interval_start_utc), p: r.lmp_total }))
+    .sort((a, b) => a.t - b.t);
+
+  const lo = data.length ? data.reduce((m, x) => (x.p < m.p ? x : m)) : null;
+  const hi = data.length ? data.reduce((m, x) => (x.p > m.p ? x : m)) : null;
+
+  return (
+    <div>
+      <header style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <h1 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Price shape</h1>
+        <select
+          value={node}
+          onChange={(e) => setNode(e.target.value)}
+          style={{
+            background: "var(--surface-2)", color: "var(--ink)",
+            border: "1px solid var(--line-strong)", borderRadius: 6,
+            padding: "4px 8px", fontFamily: "var(--mono)", fontSize: 12,
+          }}
+        >
+          {[...dryos.HUBS, ...dryos.ZONES].map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </header>
+
+      {error && <p style={{ color: "var(--fail)", fontSize: 12 }}>{error}</p>}
+
+      <div style={{ marginTop: 14 }}>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+            <defs>
+              <linearGradient id="shape-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.24} />
+                <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="var(--line)" vertical={false} />
+            <XAxis
+              dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]}
+              tickFormatter={(t) => new Date(t).toISOString().slice(11, 16)}
+              tick={{ fill: "var(--faint)", fontSize: 11 }}
+              stroke="var(--line)" tickLine={false} minTickGap={44}
+            />
+            <YAxis
+              width={52} tickFormatter={(v) => "$" + v}
+              tick={{ fill: "var(--faint)", fontSize: 11 }}
+              stroke="var(--line)" tickLine={false} axisLine={false}
+            />
+            <ReferenceLine y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />
+            <Tooltip
+              content={<ChartTip />}
+              cursor={{ stroke: "var(--line-strong)", strokeWidth: 1 }}
+            />
+            <Area
+              type="monotone" dataKey="p"
+              stroke="var(--accent)" strokeWidth={2} fill="url(#shape-fill)"
+              isAnimationActive={false} dot={false}
+              activeDot={{ r: 4, fill: "var(--accent)", stroke: "var(--bg)", strokeWidth: 2 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+        <Stat label="Cheapest" value={lo} tone="var(--info)" />
+        <Stat label="Dearest" value={hi} tone="var(--warn)" />
+      </div>
+
+      {lo && hi && (
+        <p style={{ marginTop: 12, fontSize: 13, color: "var(--muted)" }}>
+          Round-trip spread of{" "}
+          <strong style={{ color: "var(--ink)" }}>${(hi.p - lo.p).toFixed(2)}/MWh</strong>{" "}
+          over the last 24 hours at {node}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ChartTip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  return (
+    <div style={{
+      background: "var(--surface-2)", border: "1px solid var(--line-strong)",
+      borderRadius: 6, padding: "6px 9px", fontSize: 12,
+    }}>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--faint)" }}>
+        {new Date(label).toISOString().slice(11, 16)}Z
+      </div>
+      <div style={{ color: "var(--ink)", fontWeight: 600 }}>
+        ${payload[0].value.toFixed(2)}/MWh
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, tone }) {
+  return (
+    <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "10px 12px" }}>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--faint)" }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 20, fontWeight: 600, color: tone, marginTop: 4 }}>
+        {value ? "$" + value.p.toFixed(2) : "—"}
+      </div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--faint)" }}>
+        {value ? new Date(value.t).toISOString().slice(11, 16) + "Z" : ""}
+      </div>
+    </div>
+  );
+}

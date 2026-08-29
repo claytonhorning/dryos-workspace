@@ -1,0 +1,89 @@
+import { NextResponse } from "next/server";
+import { record } from "@/lib/workspace/meter";
+import { isMockDataset, mockRows } from "@/lib/workspace/mockData";
+import { normaliseRow, resolveTime } from "@/lib/workspace/time";
+
+/**
+ * The only way an app reaches data.
+ *
+ * Apps run with no network of their own and post their requests to the host,
+ * which arrives here. Everything a credential would be needed for happens on
+ * this side of the boundary — which is also the single place that would meter,
+ * cache or refuse a call once this is more than a proof of concept.
+ *
+ * It is also where every query is metered — see `meter.ts`. Live schemas cost
+ * their token price per call, mock ones cost nothing, and that difference is
+ * the entire pricing model.
+ *
+ * It is also where a mock schema is served. Routing them here rather than in the
+ * app means an app cannot tell the difference, which is the point: you find out
+ * whether the thing you built works before the collector behind it exists. What
+ * marks it as mock is the catalogue, and that badge travels with every chip.
+ */
+const API = process.env.DRYOS_API_URL ?? "http://127.0.0.1:8000";
+const MAX_LIMIT = 2000;
+
+export async function POST(req: Request) {
+  let body: {
+    dataset?: string;
+    node?: string | string[];
+    start?: string;
+    end?: string;
+    limit?: number;
+    /** Which screen asked, so a screen can be told what it costs. */
+    appId?: string;
+  };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Malformed request." }, { status: 400 });
+  }
+
+  const dataset = body.dataset ?? "ercot-realtime-lmp";
+  const limit = Math.min(body.limit ?? 200, MAX_LIMIT);
+  const start = resolveTime(body.start);
+  const end = resolveTime(body.end);
+
+  // An array of nodes fans out into one request each, so `limit: 1` means
+  // "the newest interval for every node" rather than "one row in total".
+  const nodes = Array.isArray(body.node) ? body.node : [body.node];
+
+  if (isMockDataset(dataset)) {
+    const rows = mockRows({ dataset, node: body.node, start, end, limit });
+    await record(dataset, rows.length, body.appId);
+    return NextResponse.json({ rows, count: rows.length, mock: true });
+  }
+
+  try {
+    const results = await Promise.all(
+      nodes.map(async (node) => {
+        const url = new URL(`${API}/v1/datasets/${dataset}/query`);
+        if (node) url.searchParams.set("node", node);
+        if (start) url.searchParams.set("start", start);
+        if (end) url.searchParams.set("end", end);
+        url.searchParams.set("limit", String(limit));
+
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) {
+          const detail = await res.text();
+          throw new Error(
+            res.status === 503
+              ? `${dataset} has not been collected yet.`
+              : `Dryos API ${res.status}: ${detail.slice(0, 160)}`,
+          );
+        }
+        const json = (await res.json()) as { rows: Record<string, unknown>[] };
+        return json.rows.map(normaliseRow);
+      }),
+    );
+
+    const rows = results.flat();
+    await record(dataset, rows.length, body.appId);
+    return NextResponse.json({ rows, count: rows.length });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Query failed." },
+      { status: 502 },
+    );
+  }
+}

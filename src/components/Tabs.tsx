@@ -18,14 +18,23 @@ export interface Tab {
  * unmounting it on every tab change would restart the poll and drop the
  * countdown's state each time you looked at the schema.
  */
-export function Tabs({ tabs, initial }: { tabs: Tab[]; initial?: string }) {
+export function Tabs({
+  tabs,
+  initial,
+  action,
+}: {
+  tabs: Tab[];
+  initial?: string;
+  /** Rendered at the right end of the tab row — the action for the active rail. */
+  action?: React.ReactNode;
+}) {
   const [active, setActive] = useState(initial ?? tabs[0]?.id);
 
   return (
     <div>
       <div
         role="tablist"
-        className="dr-scroll flex gap-1 overflow-x-auto border-b border-line"
+        className="dr-scroll flex items-center gap-1 overflow-x-auto border-b border-line"
       >
         {tabs.map((t) => {
           const on = t.id === active;
@@ -56,6 +65,7 @@ export function Tabs({ tabs, initial }: { tabs: Tab[]; initial?: string }) {
             </button>
           );
         })}
+        {action && <div className="ml-auto pb-1 pl-3">{action}</div>}
       </div>
 
       {tabs.map((t) => (

@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
   // then dies with "__webpack_modules__[moduleId] is not a function" until it is
   // restarted. `npm run build:check` sets this to keep the two apart.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+
+  // esbuild ships its TypeScript declarations next to its entry point and
+  // resolves its platform binary at runtime, so webpack tries to parse `.d.ts`
+  // as JavaScript and fails. Leaving it external means Node `require`s it
+  // directly, which is what it expects.
+  serverExternalPackages: ["esbuild"],
 };
 
 export default nextConfig;

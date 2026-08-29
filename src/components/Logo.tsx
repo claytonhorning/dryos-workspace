@@ -1,44 +1,29 @@
-export function Logo({ size = 26 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 28 28"
-      fill="none"
-      aria-hidden="true"
-      className="shrink-0"
-    >
-      <rect
-        x="0.75"
-        y="0.75"
-        width="26.5"
-        height="26.5"
-        rx="7"
-        stroke="var(--color-line-strong)"
-        strokeWidth="1.5"
-      />
-      {/* A load curve stepping up through the mark — the shape every energy chart makes. */}
-      <path
-        d="M5 19.5 L9.5 19.5 L9.5 14 L14 14 L14 8.5 L18.5 8.5 L18.5 16 L23 16"
-        stroke="var(--color-accent)"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx="23"
-        cy="16"
-        r="2"
-        fill="var(--color-accent)"
-      />
-    </svg>
-  );
-}
+import { cx } from "./ui";
 
-export function Wordmark() {
+/**
+ * The wordmark: the word, set heavy and tight.
+ *
+ * Everything about it lives in `.dryos-mark` (globals.css) and is sized in `em`,
+ * so one class serves the chrome and any larger surface without a second
+ * definition drifting away from it.
+ */
+export const BRAND = "#C4703A";
+
+export function Wordmark({
+  size = 17,
+  className,
+}: {
+  size?: number;
+  className?: string;
+}) {
   return (
-    <span className="text-[15px] font-semibold tracking-[-0.01em] text-ink">
+    <span className={cx("dryos-mark", className)} style={{ fontSize: size }}>
       dryos
     </span>
   );
+}
+
+/** Kept for callers that want the mark on its own terms. */
+export function Logo({ size = 26 }: { size?: number }) {
+  return <Wordmark size={size} />;
 }

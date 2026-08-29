@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><metadata><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/"><rdf:Description><dc:creator>RealFaviconGenerator</dc:creator><dc:source>https://realfavicongenerator.net</dc:source></rdf:Description></rdf:RDF></metadata><defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#24392A"></stop>
+      <stop offset="100%" stop-color="#111C15"></stop>
+    </linearGradient>
+    <clipPath id="ringClip">
+      <path d="M290,364 A68,68 0 0 1 290,228 Z"></path>
+    </clipPath>
+  </defs><rect width="512" height="512" rx="118" fill="url(#bgGrad)"></rect><g clip-path="url(#ringClip)">
+    <circle cx="290" cy="296" r="68" fill="#C97A3D"></circle>
+    <circle cx="290" cy="296" r="52" fill="#6F8768"></circle>
+    <circle cx="290" cy="296" r="36" fill="#D9A441"></circle>
+    <circle cx="290" cy="296" r="20" fill="#7A3B1E"></circle>
+  </g><path fill-rule="evenodd" fill="#F0E6D2" d="M290,88 L350,88 L350,424 L290,424 A128,128 0 0 1 290,168 Z
+       M290,364 A68,68 0 0 1 290,228 Z"></path></svg>

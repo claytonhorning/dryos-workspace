@@ -42,3 +42,4 @@ next-env.d.ts
 
 # verification builds, kept out of the dev server's .next
 .next-check
+.workspace/

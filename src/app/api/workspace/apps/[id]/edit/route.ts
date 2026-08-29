@@ -1,0 +1,155 @@
+import { NextResponse } from "next/server";
+import { editApp } from "@/lib/workspace/agent";
+import { composeApp, describeComponent } from "@/lib/workspace/compose";
+import { compile } from "@/lib/workspace/runtime";
+import { ndjsonStream } from "@/lib/workspace/ndjson";
+import { addRevision, getApp } from "@/lib/workspace/store";
+import {
+  DEFAULT_LAYOUT,
+  componentDef,
+  type ComponentKind,
+} from "@/lib/workspace/components";
+import type { DataRef } from "@/lib/workspace/catalog";
+
+export const maxDuration = 300;
+export const dynamic = "force-dynamic";
+
+/**
+ * A change, by whichever route is cheapest.
+ *
+ * Two paths, and which one runs is decided here rather than by the model:
+ *
+ *   · A typed component with no message, on an app that is still composed —
+ *     regenerate the file from the manifest, compile it, save it. No model call,
+ *     no tokens, no waiting, and the result is identical every time.
+ *   · Anything else — the agent, seeded with the generated component when there
+ *     is one. Modifying working code is a far better prompt than a blank file.
+ *
+ * The first path is the point. Most of what people ask for after picking data is
+ * "chart this", and paying a model to retype the same forty lines is a cost with
+ * no upside.
+ */
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const app = await getApp(id);
+  if (!app) return NextResponse.json({ error: "No such screen." }, { status: 404 });
+
+  const { intent, refs, component, options, custom, layout, at } = (await req.json()) as {
+    intent?: string;
+    refs?: DataRef[];
+    component?: ComponentKind;
+    options?: Record<string, string>;
+    /** A saved component's finished source, used verbatim. */
+    custom?: { name: string; code: string };
+    layout?: { w: number; h: number };
+    /** Where in the stack it was dropped. Appended when absent. */
+    at?: number;
+  };
+
+  const said = intent?.trim() ?? "";
+  const def = component ? componentDef(component) : undefined;
+
+  if (!said && !def) {
+    return NextResponse.json({ error: "Say what you want changed." }, { status: 400 });
+  }
+
+  const chosen = refs ?? [];
+  // A saved component was already validated when it was built, and its source is
+  // fixed — re-running the shape's rules against it would refuse a component
+  // that demonstrably renders.
+  if (def && !custom) {
+    const verdict = def.accepts(chosen);
+    if (!verdict.ok) {
+      return NextResponse.json({ error: verdict.why ?? "That will not render." }, { status: 400 });
+    }
+  }
+
+  /* ── Deterministic: no message, and the app still knows its own shape ──── */
+  if (def && !said && app.manifest) {
+    return ndjsonStream(async (send) => {
+      send({ type: "phase", phase: "composing" });
+
+      // Dropped between two sections, so it is spliced in rather than pushed.
+      const manifest = [...app.manifest!];
+      const where = Math.max(0, Math.min(at ?? manifest.length, manifest.length));
+      manifest.splice(where, 0, {
+        kind: def.kind,
+        refs: chosen,
+        options,
+        custom,
+        layout: layout ?? DEFAULT_LAYOUT[def.kind],
+      });
+      const source = composeApp(manifest);
+
+      // Gated exactly like a model's output. A generator can be wrong too, and
+      // the rule is the same either way: nothing is saved unless it builds.
+      send({ type: "phase", phase: "compiling" });
+      const built = await compile(source);
+      if (!built.js) {
+        send({ type: "failed", message: `The component did not compile: ${built.error}` });
+        return;
+      }
+
+      const updated = await addRevision(id, {
+        intent: custom
+          ? `Add the “${custom.name}” component.`
+          : describeComponent(def.kind, chosen),
+        refs: chosen.length ? chosen : undefined,
+        manifest,
+        source,
+        author: "you",
+        note: "Built from a typed component — no model was used.",
+      });
+      send({ type: "done", app: updated, composed: true });
+    });
+  }
+
+  /* ── The agent, seeded when a component was picked ─────────────────────── */
+  return ndjsonStream(async (send) => {
+    const seed = def
+      ? composeApp([
+          {
+            kind: def.kind,
+            refs: chosen,
+            options,
+            custom,
+            layout: layout ?? DEFAULT_LAYOUT[def.kind],
+          },
+        ])
+      : undefined;
+
+    // The app is not composed, so there is no index to splice at — the position
+    // becomes a sentence instead, which is the one form the agent can act on.
+    const place =
+      def && at !== undefined ? (at === 0 ? " Put it at the top." : " Put it below what is already there.") : "";
+
+    const request = def
+      ? `${custom ? `Add the “${custom.name}” component.` : describeComponent(def.kind, chosen)}${place}${said ? `\n\nThen: ${said}` : ""}`
+      : said;
+
+    const result = await editApp({
+      source: app.source,
+      intent: request,
+      refs: chosen,
+      seed,
+      onEvent: send,
+    });
+
+    // Nothing is written unless it built. The app keeps running what it had.
+    if (!result.source) {
+      send({ type: "failed", message: result.error ?? "The change failed." });
+      return;
+    }
+
+    const updated = await addRevision(id, {
+      intent: request,
+      refs: chosen.length ? chosen : undefined,
+      // Deliberately absent: the model has rewritten the file and no manifest
+      // describes it any more.
+      source: result.source,
+      author: "you",
+      note: result.note,
+    });
+    send({ type: "done", app: updated });
+  });
+}

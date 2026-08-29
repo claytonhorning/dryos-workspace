@@ -23,9 +23,9 @@ export default function DocsPage() {
       <div className="mt-6 rounded-lg border border-dashed border-line-strong bg-surface/60 px-5 py-4">
         <p className="text-[13.5px] leading-relaxed text-muted">
           <span className="text-ink">Pre-launch.</span> The API below is implemented but
-          not deployed, and neither collector is serving data yet. There are no API keys
-          to issue because there is no metering — and unmetered delivery is the one thing
-          that will not ship.
+          not deployed, and there are no API keys to issue yet. The one place data is
+          served today is the workspace, which meters every call it makes — unmetered
+          delivery is the one thing that will not ship.
         </p>
       </div>
 

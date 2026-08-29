@@ -1,0 +1,88 @@
+import { useEffect, useState } from "react";
+
+/** Live prices at every ERCOT trading hub, refreshed on an interval. */
+const REFRESH_MS = 60000;
+
+export default function HubMonitor() {
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+
+  async function load() {
+    try {
+      // One row per node: `limit: 1` returns the newest interval for each.
+      const res = await dryos.query({
+        dataset: "ercot-realtime-lmp",
+        node: dryos.HUBS,
+        limit: 1,
+      });
+      setRows(res.rows);
+      setUpdatedAt(new Date());
+      setError(null);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, REFRESH_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  const sorted = [...rows].sort((a, b) => b.lmp_total - a.lmp_total);
+  const avg = rows.length
+    ? rows.reduce((s, r) => s + r.lmp_total, 0) / rows.length
+    : 0;
+
+  return (
+    <div>
+      <header style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+        <h1 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>ERCOT hub prices</h1>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--faint)" }}>
+          {updatedAt ? updatedAt.toLocaleTimeString() : "loading…"}
+        </span>
+      </header>
+
+      {error && (
+        <p style={{ color: "var(--fail)", fontFamily: "var(--mono)", fontSize: 12 }}>{error}</p>
+      )}
+
+      <table style={{ marginTop: 14 }}>
+        <thead>
+          <tr>
+            <th>Hub</th>
+            <th style={{ textAlign: "right" }}>$/MWh</th>
+            <th style={{ textAlign: "right" }}>vs avg</th>
+            <th>Interval</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => {
+            const delta = r.lmp_total - avg;
+            return (
+              <tr key={r.node}>
+                <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{r.node}</td>
+                <td style={{ textAlign: "right", fontWeight: 600 }}>{r.lmp_total.toFixed(2)}</td>
+                <td
+                  style={{
+                    textAlign: "right",
+                    fontFamily: "var(--mono)",
+                    fontSize: 12,
+                    color: delta >= 0 ? "var(--accent)" : "var(--info)",
+                  }}
+                >
+                  {delta >= 0 ? "+" : ""}
+                  {delta.toFixed(2)}
+                </td>
+                <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--faint)" }}>
+                  {new Date(r.interval_start_utc).toISOString().slice(11, 16)}Z
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}

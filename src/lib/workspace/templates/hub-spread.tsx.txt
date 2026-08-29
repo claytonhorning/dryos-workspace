@@ -1,0 +1,153 @@
+import { useEffect, useState } from "react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+/** The spread between two hubs over time — the shape congestion takes. */
+const ALERT_ABOVE = 20;
+
+export default function HubSpread() {
+  const [a, setA] = useState("HB_HOUSTON");
+  const [b, setB] = useState("HB_WEST");
+  const [series, setSeries] = useState([]);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [ra, rb] = await Promise.all([
+          dryos.query({ dataset: "ercot-realtime-lmp", node: a, start: "-12h", limit: 500 }),
+          dryos.query({ dataset: "ercot-realtime-lmp", node: b, start: "-12h", limit: 500 }),
+        ]);
+        if (cancelled) return;
+        const byInterval = new Map();
+        for (const r of ra.rows) {
+          byInterval.set(r.interval_start_utc, { t: Date.parse(r.interval_start_utc), a: r.lmp_total });
+        }
+        for (const r of rb.rows) {
+          const e = byInterval.get(r.interval_start_utc);
+          if (e) e.b = r.lmp_total;
+        }
+        const points = [...byInterval.values()]
+          .filter((p) => typeof p.b === "number")
+          .map((p) => ({ ...p, spread: p.a - p.b }))
+          .sort((x, y) => x.t - y.t);
+        setSeries(points);
+        setError(null);
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      }
+    }
+    load();
+    const id = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [a, b]);
+
+  const latest = series.length ? series[series.length - 1].spread : null;
+  const breaching = latest !== null && Math.abs(latest) > ALERT_ABOVE;
+
+  return (
+    <div>
+      <header style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <h1 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Hub spread</h1>
+        <Picker value={a} onChange={setA} />
+        <span style={{ color: "var(--faint)" }}>−</span>
+        <Picker value={b} onChange={setB} />
+      </header>
+
+      {error && <p style={{ color: "var(--fail)", fontSize: 12 }}>{error}</p>}
+
+      <div style={{ marginTop: 14, display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 30, fontWeight: 600, color: breaching ? "var(--warn)" : "var(--ink)" }}>
+          {latest === null ? "—" : (latest >= 0 ? "+" : "") + latest.toFixed(2)}
+        </span>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--faint)" }}>
+          $/MWh · alert beyond ±${ALERT_ABOVE}
+        </span>
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={series} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+            <CartesianGrid stroke="var(--line)" vertical={false} />
+            <XAxis
+              dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]}
+              tickFormatter={(t) => new Date(t).toISOString().slice(11, 16)}
+              tick={{ fill: "var(--faint)", fontSize: 11 }}
+              stroke="var(--line)" tickLine={false} minTickGap={44}
+            />
+            <YAxis
+              width={52} tickFormatter={(v) => "$" + v}
+              tick={{ fill: "var(--faint)", fontSize: 11 }}
+              stroke="var(--line)" tickLine={false} axisLine={false}
+            />
+            <ReferenceLine y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />
+            <ReferenceLine y={ALERT_ABOVE} stroke="var(--warn-line, var(--warn))" strokeDasharray="2 4" />
+            <ReferenceLine y={-ALERT_ABOVE} stroke="var(--warn-line, var(--warn))" strokeDasharray="2 4" />
+            <Tooltip
+              content={<SpreadTip a={a} b={b} />}
+              cursor={{ stroke: "var(--line-strong)", strokeWidth: 1 }}
+            />
+            <Line
+              type="monotone" dataKey="spread"
+              stroke={breaching ? "var(--warn)" : "var(--accent)"} strokeWidth={1.75}
+              isAnimationActive={false} dot={false}
+              activeDot={{ r: 4, fill: "var(--accent)", stroke: "var(--bg)", strokeWidth: 2 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <p style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--faint)" }}>
+        last 12 hours · {series.length} intervals
+      </p>
+    </div>
+  );
+}
+
+function SpreadTip({ active, payload, label, a, b }) {
+  if (!active || !payload || !payload.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div style={{
+      background: "var(--surface-2)", border: "1px solid var(--line-strong)",
+      borderRadius: 6, padding: "7px 10px", fontSize: 12, minWidth: 150,
+    }}>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--faint)" }}>
+        {new Date(label).toISOString().slice(11, 16)}Z
+      </div>
+      <div style={{ color: "var(--ink)", fontWeight: 600, marginTop: 2 }}>
+        {(p.spread >= 0 ? "+" : "") + p.spread.toFixed(2)} $/MWh
+      </div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: "var(--muted)", marginTop: 4 }}>
+        <div>{a} ${p.a.toFixed(2)}</div>
+        <div>{b} ${p.b.toFixed(2)}</div>
+      </div>
+    </div>
+  );
+}
+
+function Picker({ value, onChange }) {
+  const all = [...dryos.HUBS, ...dryos.ZONES];
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        background: "var(--surface-2)", color: "var(--ink)",
+        border: "1px solid var(--line-strong)", borderRadius: 6,
+        padding: "4px 8px", fontFamily: "var(--mono)", fontSize: 12,
+      }}
+    >
+      {all.map((n) => <option key={n} value={n}>{n}</option>)}
+    </select>
+  );
+}
