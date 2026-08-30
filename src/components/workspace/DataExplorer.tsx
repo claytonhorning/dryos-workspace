@@ -11,7 +11,6 @@ import {
   categoryOf,
   catalogRefs,
   domainOf,
-  domainSummary,
   domains,
   entityCountLabel,
   entityRef,
@@ -54,7 +53,6 @@ export function DataExplorer({
 
   const refs = useMemo(() => catalogRefs(), []);
   const cats = useMemo(() => [ALL, ...categories(domain)], [domain]);
-  const summary = useMemo(() => domainSummary(domain), [domain]);
 
   const chosen = useMemo(
     () => new Set(selected.map((r) => `${r.snippet}::${r.label}`)),
@@ -110,9 +108,6 @@ export function DataExplorer({
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
         <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
           Data
-        </span>
-        <span className="font-mono text-[9.5px] text-faint">
-          {summary.live} live · {summary.total - summary.live} mock
         </span>
 
         <select
@@ -305,10 +300,6 @@ function SetView({
   const [busy, setBusy] = useState(false);
   const [opened, setOpened] = useState(false);
 
-  const mine = selected.filter(
-    (r) => r.kind === "entity" && r.schemaId === schema.id,
-  );
-
   useEffect(() => {
     const t = setTimeout(async () => {
       setBusy(true);
@@ -343,10 +334,6 @@ function SetView({
     }, 200);
     return () => clearTimeout(t);
   }, [schema.dataset, q, facet, opened]);
-
-  const activeCount = facet && facets ? facets[facet] : schema.entities.count;
-  const addableAll =
-    facet != null && activeCount != null && activeCount <= 12 && !q.trim();
 
   return (
     <>
@@ -412,21 +399,6 @@ function SetView({
       </div>
 
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
-        {mine.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1">
-            {mine.map((r) => (
-              <button
-                key={r.label}
-                onClick={() => onToggle(r)}
-                title="Remove"
-                className="rounded-full border border-accent-line bg-accent-dim px-2 py-[2px] font-mono text-[10.5px] text-accent"
-              >
-                {r.label} ✕
-              </button>
-            ))}
-          </div>
-        )}
-
         {schema.entityKey && streamRef && (
           <button
             onClick={() => onToggle(streamRef)}
@@ -440,20 +412,6 @@ function SetView({
             {chosen.has(`${streamRef.snippet}::${streamRef.label}`) ? "✓ " : ""}
             All {schema.entities.count} as one selection — stays current as the
             set changes
-          </button>
-        )}
-
-        {addableAll && (
-          <button
-            onClick={() => {
-              for (const row of rows) {
-                const ref = entityRef(schema, row.node, varKey);
-                if (!chosen.has(`${ref.snippet}::${ref.label}`)) onToggle(ref);
-              }
-            }}
-            className="mb-1.5 w-full rounded-md border border-dashed border-accent-line px-2.5 py-1.5 text-left text-[11.5px] text-accent transition-colors hover:bg-accent-dim"
-          >
-            Add all {activeCount} — a set this size is a chart
           </button>
         )}
 

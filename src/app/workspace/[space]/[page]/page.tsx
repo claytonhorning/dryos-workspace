@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DataExplorer } from "@/components/workspace/DataExplorer";
 import { AskData } from "@/components/workspace/AskData";
 import { AvailabilityBadge, AttachedChip } from "@/components/workspace/DataChip";
@@ -47,7 +47,11 @@ const PANELS: { id: PanelMode; label: string }[] = [
  * and the screen takes the whole width.
  */
 const COLUMNS = (open: boolean) =>
-  open ? "lg:grid-cols-[1fr_420px]" : "lg:grid-cols-1";
+  open ? "lg:grid-cols-[1fr_var(--panel-w,420px)]" : "lg:grid-cols-1";
+
+/** How wide the panel column may be dragged, px. */
+const PANEL_MIN = 320;
+const PANEL_MAX = 840;
 
 /** One screen, running, with the tools that shaped it beside it. */
 export default function AppPage() {
@@ -86,6 +90,39 @@ export default function AppPage() {
    *  silently, and silence about your own data is not reassuring. */
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
+  /**
+   * The panel's width, draggable at its left edge. Judging a preview in a
+   * fixed 420px was the whole reason screens felt cramped; someone comparing
+   * eight series needs the room, someone arranging tiles wants it thin. Saved
+   * per machine — a preference, not a revision.
+   */
+  const [panelW, setPanelW] = useState(420);
+  useEffect(() => {
+    const saved = Number(localStorage.getItem("dryos:panelW"));
+    if (saved >= PANEL_MIN && saved <= PANEL_MAX) setPanelW(saved);
+  }, []);
+  const resizePanel = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const from = panelWRef.current;
+    const target = e.currentTarget as HTMLElement;
+    target.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const w = Math.min(PANEL_MAX, Math.max(PANEL_MIN, from + (startX - ev.clientX)));
+      setPanelW(w);
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      localStorage.setItem("dryos:panelW", String(panelWRef.current));
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+  }, []);
+  const panelWRef = useRef(420);
+  useEffect(() => {
+    panelWRef.current = panelW;
+  }, [panelW]);
   /** Which tile the editor should put its result back into, from a ⚙ click. */
   const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -363,7 +400,10 @@ export default function AppPage() {
           : "h-[calc(100vh-var(--nav-h))]",
       )}
     >
-      <div className={cx("grid min-h-0 flex-1 gap-4", COLUMNS(asideOpen))}>
+      <div
+        className={cx("grid min-h-0 flex-1 gap-4", COLUMNS(asideOpen))}
+        style={{ ["--panel-w" as string]: `${panelW}px` } as React.CSSProperties}
+      >
         <div className="relative flex min-h-0 flex-col gap-2">
           <Runner
             appId={app.id}
@@ -399,7 +439,19 @@ export default function AppPage() {
           open.
         */}
         {asideOpen && (
-          <aside className="flex min-h-0 flex-col gap-3">
+          <aside className="relative flex min-h-0 flex-col gap-3">
+            {/*
+              The grab edge lives in the gap between the canvas and the panel.
+              Pointer capture keeps the drag alive over the iframe, which would
+              otherwise swallow it mid-gesture.
+            */}
+            <div
+              onPointerDown={resizePanel}
+              title="Drag to resize the panel"
+              className="group absolute top-0 -left-4 hidden h-full w-4 cursor-col-resize items-center justify-center lg:flex"
+            >
+              <div className="h-10 w-[3px] rounded-full bg-line transition-colors group-hover:bg-accent" />
+            </div>
             {/*
               Everything that acts on the page, above the panel rather than
               above the canvas.

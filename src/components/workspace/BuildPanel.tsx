@@ -10,7 +10,7 @@ import {
   type ComponentSpec,
   withDefaults,
 } from "@/lib/workspace/components";
-import { refreshCost, tokenLabel, type DataRef } from "@/lib/workspace/catalog";
+import { type DataRef } from "@/lib/workspace/catalog";
 
 /**
  * Two ways to make something, split by whether a model is needed.
@@ -84,6 +84,18 @@ export function BuildPanel({
   const [ask, setAsk] = useState("");
   /** Which card is in flight, so only that one shakes. */
   const [carrying, setCarrying] = useState<string | null>(null);
+  /**
+   * The shape being previewed, right here under the shelf. Clicking a card
+   * runs the real thing — the preview route composes a one-tile app on live
+   * data — with its settings beside it, so judging a chart never means
+   * leaving the panel, and switching cards switches the preview.
+   */
+  const [previewKind, setPreviewKind] = useState<ComponentKind | null>(null);
+  const [previewOpts, setPreviewOpts] = useState<Record<string, string>>({});
+
+  const previewDef = previewKind
+    ? COMPONENTS.find((c) => c.kind === previewKind)
+    : undefined;
 
   useEffect(() => {
     fetch("/api/workspace/components")
@@ -91,8 +103,6 @@ export function BuildPanel({
       .then((d) => setSaved(d.components ?? []))
       .catch(() => {});
   }, [reloadKey]);
-
-  const cost = refreshCost(refs);
 
   /*
     A shape the selection has moved past leaves the shelf rather than greying on
@@ -124,17 +134,6 @@ export function BuildPanel({
         <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
           Build
         </span>
-        <span className="ml-auto font-mono text-[9.5px] text-faint">
-          {refs.length === 0 ? (
-            "pick data first"
-          ) : (
-            <>
-              {refs.length} selected ·{" "}
-              <span className="text-muted">{tokenLabel(cost.perRefresh)}</span>
-              /refresh
-            </>
-          )}
-        </span>
       </div>
 
       {/* ── Components, on a grid that wraps ─────────────────────────── */}
@@ -164,7 +163,14 @@ export function BuildPanel({
                 body={verdict.ok ? c.blurb : verdict.why!}
                 enabled={verdict.ok}
                 carrying={carrying === c.kind}
-                onOpen={() => onOpen({ def: c, refs })}
+                onOpen={() => {
+                  if (previewKind === c.kind) {
+                    setPreviewKind(null);
+                    return;
+                  }
+                  setPreviewKind(c.kind);
+                  setPreviewOpts(withDefaults(c));
+                }}
                 onDragStart={() => {
                   setCarrying(c.kind);
                   onDragStateChange({
@@ -226,6 +232,75 @@ export function BuildPanel({
           })}
         </div>
       </div>
+
+      {previewDef && (
+        <div className="shrink-0 border-t border-line px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+              {previewDef.name} · preview
+            </span>
+            <span className="font-mono text-[9.5px] text-faint">
+              drag the card to place it
+            </span>
+            <button
+              onClick={() => onOpen({ def: previewDef, refs, options: previewOpts })}
+              className="ml-auto text-[11px] text-accent transition-colors hover:brightness-110"
+            >
+              Refine with AI ›
+            </button>
+            <button
+              onClick={() => setPreviewKind(null)}
+              aria-label="Close preview"
+              className="rounded border border-line px-1.5 py-[2px] text-[10px] text-faint hover:text-ink"
+            >
+              ✕
+            </button>
+          </div>
+
+          {previewDef.options.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {previewDef.options.map((o) => (
+                <label key={o.key} className="flex items-center gap-1 text-[10.5px] text-faint">
+                  {o.label}
+                  <select
+                    value={previewOpts[o.key] ?? o.fallback}
+                    onChange={(e) =>
+                      setPreviewOpts((prev) => ({ ...prev, [o.key]: e.target.value }))
+                    }
+                    className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-line-strong"
+                  >
+                    {o.choices.map((ch) => (
+                      <option key={ch.value} value={ch.value}>
+                        {ch.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
+
+          {previewDef.accepts(refs).ok ? (
+            <div className="mt-2 h-56 overflow-hidden rounded-md border border-line bg-code">
+              <iframe
+                // Keyed by the spec so a settings change reloads the real
+                // thing rather than mutating a stale frame.
+                key={JSON.stringify({ k: previewKind, o: previewOpts, r: refs.length })}
+                src={`/api/workspace/preview?spec=${encodeURIComponent(
+                  JSON.stringify({ kind: previewKind, refs, options: previewOpts }),
+                )}`}
+                sandbox="allow-scripts"
+                className="h-full w-full border-0"
+                title="Component preview"
+              />
+            </div>
+          ) : (
+            <p className="mt-2 text-[11.5px] text-muted">
+              {previewDef.accepts(refs).why}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── Something no shape covers ────────────────────────────────── */}
       <div className="border-t border-line px-3 py-2.5">
