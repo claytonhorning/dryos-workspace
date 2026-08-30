@@ -3,7 +3,8 @@
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { DataExplorer } from "@/components/workspace/DataExplorer";
-import { AvailabilityBadge } from "@/components/workspace/DataChip";
+import { AskData } from "@/components/workspace/AskData";
+import { AvailabilityBadge, AttachedChip } from "@/components/workspace/DataChip";
 import { Runner } from "@/components/workspace/Runner";
 import { Button, cx } from "@/components/ui";
 import { ScreenSkeleton } from "@/components/Skeleton";
@@ -74,6 +75,13 @@ export default function AppPage() {
     [router, space, id],
   );
   const [panel, setPanel] = useState<PanelMode>("build");
+  /**
+   * Data and Build are one panel taken in two steps: choose what, then choose
+   * how. Each step gets the whole column — split in half, neither had room —
+   * and each carries its own model at the bottom: the data guide on the first
+   * screen, the custom-component box on the second.
+   */
+  const [stage, setStage] = useState<"data" | "build">("data");
   /** When the last write landed. Arranging a screen saves constantly and
    *  silently, and silence about your own data is not reassuring. */
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -105,6 +113,8 @@ export default function AppPage() {
    * real box rather than sent, so it is a draft you can edit or replace — and it
    * only ever overwrites itself, never something the user typed.
    */
+  const attachedKeys = new Set(attached.map((r) => `${r.snippet}::${r.label}`));
+
   const toggle = useCallback(
     (ref: DataRef) => {
       const same = (r: DataRef) =>
@@ -551,9 +561,7 @@ export default function AppPage() {
 
                 <div
                   hidden={panel !== "build"}
-                  // Equal halves: one is read, the other is used, and neither
-                  // should be the one that has to scroll.
-                  className="grid min-h-0 flex-1 auto-rows-min grid-rows-[1fr_1fr] gap-3"
+                  className="flex min-h-0 flex-1 flex-col gap-2"
                 >
                   {/*
                     Only failures report here. Placing a component is
@@ -563,22 +571,83 @@ export default function AppPage() {
                     nothing anyone was waiting to read.
                   */}
                   {error && (
-                    <div
-                      className="row-span-full flex shrink-0 items-center gap-2 rounded-lg border border-warn-line bg-warn-dim px-3 py-2 text-[12.5px] text-warn"
-                      style={{ gridRow: "auto" }}
-                    >
+                    <div className="flex shrink-0 items-center gap-2 rounded-lg border border-warn-line bg-warn-dim px-3 py-2 text-[12.5px] text-warn">
                       <span className="min-w-0 truncate">{error}</span>
                     </div>
                   )}
 
-                  <DataExplorer selected={attached} onToggle={toggle} />
-
-                  <BuildPanel
-                    refs={attached}
-                    onDragStateChange={setDragging}
-                    onOpen={setEditing}
-                    reloadKey={savedTick}
-                  />
+                  {stage === "data" ? (
+                    <>
+                      <div className="min-h-0 flex-1">
+                        <DataExplorer selected={attached} onToggle={toggle} />
+                      </div>
+                      {/*
+                        The selection, in hand: the same chips the picks made,
+                        removable here, clearable at once — and the door to the
+                        second step, which only opens once there is something
+                        to build with.
+                      */}
+                      <div className="flex shrink-0 flex-col gap-2 rounded-lg border border-line bg-surface p-2">
+                        {attached.length > 0 && (
+                          <div className="dr-scroll flex gap-1.5 overflow-x-auto pb-0.5">
+                            {attached.map((r) => (
+                              <AttachedChip
+                                key={`${r.snippet}::${r.label}`}
+                                refr={r}
+                                onRemove={() => toggle(r)}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2.5">
+                          <span className="font-mono text-[10px] text-faint">
+                            {attached.length} selected
+                          </span>
+                          {attached.length > 0 && (
+                            <button
+                              onClick={() => setAttached([])}
+                              className="text-[11px] text-muted transition-colors hover:text-fail"
+                            >
+                              Clear all
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setStage("build")}
+                            disabled={attached.length === 0}
+                            className={cx(
+                              "ml-auto rounded-md border px-3 py-1.5 text-[12px] transition-colors",
+                              attached.length === 0
+                                ? "border-line text-faint"
+                                : "border-accent-line bg-accent-dim text-accent hover:brightness-110",
+                            )}
+                          >
+                            Add a component ›
+                          </button>
+                        </div>
+                        <AskData chosen={attachedKeys} onPick={toggle} />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setStage("data")}
+                        className="flex shrink-0 items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-left text-[12px] text-muted transition-colors hover:border-line-strong hover:text-ink"
+                      >
+                        ‹ Data
+                        <span className="font-mono text-[10px] text-faint">
+                          {attached.length} selected
+                        </span>
+                      </button>
+                      <div className="min-h-0 flex-1">
+                        <BuildPanel
+                          refs={attached}
+                          onDragStateChange={setDragging}
+                          onOpen={setEditing}
+                          reloadKey={savedTick}
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             )}

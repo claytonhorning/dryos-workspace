@@ -136,6 +136,32 @@ function node(ref: DataRef): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Forward-fill code for the slower series in a mixed-cadence selection.
+ *
+ * An hourly DAM price beside a five-minute LMP left the tooltip one-sided at
+ * every timestamp the DAM did not publish — but the hourly price *is* the
+ * price at 12:05, so holding it forward is the honest join, and it draws the
+ * settled price as the step function it actually is. Same-cadence selections
+ * emit nothing.
+ */
+function slowFill(refs: DataRef[], s: { key: string }[]): string {
+  const cadences = refs.map((r) => r.cadenceSeconds);
+  const finest = Math.min(...cadences);
+  const slow = s.filter((_, i) => cadences[i] > finest).map((x) => x.key);
+  if (!slow.length) return "";
+  return `
+    // A slower series holds its value between publishes — the hourly price is
+    // still the price at :05 — so every hover has both sides to compare.
+    const held = {};
+    for (const row of sorted) {
+      for (const k of ${JSON.stringify(slow)}) {
+        if (row[k] !== undefined) held[k] = row[k];
+        else if (held[k] !== undefined) row[k] = held[k];
+      }
+    }`;
+}
+
 /** Poll no faster than the schema publishes. Never below fifteen seconds. */
 function refreshMs(refs: DataRef[]): number {
   const fastest = Math.min(...refs.map((r) => r.cadenceSeconds));
@@ -143,17 +169,25 @@ function refreshMs(refs: DataRef[]): number {
 }
 
 function series(refs: DataRef[]) {
-  return refs.map((r, i) => ({
-    key: `s${i}`,
-    dataset: target(r),
-    node: node(r) ?? schemaFor(r.schemaId)?.entities.sample[0] ?? "",
-    column: column(r),
-    unit: unit(r),
+  const streams = new Set(refs.map((r) => r.schemaId));
+  return refs.map((r, i) => {
+    const n = node(r);
     // An entity-picked ref is already named by its entity; repeating it as
     // "HB_NORTH · HB_NORTH" would be a stutter.
-    label: node(r) && node(r) !== r.label ? `${r.label} · ${node(r)}` : r.label,
-    mock: r.availability === "mock",
-  }));
+    const base = n && n !== r.label ? `${r.label} · ${n}` : r.label;
+    // Two streams can price the same entity — RT and DAM both quote
+    // HB_NORTH — and a tooltip with two identical labels compares nothing.
+    const stream = schemaFor(r.schemaId)?.name;
+    return {
+      key: `s${i}`,
+      dataset: target(r),
+      node: n ?? schemaFor(r.schemaId)?.entities.sample[0] ?? "",
+      column: column(r),
+      unit: unit(r),
+      label: streams.size > 1 && stream ? `${base} — ${stream}` : base,
+      mock: r.availability === "mock",
+    };
+  });
 }
 
 /*
@@ -355,7 +389,8 @@ const chart: ComponentDef = {
     });`,
       )
       .join("\n    ")}
-    return [...by.values()].sort((a, b) => a.t - b.t);
+    const sorted = [...by.values()].sort((a, b) => a.t - b.t);${slowFill(refs, s)}
+    return sorted;
   }, [rows]);
 ${
   stacked
