@@ -38,6 +38,14 @@ import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
  */
 export const DRAG_TYPE = "application/x-dryos-component";
 
+/** Turned down once, per machine — the same place the panel width lives. */
+const HINTS_KEY = "dryos:hints";
+/**
+ * Long enough that someone who already knows the gesture never meets it, short
+ * enough to arrive while they are still looking at the preview wondering.
+ */
+const HINT_DELAY = 4000;
+
 export interface TrayPayload {
   kind: ComponentKind;
   options?: Record<string, string>;
@@ -93,6 +101,17 @@ export function BuildPanel({
    */
   const [previewKind, setPreviewKind] = useState<ComponentKind | null>(null);
   const [previewOpts, setPreviewOpts] = useState<Record<string, string>>({});
+  /**
+   * The hint in the corner: shown only after a preview has sat there long
+   * enough to mean somebody is looking at it and has not worked out that it
+   * is the thing to drag. Off for good once they say so — a hint that keeps
+   * arriving after being turned down is not a hint.
+   */
+  const [hint, setHint] = useState(false);
+  /** Assumed off until the flag is read, so it can never flash before we know. */
+  const [hintsOff, setHintsOff] = useState(true);
+  /** One drag is the whole lesson; after that there is nothing left to say. */
+  const [dragged, setDragged] = useState(false);
 
   const previewDef = previewKind
     ? COMPONENTS.find((c) => c.kind === previewKind)
@@ -107,6 +126,26 @@ export function BuildPanel({
       .then((d) => setSaved(d.components ?? []))
       .catch(() => {});
   }, [reloadKey]);
+
+  useEffect(() => {
+    try {
+      setHintsOff(localStorage.getItem(HINTS_KEY) === "off");
+    } catch {
+      // A machine that will not keep the flag still gets the hint.
+      setHintsOff(false);
+    }
+  }, []);
+
+  const previewLive = Boolean(previewDef?.accepts(refs).ok);
+
+  useEffect(() => {
+    if (!previewLive || hintsOff || dragged) {
+      setHint(false);
+      return;
+    }
+    const t = setTimeout(() => setHint(true), HINT_DELAY);
+    return () => clearTimeout(t);
+  }, [previewLive, previewKind, hintsOff, dragged]);
 
   /*
     A shape the selection has moved past leaves the shelf rather than greying on
@@ -248,28 +287,7 @@ export function BuildPanel({
 
       {previewDef && (
         <div className="shrink-0 border-t border-line px-3 py-2.5">
-          <div
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.effectAllowed = "copy";
-              setCarrying(previewDef.kind);
-              onDragStateChange({
-                kind: previewDef.kind,
-                options: previewOpts,
-                refs,
-                layout: DEFAULT_LAYOUT[previewDef.kind],
-              });
-            }}
-            onDragEnd={() => {
-              setCarrying(null);
-              onDragStateChange(null);
-            }}
-            className="flex cursor-grab items-center gap-2 active:cursor-grabbing"
-            title="Drag onto the page to place exactly what you see"
-          >
-            <span className="rounded border border-accent-line bg-accent-dim px-1.5 py-[2px] font-mono text-[9.5px] text-accent">
-              ⠿ drag to place
-            </span>
+          <div className="flex items-center gap-2">
             <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
               {previewDef.name} · preview
             </span>
@@ -312,7 +330,30 @@ export function BuildPanel({
           )}
 
           {previewDef.accepts(refs).ok ? (
-            <div className="mt-2 h-56 overflow-hidden rounded-md border border-line bg-code">
+            <div
+              // The widget itself is the handle: what you drag is what lands,
+              // so the accent border belongs to the thing being carried rather
+              // than to a chip pointing at it.
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = "copy";
+                setCarrying(previewDef.kind);
+                setDragged(true);
+                setHint(false);
+                onDragStateChange({
+                  kind: previewDef.kind,
+                  options: previewOpts,
+                  refs,
+                  layout: DEFAULT_LAYOUT[previewDef.kind],
+                });
+              }}
+              onDragEnd={() => {
+                setCarrying(null);
+                onDragStateChange(null);
+              }}
+              title="Drag onto the page to place exactly what you see"
+              className="relative mt-2 h-56 cursor-grab overflow-hidden rounded-md border border-accent bg-code active:cursor-grabbing"
+            >
               <iframe
                 ref={previewFrame}
                 // Keyed by the spec so a settings change reloads the real
@@ -333,6 +374,13 @@ export function BuildPanel({
                 className="h-full w-full border-0"
                 title="Component preview"
               />
+              {/*
+                Pointer events do not cross into an iframe, so a drag started
+                over the frame would never reach this wrapper. A transparent
+                sheet catches it — nothing is drawn on it, the widget under it
+                is the whole message.
+              */}
+              <div className="absolute inset-0" aria-hidden />
             </div>
           ) : (
             <p className="mt-2 text-[11.5px] text-muted">
@@ -386,6 +434,45 @@ export function BuildPanel({
           </span>
         </div>
       </div>
+
+      {/*
+        The corner, not the widget: a hint that lived on the preview competed
+        with the preview for the same glance. Bottom right is the free corner —
+        the usage dock owns bottom left.
+      */}
+      {hint && (
+        <div
+          role="status"
+          className="dr-rise fixed right-4 bottom-4 z-30 w-[248px] rounded-xl border border-line-strong bg-surface p-3 shadow-2xl shadow-black/50"
+        >
+          <div className="flex items-start gap-2">
+            <p className="text-[12px] leading-snug text-ink">
+              Drag the widget onto the screen to place it.
+            </p>
+            <button
+              onClick={() => setHint(false)}
+              aria-label="Dismiss this hint"
+              className="-mt-0.5 -mr-1 shrink-0 rounded px-1 text-[11px] text-faint transition-colors hover:text-ink"
+            >
+              ✕
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              setHintsOff(true);
+              setHint(false);
+              try {
+                localStorage.setItem(HINTS_KEY, "off");
+              } catch {
+                // Nothing to do: it stays gone for this session either way.
+              }
+            }}
+            className="mt-2 font-mono text-[9.5px] text-faint underline underline-offset-2 transition-colors hover:text-ink"
+          >
+            don&rsquo;t show hints again
+          </button>
+        </div>
+      )}
     </div>
   );
 }

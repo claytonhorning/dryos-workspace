@@ -221,7 +221,11 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       }
     : {
         background: "var(--surface)",
-        border: "1px solid " + (dragging ? "var(--accent)" : over ? "var(--info)" : "var(--line)"),
+        // A preview is one component inside a box that already has a border;
+        // drawing the tile's own inside it reads as a frame around a frame.
+        border: bare
+          ? "none"
+          : "1px solid " + (dragging ? "var(--accent)" : over ? "var(--info)" : "var(--line)"),
         borderRadius: 8,
         display: "flex",
         flexDirection: "column",
