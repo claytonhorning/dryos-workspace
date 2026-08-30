@@ -6,11 +6,14 @@
  * the variables underneath it. This file is that tree, and it is the only place
  * that decides what the workspace claims to have.
  *
- * Exactly one branch is collected for real: `ercot-realtime-lmp`. Everything
- * else is declared here so the shape of the catalogue is visible before the
- * collectors exist, and every one of those carries `availability: "mock"` all
- * the way to the chip the user clicks. A mock that reads as real is worse than
- * no mock at all, so nothing in this app renders a stream without its badge.
+ * Every stream here is backed by a collector — one entry per ERCOT report,
+ * written from the database it serves. The `mock` machinery remains for two
+ * jobs: thumbnails render from each variable's declared shape (a shelf tile
+ * has no host to answer real queries), and a future stream added ahead of its
+ * collector goes back to carrying `availability: "mock"` and its badge. The
+ * only report deliberately absent is NP4-183's duplicate table
+ * (`ercot-dam-lmp-bus`): the Day-ahead stream serves the same file via
+ * `ercot-dam-lmp`, and one report should be one stream.
  */
 
 export type Availability = "live" | "mock";
@@ -153,7 +156,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.load",
-    path: ["Energy", "Power", "Load"],
+    path: ["Energy", "Load", "Actual by weather zone"],
     name: "Actual system load",
     dataset: "ercot-actual-load-weather-zone",
     availability: "live",
@@ -187,7 +190,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.loadforecast",
-    path: ["Energy", "Power", "Load forecast"],
+    path: ["Energy", "Load", "Forecast by weather zone"],
     name: "Seven-day load forecast",
     dataset: "ercot-load-forecast-weather-zone",
     availability: "live",
@@ -220,7 +223,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.genmix",
-    path: ["Energy", "Power", "Generation mix"],
+    path: ["Energy", "Generation", "Fuel mix"],
     name: "Fuel mix",
     dataset: "ercot-fuel-mix",
     availability: "live",
@@ -253,187 +256,808 @@ export const SCHEMAS: Schema[] = [
     ],
   },
   {
-    id: "energy.gas.spot",
-    path: ["Energy", "Gas", "Spot"],
-    name: "Hub spot gas",
-    availability: "mock",
-    cadence: { label: "daily, 09:00 CT", seconds: 86_400 },
+    id: "energy.power.rtspp",
+    path: ["Energy", "Power", "RT settlement"],
+    name: "Real-time settlement point prices",
+    dataset: "ercot-rt-spp",
+    availability: "live",
+    cadence: { label: "every 15 min", seconds: 900 },
+    tokens: 1,
+    entities: {
+      count: 1118,
+      label: "settlement points",
+      sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
+    },
+    blurb:
+      "The 15-minute price settlement actually uses, every ERCOT settlement point — the SCED LMP plus price adders. Collected from ERCOT MIS (NP6-905).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "spp",
+        label: "Settlement price",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The 15-minute settlement point price.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 30, swing: 12, noise: 3 },
+      },
+    ],
+  },
+  {
+    id: "energy.power.damspp",
+    path: ["Energy", "Power", "DAM settlement"],
+    name: "DAM settlement point prices",
+    dataset: "ercot-dam-spp",
+    availability: "live",
+    cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    tokens: 0.5,
+    entities: {
+      count: 1118,
+      label: "settlement points",
+      sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
+    },
+    blurb:
+      "Day-ahead hourly settlement point prices for every settlement point, posted once after the DAM run. Collected from ERCOT MIS (NP4-190).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "spp",
+        label: "Cleared price",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Hourly day-ahead settlement point price.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 34, swing: 15, noise: 4 },
+      },
+    ],
+  },
+  {
+    id: "energy.power.rtbus",
+    path: ["Energy", "Power", "RT bus LMP"],
+    name: "Real-time LMPs by electrical bus",
+    dataset: "ercot-rt-lmp-bus",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 1,
+    entities: {
+      count: 19312,
+      label: "electrical buses",
+      sample: ["ADICKS__138C", "0001DUPV1_", "0001HWFG1"],
+    },
+    blurb:
+      "Bus-level prices under the settlement points: ~19,000 electrical buses from every SCED run. The heaviest feed ERCOT publishes. Collected from ERCOT MIS (NP6-787).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "lmp",
+        label: "Bus LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Capped bus-level price — the one settlement uses.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 29, swing: 12, noise: 3.5 },
+      },
+    ],
+  },
+  {
+    id: "energy.power.indicative",
+    path: ["Energy", "Power", "Indicative LMP"],
+    name: "Indicative LMPs (RTD look-ahead)",
+    dataset: "ercot-indicative-lmp",
+    availability: "live",
+    cadence: { label: "every 5 min, look-ahead", seconds: 300 },
+    tokens: 1,
+    entities: {
+      count: 1118,
+      label: "settlement points",
+      sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
+    },
+    blurb:
+      "Where real-time prices are about to go: RTD's forward intervals for every settlement point, republished each run with every vintage kept. Collected from ERCOT MIS (NP6-970).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "lmp",
+        label: "Indicative LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Forecast price for the forward interval.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 29, swing: 12, noise: 4 },
+      },
+    ],
+  },
+  {
+    id: "energy.power.scedlambda",
+    path: ["Energy", "Power", "System lambda"],
+    name: "SCED system lambda",
+    dataset: "ercot-sced-lambda",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
     tokens: 0.25,
     entities: {
+      count: 1,
+      label: "system series",
+      sample: ["SYSTEM"],
+    },
+    blurb:
+      "The system-wide marginal energy price from every SCED run — one number for what energy is worth in ERCOT right now. Collected from ERCOT MIS (NP6-322).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "system_lambda",
+        label: "System lambda",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Capped system-wide marginal energy price.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 27, swing: 11, noise: 3 },
+      },
+    ],
+  },
+  {
+    id: "energy.power.damlambda",
+    path: ["Energy", "Power", "DAM lambda"],
+    name: "DAM system lambda",
+    dataset: "ercot-dam-lambda",
+    availability: "live",
+    cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: ["SYSTEM"],
+    },
+    blurb:
+      "The day-ahead hourly system-wide marginal energy price, posted once after the DAM run. Collected from ERCOT MIS (NP4-523).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "system_lambda",
+        label: "System lambda",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Hourly day-ahead system lambda.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 31, swing: 13, noise: 3 },
+      },
+    ],
+  },
+  {
+    id: "energy.power.shadow",
+    path: ["Energy", "Power", "Shadow prices"],
+    name: "DAM shadow prices",
+    dataset: "ercot-dam-shadow-prices",
+    availability: "live",
+    cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    tokens: 0.5,
+    entities: {
+      count: 263,
+      label: "binding constraints",
+      sample: ["105T105_1", "1080__A", "100027_D_1"],
+    },
+    blurb:
+      "Every binding transmission constraint in the day-ahead market with its limit, cleared flow and shadow price — why nodal prices diverge from the lambda. Collected from ERCOT MIS (NP4-191).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Shadow price",
+        unit: "$/MW",
+        availability: "live",
+        description: "Marginal value of one more MW of headroom on the constraint.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 90, swing: 80, noise: 20, floor: 0 },
+      },
+      {
+        key: "constraint_limit_mw",
+        label: "Constraint limit",
+        unit: "MW",
+        availability: "live",
+        description: "The binding limit, MW.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 400, swing: 250, noise: 10, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.power.dambought",
+    path: ["Energy", "Power", "DAM volumes bought"],
+    name: "DAM energy purchased",
+    dataset: "ercot-dam-energy-bought",
+    availability: "live",
+    cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    tokens: 0.5,
+    entities: {
+      count: 1049,
+      label: "settlement points",
+      sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
+    },
+    blurb:
+      "Cleared day-ahead purchase volumes per settlement point and hour — the quantity side of the DAM. Collected from ERCOT MIS (NP4-192).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "energy_mwh",
+        label: "Energy bought",
+        unit: "MWh",
+        availability: "live",
+        description: "Total DAM energy bought at the point in the hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 90, swing: 70, noise: 15, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.power.damsold",
+    path: ["Energy", "Power", "DAM volumes sold"],
+    name: "DAM energy sold",
+    dataset: "ercot-dam-energy-sold",
+    availability: "live",
+    cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    tokens: 0.5,
+    entities: {
+      count: 1049,
+      label: "settlement points",
+      sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
+    },
+    blurb:
+      "Cleared day-ahead sale volumes per settlement point and hour — the supply side of the DAM. Collected from ERCOT MIS (NP4-193).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "energy_mwh",
+        label: "Energy sold",
+        unit: "MWh",
+        availability: "live",
+        description: "Total DAM energy sold at the point in the hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 110, swing: 80, noise: 15, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.ancillary.dammcpc",
+    path: ["Energy", "Ancillary", "DAM prices"],
+    name: "DAM capacity clearing prices",
+    dataset: "ercot-dam-mcpc",
+    availability: "live",
+    cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    tokens: 0.25,
+    entities: {
+      count: 5,
+      label: "AS products",
+      sample: ["REGUP", "RRS", "ECRS"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "Day-ahead hourly clearing prices for each ancillary service product. Collected from ERCOT MIS (NP4-188).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "mcpc",
+        label: "Clearing price",
+        unit: "$/MW",
+        availability: "live",
+        description: "Hourly MCPC for the product.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 6, swing: 5, noise: 1.5, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.ancillary.scedmcpc",
+    path: ["Energy", "Ancillary", "RT prices"],
+    name: "Real-time capacity clearing prices (SCED)",
+    dataset: "ercot-sced-mcpc",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 5,
+      label: "AS products",
+      sample: ["REGUP", "RRS", "ECRS"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "Real-time capacity clearing prices per product from every SCED run — the RTC-era companion to the energy LMP. Collected from ERCOT MIS (NP6-332).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "mcpc",
+        label: "Clearing price",
+        unit: "$/MW",
+        availability: "live",
+        description: "Capped real-time MCPC for the product.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 4, swing: 4, noise: 1, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.ancillary.rtmcpc",
+    path: ["Energy", "Ancillary", "RT settlement"],
+    name: "Capacity settlement prices (15-minute)",
+    dataset: "ercot-rt-mcpc",
+    availability: "live",
+    cadence: { label: "every 15 min", seconds: 900 },
+    tokens: 0.25,
+    entities: {
+      count: 5,
+      label: "AS products",
+      sample: ["REGUP", "RRS", "ECRS"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "The 15-minute settlement clearing price for each ancillary product — what real-time capacity settlement actually uses. Collected from ERCOT MIS (NP6-331).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "mcpc",
+        label: "Settlement price",
+        unit: "$/MW",
+        availability: "live",
+        description: "15-minute settlement MCPC for the product.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 4, swing: 4, noise: 1, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.ancillary.plan",
+    path: ["Energy", "Ancillary", "Plan"],
+    name: "Ancillary service plan",
+    dataset: "ercot-dam-as-plan",
+    availability: "live",
+    cadence: { label: "daily, 7-day plan", seconds: 86400 },
+    tokens: 0.25,
+    entities: {
+      count: 5,
+      label: "AS products",
+      sample: ["REGUP", "RRS", "ECRS"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "How much of each service ERCOT plans to procure, per hour, seven days out — republished daily with every revision kept. Collected from ERCOT MIS (NP4-33).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "quantity_mw",
+        label: "Planned quantity",
+        unit: "MW",
+        availability: "live",
+        description: "Capacity ERCOT plans to procure for the product and hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 1800, swing: 900, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.load.actualfz",
+    path: ["Energy", "Load", "Actual by forecast zone"],
+    name: "Actual load by forecast zone",
+    dataset: "ercot-actual-load-forecast-zone",
+    availability: "live",
+    cadence: { label: "hourly, posted next day", seconds: 3600 },
+    tokens: 0.5,
+    entities: {
+      count: 5,
+      label: "forecast zones",
+      sample: ["HOUSTON", "NORTH", "SOUTH"],
+    },
+    entityKey: "zone",
+    entityOmit: ["TOTAL"],
+    blurb:
+      "Metered demand by the four forecast zones plus the system total, hourly. Collected from ERCOT MIS (NP6-346).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "load_mw",
+        label: "Actual load",
+        unit: "MW",
+        availability: "live",
+        description: "Hourly average metered demand for the zone.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 15000, swing: 5000, noise: 300, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.load.forecastfz",
+    path: ["Energy", "Load", "Forecast by forecast zone"],
+    name: "Seven-day forecast by forecast zone",
+    dataset: "ercot-load-forecast-forecast-zone",
+    availability: "live",
+    cadence: { label: "hourly, 7 days ahead", seconds: 3600 },
+    tokens: 0.5,
+    entities: {
+      count: 5,
+      label: "forecast zones",
+      sample: ["HOUSTON", "NORTH", "SOUTH"],
+    },
+    entityKey: "zone",
+    entityOmit: ["TOTAL"],
+    blurb:
+      "ERCOT's hourly-refreshed load forecast for the four forecast zones and the system, seven days out — every revision kept. Collected from ERCOT MIS (NP3-560).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "load_mw",
+        label: "Forecast load",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast hourly average load for the zone.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 15000, swing: 5000, noise: 150, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.load.demand",
+    path: ["Energy", "Load", "System demand"],
+    name: "System-wide demand",
+    dataset: "ercot-system-demand",
+    availability: "live",
+    cadence: { label: "15-min, posted hourly", seconds: 3600 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: ["SYSTEM"],
+    },
+    blurb:
+      "System-wide actual demand at 15-minute resolution — the one-line answer to how much Texas is using. Collected from ERCOT MIS (NP6-235).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "demand_mw",
+        label: "Demand",
+        unit: "MW",
+        availability: "live",
+        description: "System-wide 15-minute average demand.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 58000, swing: 14000, noise: 600, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.load.supplydemand",
+    path: ["Energy", "Load", "Supply vs demand"],
+    name: "Supply and demand",
+    dataset: "ercot-supply-demand",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: ["SYSTEM"],
+    },
+    blurb:
+      "The grid-conditions headline: 5-minute demand against available committed capacity, from ERCOT's own dashboard feed — which retains two days, so the history exists because the collector keeps running.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "demand_mw",
+        label: "Demand",
+        unit: "MW",
+        availability: "live",
+        description: "System demand over the interval.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 58000, swing: 14000, noise: 600, floor: 0 },
+      },
+      {
+        key: "capacity_mw",
+        label: "Available capacity",
+        unit: "MW",
+        availability: "live",
+        description: "Total available committed capacity.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 78000, swing: 10000, noise: 500, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.generation.wind",
+    path: ["Energy", "Generation", "Wind by load zone"],
+    name: "Wind: actual and forecast",
+    dataset: "ercot-wind-hourly",
+    availability: "live",
+    cadence: { label: "hourly, rolling week", seconds: 3600 },
+    tokens: 0.5,
+    entities: {
       count: 4,
-      label: "pricing hubs",
-      sample: ["HENRY", "WAHA", "KATY"],
+      label: "regions",
+      sample: ["LZ_WEST", "LZ_NORTH", "LZ_SOUTH_HOUSTON"],
     },
+    entityKey: "region",
+    entityOmit: ["SYSTEM"],
     blurb:
-      "Next-day physical gas at the major hubs. Moves the marginal heat rate, and with it " +
-      "most of the power curve.",
+      "Hourly averaged actual wind generation and ERCOT's own forecasts, system-wide and by load zone, refreshed hourly. Collected from ERCOT MIS (NP4-732).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
     variables: [
       {
-        key: "spot_price",
-        label: "Spot price",
-        unit: "$/MMBtu",
-        availability: "mock",
-        description: "Next-day midpoint.",
-        mock: { base: 2.9, swing: 0.8, noise: 0.15, floor: 0 },
+        key: "gen_mw",
+        label: "Actual generation",
+        unit: "MW",
+        availability: "live",
+        description: "Hourly averaged actual wind output.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 9000, swing: 7000, noise: 700, floor: 0 },
       },
       {
-        key: "implied_heat_rate",
-        label: "Implied heat rate",
-        unit: "MMBtu/MWh",
-        availability: "mock",
-        description: "Power price divided by gas price for the same day.",
-        mock: { base: 11, swing: 3.5, noise: 0.6, floor: 0 },
+        key: "forecast_stf_mw",
+        label: "Short-term forecast",
+        unit: "MW",
+        availability: "live",
+        description: "ERCOT's STWPF forecast for the hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 9000, swing: 7000, noise: 400, floor: 0 },
       },
     ],
   },
   {
-    id: "aviation.flights.positions",
-    path: ["Aviation", "Flights", "Live positions"],
-    name: "ADS-B state vectors",
-    availability: "mock",
-    // Real ADS-B is roughly per second; the open networks resample to ten.
-    cadence: { label: "every 10 s", seconds: 10 },
-    tokens: 0.3,
-    motion: true,
+    id: "energy.generation.windgeo",
+    path: ["Energy", "Generation", "Wind by region"],
+    name: "Wind by geographical region",
+    dataset: "ercot-wind-hourly-geo",
+    availability: "live",
+    cadence: { label: "hourly, rolling week", seconds: 3600 },
+    tokens: 0.5,
     entities: {
-      count: 36,
-      // The ICAO 24-bit transponder address — the identifier the standard is
-      // built on, and the one every tracker keys off.
-      label: "aircraft",
-      sample: ["a1b2c3", "a4d5e6", "a7f809"],
+      count: 6,
+      label: "regions",
+      sample: ["PANHANDLE", "COASTAL", "WEST"],
     },
+    entityKey: "region",
+    entityOmit: ["SYSTEM"],
     blurb:
-      "Aircraft state vectors in the ADS-B shape — icao24, callsign, position, " +
-      "barometric altitude, ground speed, track and vertical rate.",
+      "Hourly averaged actual wind generation and forecasts by geographical region — Panhandle, Coastal, South, West, North. Collected from ERCOT MIS (NP4-742).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
     variables: [
       {
-        key: "baro_altitude_ft",
-        label: "Altitude",
-        unit: "ft",
-        availability: "mock",
-        description: "Barometric altitude, the field trackers colour by.",
-        mock: { base: 24_000, swing: 14_000, noise: 200, floor: 0 },
+        key: "gen_mw",
+        label: "Actual generation",
+        unit: "MW",
+        availability: "live",
+        description: "Hourly averaged actual wind output for the region.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 3000, swing: 2500, noise: 300, floor: 0 },
       },
       {
-        key: "velocity_kt",
-        label: "Ground speed",
-        unit: "kt",
-        availability: "mock",
-        description: "Speed over the ground.",
-        mock: { base: 420, swing: 90, noise: 8, floor: 0 },
-      },
-      {
-        key: "vertical_rate_fpm",
-        label: "Vertical rate",
-        unit: "ft/min",
-        availability: "mock",
-        description: "Climb positive, descent negative.",
-        mock: { base: 0, swing: 1_800, noise: 60 },
+        key: "forecast_stf_mw",
+        label: "Short-term forecast",
+        unit: "MW",
+        availability: "live",
+        description: "ERCOT's STWPF forecast for the hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 3000, swing: 2500, noise: 150, floor: 0 },
       },
     ],
   },
   {
-    id: "weather.observed.grid",
-    path: ["Weather", "Observed", "Gridded field"],
-    name: "Surface field",
-    availability: "mock",
-    cadence: { label: "hourly", seconds: 3_600 },
-    tokens: 0.6,
-    field: true,
+    id: "energy.generation.solar",
+    path: ["Energy", "Generation", "Solar"],
+    name: "Solar: actual and forecast",
+    dataset: "ercot-solar-hourly",
+    availability: "live",
+    cadence: { label: "hourly, rolling week", seconds: 3600 },
+    tokens: 0.5,
     entities: {
-      count: 72,
-      label: "grid cells",
-      // `G_{lat*10}_{-lon*10}` — the id carries its own position, so a grid can
-      // grow or move without a lookup table growing with it. See `geo.ts`.
-      sample: ["G_315_1005", "G_300_0975", "G_330_0960"],
+      count: 1,
+      label: "system series",
+      sample: ["SYSTEM"],
     },
     blurb:
-      "Temperature and precipitation on a 1.5° grid across the ERCOT footprint. " +
-      "The shape of the weather, rather than a reading at eight named places.",
+      "Hourly averaged actual solar generation and ERCOT's own forecasts, system-wide, refreshed hourly with a rolling week of horizon. Collected from ERCOT MIS (NP4-737).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
     variables: [
       {
-        key: "temp_f",
-        label: "Temperature",
-        unit: "°F",
-        availability: "mock",
-        description: "Dry-bulb temperature at the cell centre.",
-        mock: { base: 84, swing: 17, noise: 1.2 },
+        key: "gen_mw",
+        label: "Actual generation",
+        unit: "MW",
+        availability: "live",
+        description: "Hourly averaged actual solar output.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 12000, swing: 12000, noise: 800, floor: 0 },
       },
       {
-        key: "precip_mm_h",
-        label: "Precipitation",
-        unit: "mm/h",
-        availability: "mock",
-        description: "Rain rate at the cell centre.",
-        mock: { base: 0.6, swing: 1.6, noise: 0.3, floor: 0 },
+        key: "forecast_stf_mw",
+        label: "Short-term forecast",
+        unit: "MW",
+        availability: "live",
+        description: "ERCOT's STPPF forecast for the hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 12000, swing: 12000, noise: 400, floor: 0 },
       },
     ],
   },
   {
-    id: "weather.observed.surface",
-    path: ["Weather", "Observed", "Surface"],
-    name: "Surface observations",
-    availability: "mock",
-    cadence: { label: "hourly", seconds: 3_600 },
+    id: "energy.generation.solargeo",
+    path: ["Energy", "Generation", "Solar by region"],
+    name: "Solar by geographical region",
+    dataset: "ercot-solar-hourly-geo",
+    availability: "live",
+    cadence: { label: "hourly, rolling week", seconds: 3600 },
+    tokens: 0.5,
+    entities: {
+      count: 7,
+      label: "regions",
+      sample: ["FAR_WEST", "CENTER_WEST", "FAR_EAST"],
+    },
+    entityKey: "region",
+    entityOmit: ["SYSTEM"],
+    blurb:
+      "Hourly averaged actual solar generation and forecasts by geographical region — CenterWest through FarEast. Collected from ERCOT MIS (NP4-745).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Actual generation",
+        unit: "MW",
+        availability: "live",
+        description: "Hourly averaged actual solar output for the region.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 2500, swing: 2500, noise: 250, floor: 0 },
+      },
+      {
+        key: "forecast_stf_mw",
+        label: "Short-term forecast",
+        unit: "MW",
+        availability: "live",
+        description: "ERCOT's STPPF forecast for the hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 2500, swing: 2500, noise: 120, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.grid.adders",
+    path: ["Energy", "Grid", "Price adders"],
+    name: "Real-time price adders and reserves",
+    dataset: "ercot-rt-price-adders",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: ["SYSTEM"],
+    },
+    blurb:
+      "The scarcity-pricing feed: reliability deployment price adders, deployments and online reserve limits from every SCED run. Collected from ERCOT MIS (NP6-323).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "system_lambda",
+        label: "System lambda",
+        unit: "$/MWh",
+        availability: "live",
+        description: "System lambda for the SCED run.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 27, swing: 11, noise: 3 },
+      },
+      {
+        key: "rtrdpa",
+        label: "Reliability adder",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Real-time reliability deployment price adder.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 1, swing: 1, noise: 0.5, floor: 0 },
+      },
+      {
+        key: "rtolhsl",
+        label: "Online HSL",
+        unit: "MW",
+        availability: "live",
+        description: "Aggregate high sustained limit of online resources.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 95000, swing: 15000, noise: 1000, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.grid.adequacy",
+    path: ["Energy", "Grid", "Adequacy"],
+    name: "Short-term system adequacy",
+    dataset: "ercot-short-term-adequacy",
+    availability: "live",
+    cadence: { label: "hourly, 168h out", seconds: 3600 },
+    tokens: 0.5,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: ["SYSTEM"],
+    },
+    blurb:
+      "ERCOT's own hour-by-hour view of whether it has enough capacity, 168 hours out, refreshed hourly with every revision kept. Collected from ERCOT MIS (NP3-763).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "avail_cap_gen",
+        label: "Available capacity",
+        unit: "MW",
+        availability: "live",
+        description: "Available generation capacity for the hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 90000, swing: 15000, noise: 1500, floor: 0 },
+      },
+      {
+        key: "avail_cap_reserve",
+        label: "Available reserve",
+        unit: "MW",
+        availability: "live",
+        description: "Capacity available as reserve for the hour.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 15000, swing: 6000, noise: 800, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.grid.outages",
+    path: ["Energy", "Grid", "Outages"],
+    name: "Resource outage capacity",
+    dataset: "ercot-outage-capacity",
+    availability: "live",
+    cadence: { label: "hourly, week out", seconds: 3600 },
+    tokens: 0.5,
+    entities: {
+      count: 4,
+      label: "forecast zones",
+      sample: ["HOUSTON", "NORTH", "SOUTH"],
+    },
+    entityKey: "zone",
+    blurb:
+      "Capacity on outage by forecast zone, hour by hour for the coming week — total, intermittent and not-yet-commercial. Collected from ERCOT MIS (NP3-233).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    variables: [
+      {
+        key: "total_resource_mw",
+        label: "Capacity on outage",
+        unit: "MW",
+        availability: "live",
+        description: "Total resource capacity on outage in the zone.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 2000, swing: 1200, noise: 150, floor: 0 },
+      },
+      {
+        key: "total_irr_mw",
+        label: "Intermittent on outage",
+        unit: "MW",
+        availability: "live",
+        description: "Intermittent renewable capacity on outage.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 1200, swing: 900, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.grid.temperature",
+    path: ["Energy", "Grid", "Temperature"],
+    name: "Temperature forecast by weather zone",
+    dataset: "ercot-temperature-forecast",
+    availability: "live",
+    cadence: { label: "daily, rolling window", seconds: 86400 },
     tokens: 0.25,
     entities: {
       count: 8,
       label: "weather zones",
-      sample: ["COAST", "NORTH_C", "WEST"],
+      sample: ["COAST", "NORTH_C", "FAR_WEST"],
     },
+    entityKey: "zone",
     blurb:
-      "Temperature and wind at the zone level — the driver behind both load and wind output.",
+      "The hourly temperature forecast ERCOT plans against, per weather zone, published daily with every revision kept. Collected from ERCOT MIS (NP4-722).",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
     variables: [
       {
-        key: "temp_f",
+        key: "temperature_f",
         label: "Temperature",
         unit: "°F",
-        availability: "mock",
-        description: "Dry-bulb temperature.",
-        mock: { base: 82, swing: 15, noise: 1.5 },
-      },
-      {
-        key: "wind_speed_mph",
-        label: "Wind speed",
-        unit: "mph",
-        availability: "mock",
-        description: "Sustained wind at 10m.",
-        mock: { base: 12, swing: 7, noise: 2, floor: 0 },
-      },
-    ],
-  },
-  {
-    id: "weather.forecast.wind",
-    path: ["Weather", "Forecast", "Wind"],
-    name: "Wind generation forecast",
-    availability: "mock",
-    cadence: { label: "hourly", seconds: 3_600 },
-    tokens: 0.4,
-    entities: {
-      count: 4,
-      label: "regions",
-      sample: ["WEST", "PANHANDLE", "COASTAL"],
-    },
-    blurb:
-      "Forecast wind output by region, out to 48 hours. The single largest source of " +
-      "day-ahead price error in ERCOT.",
-    variables: [
-      {
-        key: "forecast_mw",
-        label: "Forecast output",
-        unit: "MW",
-        availability: "mock",
-        description: "Expected regional wind generation.",
-        mock: { base: 4_100, swing: 3_200, noise: 260, floor: 0 },
-      },
-      {
-        key: "forecast_error_mw",
-        label: "Prior error",
-        unit: "MW",
-        availability: "mock",
-        description:
-          "Yesterday's forecast for this hour less what was delivered.",
-        mock: { base: 0, swing: 900, noise: 180 },
+        availability: "live",
+        description: "Forecast temperature for the zone.",
+        // Preview-only — see the note on the real-time schema.
+        mock: { base: 78, swing: 16, noise: 2 },
       },
     ],
   },
