@@ -369,6 +369,13 @@ function Glyph({ kind, on }: { kind: ComponentKind; on: boolean }) {
           strokeLinejoin="round"
         />
       )}
+      {kind === "bar" && (
+        <>
+          <path d="M2.5 11.5 V7" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+          <path d="M7 11.5 V2.5" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+          <path d="M11.5 11.5 V5" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+        </>
+      )}
       {kind === "ticker" && (
         <>
           <rect

@@ -411,7 +411,9 @@ function ChartTip({ active, payload, label, unit }) {
       </div>
       {payload.map((p) => (
         <div key={p.dataKey} style={{ color: "var(--ink)" }}>
-          <span style={{ color: p.stroke }}>■ </span>
+          {/* Stacked areas wear a surface-coloured stroke as the gap between
+              segments, so identity lives in the fill there. */}
+          <span style={{ color: p.fill && p.fill !== "none" ? p.fill : p.stroke }}>■ </span>
           {p.name}: <strong>{p.value == null ? "—" : Number(p.value).toFixed(2)}</strong> {unit}
         </div>
       ))}

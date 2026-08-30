@@ -20,7 +20,7 @@ import { schemaById } from "./catalog";
  * needs. `compose.ts` stitches them into a file.
  */
 
-export type ComponentKind = "chart" | "ticker" | "table" | "map";
+export type ComponentKind = "chart" | "bar" | "ticker" | "table" | "map";
 
 export interface ComponentSpec {
   kind: ComponentKind;
@@ -154,7 +154,42 @@ function series(refs: DataRef[]) {
   }));
 }
 
-const PALETTE = ["var(--accent)", "var(--info)", "var(--warn)", "var(--stale)"];
+/*
+  The eight series slots the frame's palette defines (`runtime.ts`), in their
+  fixed order. Fixed is the point: a colour follows the entity it was assigned
+  to at selection time, never its rank, and the sequence itself is what was
+  validated for colour-vision safety. Never cycle past the end — `accepts`
+  caps every shape at eight or fewer first. (This replaces the old four-slot
+  list whose fourth entry was `var(--stale)`, a token no palette defined — the
+  fourth series has been drawing in black since the day it shipped.)
+*/
+const PALETTE = [
+  "var(--s1)",
+  "var(--s2)",
+  "var(--s3)",
+  "var(--s4)",
+  "var(--s5)",
+  "var(--s6)",
+  "var(--s7)",
+  "var(--s8)",
+];
+
+/** One unit across the selection, or null when they mix. */
+function uniformUnit(refs: DataRef[]): string | null {
+  const units = [...new Set(refs.map(unit))];
+  return units.length === 1 ? units[0] : null;
+}
+
+/**
+ * What a tile is called. Up to three series, their labels fit in a title;
+ * past that the stream's own name says it better than a five-label pile-up.
+ */
+function titleFor(refs: DataRef[], s: { label: string }[]): string {
+  if (refs.length > 3) {
+    return schemaFor(refs[0].schemaId)?.name ?? s.map((x) => x.label).join(" · ");
+  }
+  return s.map((x) => x.label).join(" · ");
+}
 
 /** Rendered beside anything drawn from a schema with no collector. */
 function mockTag(any: boolean): string {
@@ -177,35 +212,78 @@ const chart: ComponentDef = {
       choices: [
         { value: "line", label: "Line" },
         { value: "area", label: "Area" },
+        { value: "stacked", label: "Stacked area" },
       ],
       fallback: "line",
     },
+    {
+      // Only stacking reads this: which series sits at the bottom of the
+      // stack. Line and area draw in selection order regardless.
+      key: "order",
+      label: "Stack order",
+      choices: [
+        { value: "size", label: "Largest first" },
+        { value: "selection", label: "As selected" },
+      ],
+      fallback: "size",
+    },
   ],
+  // Up to four series read well overlapping. Five to eight only make sense
+  // stacked, and stacking sums — so past four the units must agree.
   accepts: (refs) =>
     refs.length === 0
       ? { ok: false, why: "Pick a series." }
-      : refs.length > 4
-        ? { ok: false, why: "Four series is the most one chart reads well." }
-        : { ok: true },
+      : refs.length > 8
+        ? { ok: false, why: "Eight series is the most one chart reads well." }
+        : refs.length > 4 && uniformUnit(refs) === null
+          ? {
+              ok: false,
+              why: "Five or more series only work stacked, and a stack sums — these mix units.",
+            }
+          : { ok: true },
   emit(refs, i, o) {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
     const name = `Chart${i}`;
-    const title = s.map((x) => x.label).join(" · ");
+    const title = titleFor(refs, s);
+    const stacked = o.shape === "stacked";
     const area = o.shape === "area";
-    const Wrap = area ? "AreaChart" : "LineChart";
-    const Mark = area ? "Area" : "Line";
+    const Wrap = stacked || area ? "AreaChart" : "LineChart";
+    // A day of a five-minute feed is 288 rows; a week is 2,016. The limit
+    // follows the window instead of quietly truncating the long one.
+    const limit = o.window === "-7d" ? 2000 : 500;
+    // Hours carry a day of context; a week needs dates.
+    const tickFmt =
+      o.window === "-7d"
+        ? "(t) => new Date(t).toISOString().slice(5, 10)"
+        : "(t) => new Date(t).toISOString().slice(11, 16)";
+
+    const marks = stacked
+      ? // Runtime-ordered: "largest first" puts the biggest series at the
+        // bottom of the stack, which is how every fuel-mix chart reads. The
+        // surface-coloured stroke is the gap between segments, so adjacent
+        // fills never touch — identity is never colour alone.
+        `{ordered.map((sr) => (
+            <Area key={sr.key} type="monotone" stackId="a" dataKey={sr.key} name={sr.label} stroke="var(--surface)" strokeWidth={1} fill={sr.color} fillOpacity={0.85} dot={false} isAnimationActive={false} connectNulls />
+          ))}`
+      : s
+          .map(
+            (x, n) =>
+              `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${PALETTE[n % PALETTE.length]}" ${area ? `fill="${PALETTE[n % PALETTE.length]}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`,
+          )
+          .join("\n          ");
 
     return {
       imports: [
-        area ? "AreaChart" : "LineChart",
-        area ? "Area" : "Line",
+        Wrap,
+        stacked || area ? "Area" : "Line",
         "XAxis",
         "YAxis",
         "CartesianGrid",
         "Tooltip",
         "ResponsiveContainer",
         "ReferenceLine",
+        ...(stacked ? ["Legend"] : []),
       ],
       code: `function ${name}({ w, h }) {
   const { rows, error, loading } = useSeries(
@@ -213,8 +291,8 @@ const chart: ComponentDef = {
       s.map((x) => ({
         dataset: x.dataset,
         node: x.node,
-        start: "-24h",
-        limit: 500,
+        start: o.window,
+        limit,
       })),
       null,
       2,
@@ -237,7 +315,22 @@ const chart: ComponentDef = {
       .join("\n    ")}
     return [...by.values()].sort((a, b) => a.t - b.t);
   }, [rows]);
-
+${
+  stacked
+    ? `
+  const SERIES = ${JSON.stringify(
+    s.map((x, n) => ({ key: x.key, label: x.label, color: PALETTE[n % PALETTE.length] })),
+  )};
+  // Stack order is decided from the data: the biggest series goes to the
+  // bottom. Colours ride with the series, never with the position.
+  const ordered = React.useMemo(() => {
+    if (${JSON.stringify(o.order)} !== "size" || !merged.length) return SERIES;
+    const mean = (k) => merged.reduce((a, r) => a + (r[k] ?? 0), 0) / merged.length;
+    return [...SERIES].sort((a, b) => mean(b.key) - mean(a.key));
+  }, [merged]);
+`
+    : ""
+}
   return (
     <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(title)} unit=${JSON.stringify(s[0].unit)} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
@@ -249,7 +342,7 @@ ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
             type="number"
             scale="time"
             domain={["dataMin", "dataMax"]}
-            tickFormatter={(t) => new Date(t).toISOString().slice(11, 16)}
+            tickFormatter={${tickFmt}}
             tick={{ fill: "var(--faint)", fontSize: 11 }}
             stroke="var(--line)"
             tickLine={false}
@@ -257,13 +350,145 @@ ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
           <YAxis tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={52} />
           <ReferenceLine y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />
           <Tooltip content={<ChartTip unit=${JSON.stringify(s[0].unit)} />} />
-${s
-  .map(
-    (x, n) =>
-      `          <${Mark} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${PALETTE[n % PALETTE.length]}" ${area ? `fill="${PALETTE[n % PALETTE.length]}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`,
-  )
-  .join("\n")}
+${
+  stacked
+    ? `          <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />
+          `
+    : "          "
+}${marks}
         </${Wrap}>
+      </ResponsiveContainer>
+      </div>
+    </Section>
+  );
+}`,
+    };
+  },
+};
+
+const bar: ComponentDef = {
+  kind: "bar",
+  name: "Bar",
+  blurb: "The latest value of each series, side by side.",
+  options: [
+    {
+      key: "sort",
+      label: "Order",
+      choices: [
+        { value: "size", label: "Largest first" },
+        { value: "selection", label: "As selected" },
+        { value: "az", label: "A to Z" },
+      ],
+      fallback: "size",
+    },
+    {
+      key: "orient",
+      label: "Bars",
+      choices: [
+        { value: "v", label: "Columns" },
+        { value: "h", label: "Rows" },
+      ],
+      fallback: "v",
+    },
+  ],
+  accepts: (refs) =>
+    refs.length === 0
+      ? { ok: false, why: "Pick some series." }
+      : refs.length === 1
+        ? { ok: false, why: "One value is a ticker — add a second series to compare." }
+        : refs.length > 8
+          ? { ok: false, why: "Eight bars is the most one chart compares well." }
+          : uniformUnit(refs) === null
+            ? { ok: false, why: "Bars compare one unit; these mix units." }
+            : { ok: true },
+  // Beside a single selection a bar is not a rejected bar, it is a ticker —
+  // the same reasoning that takes the ticker off the shelf beside three.
+  offered: (refs) => refs.length !== 1,
+  emit(refs, i, o) {
+    const s = series(refs);
+    const anyMock = s.some((x) => x.mock);
+    const name = `Bar${i}`;
+    const title = titleFor(refs, s);
+    const horizontal = o.orient === "h";
+
+    return {
+      imports: [
+        "BarChart",
+        "Bar",
+        "Cell",
+        "XAxis",
+        "YAxis",
+        "CartesianGrid",
+        "Tooltip",
+        "ResponsiveContainer",
+      ],
+      code: `function ${name}({ w, h }) {
+  const { rows, error, loading } = useSeries(
+    ${JSON.stringify(
+      s.map((x) => ({ dataset: x.dataset, node: x.node, limit: 1 })),
+      null,
+      2,
+    ).replace(/\n/g, "\n    ")},
+    ${refreshMs(refs)},
+  );
+
+  // The entity is the bar's name; colour was assigned at selection time and
+  // rides with the entity through any sort, never with its rank.
+  const SERIES = ${JSON.stringify(
+    s.map((x, n) => ({
+      name: x.node || x.label,
+      full: x.label,
+      column: x.column,
+      color: PALETTE[n % PALETTE.length],
+    })),
+  )};
+
+  const data = React.useMemo(() => {
+    const out = SERIES.map((sr, n) => ({
+      name: sr.name,
+      full: sr.full,
+      fill: sr.color,
+      v: rows[n] && rows[n][0] ? rows[n][0][sr.column] : null,
+    })).filter((d) => d.v != null);
+    if (${JSON.stringify(o.sort)} === "size") out.sort((a, b) => b.v - a.v);
+    if (${JSON.stringify(o.sort)} === "az") out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  }, [rows]);
+
+  function BarTip({ active, payload }) {
+    if (!active || !payload || !payload.length) return null;
+    const d = payload[0].payload;
+    return (
+      <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
+        <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>{d.full}</div>
+        <div style={{ color: "var(--ink)" }}>
+          <span style={{ color: d.fill }}>■ </span>
+          <strong>{Number(d.v).toFixed(2)}</strong> ${s[0].unit}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(title)} unit=${JSON.stringify(s[0].unit)} loading={loading} error={error}>
+${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} ${horizontal ? 'layout="vertical" ' : ""}margin={{ top: 4, right: 8, bottom: 0, left: ${horizontal ? 4 : -12} }} barCategoryGap="22%">
+          <CartesianGrid stroke="var(--line)" ${horizontal ? "horizontal={false}" : "vertical={false}"} />
+${
+  horizontal
+    ? `          <XAxis type="number" tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} />
+          <YAxis type="category" dataKey="name" width={92} tick={{ fill: "var(--faint)", fontSize: 10.5 }} stroke="var(--line)" tickLine={false} />`
+    : `          <XAxis dataKey="name" tick={{ fill: "var(--faint)", fontSize: 10.5 }} stroke="var(--line)" tickLine={false} interval={0} />
+          <YAxis tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={52} />`
+}
+          <Tooltip content={<BarTip />} cursor={{ fill: "var(--line)", fillOpacity: 0.25 }} />
+          <Bar dataKey="v" radius={${horizontal ? "[0, 3, 3, 0]" : "[3, 3, 0, 0]"}} isAnimationActive={false}>
+            {data.map((d) => (
+              <Cell key={d.name} fill={d.fill} />
+            ))}
+          </Bar>
+        </BarChart>
       </ResponsiveContainer>
       </div>
     </Section>
@@ -1006,7 +1231,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   },
 };
 
-export const COMPONENTS: ComponentDef[] = [chart, ticker, table, map];
+export const COMPONENTS: ComponentDef[] = [chart, bar, ticker, table, map];
 
 export function componentDef(kind: ComponentKind): ComponentDef | undefined {
   return COMPONENTS.find((c) => c.kind === kind);
@@ -1021,6 +1246,7 @@ export function componentDef(kind: ComponentKind): ComponentDef | undefined {
  */
 export const DEFAULT_LAYOUT: Record<ComponentKind, { w: number; h: number }> = {
   chart: { w: 6, h: 240 },
+  bar: { w: 4, h: 220 },
   ticker: { w: 3, h: 150 },
   table: { w: 6, h: 260 },
   map: { w: 6, h: 300 },

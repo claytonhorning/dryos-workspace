@@ -207,12 +207,25 @@ const TOKENS_DARK = `
   --bg:#0a0d12; --surface:#10141b; --surface-2:#171d26; --line:#26303d;
   --line-strong:#3d4b5c; --ink:#eef2f7; --muted:#9aa8ba; --faint:#8998ab;
   --accent:#e8ff3d; --warn:#fbbf24; --info:#7dd3fc; --fail:#f4666b;
+  --s1:#e8ff3d; --s2:#7dd3fc; --s3:#fbbf24; --s4:#9085e9;
+  --s5:#199e70; --s6:#e87ba4; --s7:#d95926; --s8:#3987e5;
 `;
 
+/*
+  --s1..--s8 are the chart series slots, in fixed order. s1–s3 are the brand
+  colours charts already used; s4–s8 extend them for the stacked and bar
+  shapes. The order is the colour-vision safety mechanism, not cosmetics: each
+  mode's sequence was validated as a set (adjacent-pair CVD ΔE, chroma floor,
+  contrast against its own surface), and light is its own selected stepping,
+  not an automatic flip of dark. Reorder or restep only through the palette
+  validator.
+*/
 const TOKENS_LIGHT = `
   --bg:#ffffff; --surface:#ffffff; --surface-2:#f4f6f8; --line:#dde3ea;
   --line-strong:#aeb9c6; --ink:#0f141b; --muted:#4a5666; --faint:#586474;
   --accent:#5b6f0c; --warn:#a16207; --info:#0b6a94; --fail:#b3261e;
+  --s1:#5b6f0c; --s2:#0b6a94; --s3:#a16207; --s4:#4a3aa7;
+  --s5:#047857; --s6:#e87ba4; --s7:#2a78d6; --s8:#eb6834;
 `;
 
 const BASE_CSS = String.raw`
