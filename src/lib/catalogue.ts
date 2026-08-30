@@ -152,7 +152,7 @@ export const catalogue: Dataset[] = [
     telemetry: NO_TELEMETRY,
   },
   {
-    slug: "ercot-dam-lmp",
+    slug: "ercot-dam-lmp-bus",
     vertical: "energy",
     name: "ERCOT DAM Hourly LMPs by Bus",
     tagline:

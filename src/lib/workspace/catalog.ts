@@ -131,7 +131,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.dayahead",
     path: ["Energy", "Power", "Day-ahead"],
     name: "ERCOT day-ahead hourly LMP",
-    dataset: "ercot-dam-lmp",
+    dataset: "ercot-dam-lmp-bus",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86_400 },
     tokens: 0.5,
@@ -149,7 +149,7 @@ export const SCHEMAS: Schema[] = [
     maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
     variables: [
       {
-        key: "lmp_total",
+        key: "lmp",
         label: "Cleared price",
         unit: "$/MWh",
         availability: "live",

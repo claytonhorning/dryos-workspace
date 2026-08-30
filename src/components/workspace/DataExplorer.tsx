@@ -89,7 +89,6 @@ export function DataExplorer({
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
         <SetView
           schema={drill}
-          selected={selected}
           chosen={chosen}
           onToggle={onToggle}
           onBack={() => setDrill(null)}
@@ -273,13 +272,11 @@ interface EntityRow {
  */
 function SetView({
   schema,
-  selected,
   chosen,
   onToggle,
   onBack,
 }: {
   schema: Schema;
-  selected: DataRef[];
   chosen: Set<string>;
   onToggle: (ref: DataRef) => void;
   onBack: () => void;

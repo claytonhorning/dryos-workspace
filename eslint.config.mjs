@@ -15,6 +15,9 @@ const eslintConfig = [
     ignores: [
       "node_modules/**",
       ".next/**",
+      // build:check's own dist dir — generated types in here once drowned the
+      // real findings 11,000 to 1.
+      ".next-check/**",
       "out/**",
       "build/**",
       "next-env.d.ts",
