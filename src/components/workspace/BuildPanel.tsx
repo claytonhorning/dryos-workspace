@@ -233,6 +233,13 @@ export function BuildPanel({
                   setCarrying(null);
                   onDragStateChange(null);
                 }}
+                onDelete={async () => {
+                  await fetch(`/api/workspace/components?id=${encodeURIComponent(c.id)}`, {
+                    method: "DELETE",
+                  });
+                  const d = await fetch("/api/workspace/components").then((r) => r.json());
+                  setSaved(d.components ?? []);
+                }}
               />
             );
           })}
@@ -402,6 +409,7 @@ function Card({
   onOpen,
   onDragStart,
   onDragEnd,
+  onDelete,
 }: {
   kind: ComponentKind;
   title: string;
@@ -413,6 +421,8 @@ function Card({
   onOpen?: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
+  /** Saved components can leave the shelf; the built-in shapes cannot. */
+  onDelete?: () => void;
 }) {
   const open = enabled && onOpen ? onOpen : undefined;
   return (
@@ -448,6 +458,19 @@ function Card({
         <span className="truncate text-[12px] font-medium text-ink">
           {title}
         </span>
+        {onDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            aria-label={`Delete ${title}`}
+            title="Delete this saved component"
+            className="ml-auto shrink-0 rounded px-1 text-[11px] text-faint transition-colors hover:text-fail"
+          >
+            ✕
+          </button>
+        )}
       </div>
       <p className="mt-1 line-clamp-2 text-[10.5px] leading-snug text-faint">
         {body}

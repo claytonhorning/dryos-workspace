@@ -323,6 +323,9 @@ function SetView({
   const [rows, setRows] = useState<EntityRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [opened, setOpened] = useState(false);
+  /** A fetch has actually delivered rows for the current view — before that,
+   *  an empty list means "still looking", not "nothing matches". */
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(async () => {
@@ -337,21 +340,30 @@ function SetView({
         const json = await res.json();
         if (!res.ok) {
           setRows([]);
+          setSettled(true);
           return;
         }
-        setRows(json.nodes ?? []);
         if (json.facets && !opened) {
           setFacets(json.facets);
           // Open on the smallest readable tier — the hubs, not an
-          // alphabetical slice of the resource nodes.
+          // alphabetical slice of the resource nodes. When a tier is chosen,
+          // the unfiltered rows this first fetch returned are never shown:
+          // painting them for a beat and then jumping to the tier read as a
+          // glitch, and the second fetch is the one that matters.
           const tiers = Object.entries(json.facets as Record<string, number>)
             .filter(([, n]) => n > 1 && n <= 12)
             .sort((a, b) => a[1] - b[1]);
-          if (tiers[0]) setFacet(tiers[0][0]);
           setOpened(true);
+          if (tiers[0]) {
+            setFacet(tiers[0][0]);
+            return;
+          }
         }
+        setRows(json.nodes ?? []);
+        setSettled(true);
       } catch {
         setRows([]);
+        setSettled(true);
       } finally {
         setBusy(false);
       }
@@ -439,7 +451,7 @@ function SetView({
           </button>
         )}
 
-        {busy && rows.length === 0 ? (
+        {rows.length === 0 && !settled ? (
           <p className="px-1 py-1.5 text-[11.5px] text-faint">Searching…</p>
         ) : rows.length === 0 ? (
           <p className="px-1 py-1.5 text-[11.5px] text-faint">
