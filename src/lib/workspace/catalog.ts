@@ -378,7 +378,7 @@ export const SCHEMAS: Schema[] = [
     entities: {
       count: 1,
       label: "system series",
-      sample: ["SYSTEM"],
+      sample: [],
     },
     blurb:
       "The system-wide marginal energy price from every SCED run — one number for what energy is worth in ERCOT right now. Collected from ERCOT MIS (NP6-322).",
@@ -406,7 +406,7 @@ export const SCHEMAS: Schema[] = [
     entities: {
       count: 1,
       label: "system series",
-      sample: ["SYSTEM"],
+      sample: [],
     },
     blurb:
       "The day-ahead hourly system-wide marginal energy price, posted once after the DAM run. Collected from ERCOT MIS (NP4-523).",
@@ -703,7 +703,7 @@ export const SCHEMAS: Schema[] = [
     entities: {
       count: 1,
       label: "system series",
-      sample: ["SYSTEM"],
+      sample: [],
     },
     blurb:
       "System-wide actual demand at 15-minute resolution — the one-line answer to how much Texas is using. Collected from ERCOT MIS (NP6-235).",
@@ -731,7 +731,7 @@ export const SCHEMAS: Schema[] = [
     entities: {
       count: 1,
       label: "system series",
-      sample: ["SYSTEM"],
+      sample: [],
     },
     blurb:
       "The grid-conditions headline: 5-minute demand against available committed capacity, from ERCOT's own dashboard feed — which retains two days, so the history exists because the collector keeps running.",
@@ -922,7 +922,7 @@ export const SCHEMAS: Schema[] = [
     entities: {
       count: 1,
       label: "system series",
-      sample: ["SYSTEM"],
+      sample: [],
     },
     blurb:
       "The scarcity-pricing feed: reliability deployment price adders, deployments and online reserve limits from every SCED run. Collected from ERCOT MIS (NP6-323).",
@@ -968,7 +968,7 @@ export const SCHEMAS: Schema[] = [
     entities: {
       count: 1,
       label: "system series",
-      sample: ["SYSTEM"],
+      sample: [],
     },
     blurb:
       "ERCOT's own hour-by-hour view of whether it has enough capacity, 168 hours out, refreshed hourly with every revision kept. Collected from ERCOT MIS (NP3-763).",

@@ -19,6 +19,15 @@ import { useTheme } from "@/lib/useTheme";
  * position inward, where the grid opens a real gap at the size of the tile that
  * is coming. Nothing is labelled and nothing is drawn out here: what you see is
  * the layout you are about to get.
+ *
+ * A saved revision arrives as a new `version`, and the new bundle takes a
+ * moment to compile and boot. Swapping frames immediately painted that moment
+ * as a blank screen — the working dashboard vanished every time something was
+ * added to it. So revisions double-buffer: the outgoing frame stays exactly
+ * where it is, the incoming one loads invisibly on top, and only when its
+ * script has executed (the bundle's script tag is parser-blocking, so `load`
+ * means "running", not "requested") do the two trade places. An `updating`
+ * chip says why the numbers are a beat old.
  */
 export function Runner({
   appId,
@@ -46,23 +55,29 @@ export function Runner({
   /** Edge to edge: no radius, no border. The screen is the whole view. */
   flush?: boolean;
 }) {
-  const frame = useRef<HTMLIFrameElement>(null);
+  /** The visible frame — drops, theme pushes and drag messages address it. */
+  const frame = useRef<HTMLIFrameElement | null>(null);
   const shell = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(0);
   /** The gap the frame says the pointer is currently over. */
   const slot = useRef<number | null>(null);
   const theme = useTheme();
 
+  /** The revision on screen, and the one loading invisibly behind it. */
+  const [live, setLive] = useState(version);
+  const [pending, setPending] = useState<number | null>(null);
+  useEffect(() => {
+    setPending(version === live ? null : version);
+  }, [version, live]);
+
   // The frame cannot read this document, so the theme has to be handed to it —
   // on load and again whenever it changes under someone's feet.
   useEffect(() => {
     frame.current?.contentWindow?.postMessage({ __dryos: "theme", value: theme }, "*");
-  }, [theme, version]);
+  }, [theme, live]);
 
   const answer = useCallback(
-    async (id: number, op: string, payload: unknown) => {
-      const win = frame.current?.contentWindow;
-      if (!win) return;
+    async (win: Window, id: number, op: string, payload: unknown) => {
       setBusy((n) => n + 1);
       try {
         if (op !== "query") throw new Error(`Unknown operation "${op}"`);
@@ -92,10 +107,17 @@ export function Runner({
     [appId],
   );
 
+  /** Both frames during a handover; answers go back to whichever one asked. */
+  const windows = useRef(new Set<Window>());
+  const adopt = useCallback((el: HTMLIFrameElement | null, visible: boolean) => {
+    if (el?.contentWindow) windows.current.add(el.contentWindow);
+    if (visible) frame.current = el;
+  }, []);
+
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      // Only listen to our own frame; anything else on the page is not ours.
-      if (e.source !== frame.current?.contentWindow) return;
+      // Only listen to our own frames; anything else on the page is not ours.
+      if (!e.source || !windows.current.has(e.source as Window)) return;
       const m = e.data as
         | { __dryos: "call"; id: number; op: string; payload: unknown }
         | { __dryos: "error"; message: string }
@@ -103,7 +125,11 @@ export function Runner({
         | { __dryos: "resize"; index: number; w: number; h: number }
         | { __dryos: "reorder"; from: number; to: number };
       if (!m || typeof m !== "object") return;
-      if (m.__dryos === "call") void answer(m.id, m.op, m.payload);
+      // Data calls are answered for either frame — the incoming one starts
+      // querying while it is still invisible. Layout gestures only mean
+      // anything from the one being looked at.
+      if (m.__dryos === "call") void answer(e.source as Window, m.id, m.op, m.payload);
+      else if (e.source !== frame.current?.contentWindow) return;
       else if (m.__dryos === "error") onError?.(m.message);
       else if (m.__dryos === "slot") {
         slot.current = m.index;
@@ -119,6 +145,8 @@ export function Runner({
     return () => window.removeEventListener("message", onMessage);
   }, [answer, onError, onResize, onReorder]);
 
+  const versions = pending != null ? [live, pending] : [live];
+
   return (
     <div
       ref={shell}
@@ -127,30 +155,44 @@ export function Runner({
         flush ? "" : "rounded-lg border border-line",
       )}
     >
-      <iframe
-        // Remount on every revision rather than mutating `src` in place.
-        // Reassigning the attribute is supposed to navigate, but a frame that
-        // has already loaded does not always act on it — and a preview that
-        // silently keeps showing the previous version is worse than no preview.
-        key={version}
-        ref={frame}
-        // The revision is in the path, so a saved change gives the frame a new
-        // address and it reloads on its own — no cache busting, no imperative
-        // reload call the sandbox would not allow anyway.
-        // Also on the URL, so the very first paint is already the right colour
-        // rather than a dark flash that corrects itself a beat later.
-        src={`/api/workspace/apps/${appId}/bundle/${version}?theme=${theme}`}
-        onLoad={() =>
-          frame.current?.contentWindow?.postMessage(
-            { __dryos: "theme", value: theme },
-            "*",
-          )
-        }
-        sandbox="allow-scripts"
-        className="h-full w-full border-0"
-        title="App preview"
-      />
-      {busy > 0 && !dropping && (
+      {versions.map((v) => {
+        const visible = v === live;
+        return (
+          <iframe
+            // Keyed by revision: on swap the incoming frame keeps its key and
+            // only changes class, so the app that just booted is the app shown
+            // — never a third mount.
+            key={v}
+            ref={(el) => adopt(el, visible)}
+            // The revision is in the path, so a saved change gives the frame a
+            // new address — no cache busting, and no imperative reload the
+            // sandbox would not allow anyway. Theme on the URL so the very
+            // first paint is already the right colour.
+            src={`/api/workspace/apps/${appId}/bundle/${v}?theme=${theme}`}
+            onLoad={(e) => {
+              e.currentTarget.contentWindow?.postMessage(
+                { __dryos: "theme", value: theme },
+                "*",
+              );
+              // The parser-blocking script has run: the new revision is
+              // rendering. Now — and only now — it takes the screen.
+              if (!visible) setLive(v);
+            }}
+            sandbox="allow-scripts"
+            className={cx(
+              "absolute inset-0 h-full w-full border-0",
+              visible ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+            title="App preview"
+          />
+        );
+      })}
+      {pending != null && (
+        <span className="pointer-events-none absolute top-2 right-2 animate-pulse rounded border border-accent-line bg-surface/80 px-1.5 py-[2px] font-mono text-[10px] text-accent backdrop-blur">
+          updating…
+        </span>
+      )}
+      {busy > 0 && !dropping && pending == null && (
         <span className="pointer-events-none absolute top-2 right-2 rounded border border-line bg-surface/80 px-1.5 py-[2px] font-mono text-[10px] text-faint backdrop-blur">
           querying…
         </span>
