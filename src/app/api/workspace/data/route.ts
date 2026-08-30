@@ -22,7 +22,9 @@ import { normaliseRow, resolveTime } from "@/lib/workspace/time";
  * marks it as mock is the catalogue, and that badge travels with every chip.
  */
 const API = process.env.DRYOS_API_URL ?? "http://127.0.0.1:8000";
-const MAX_LIMIT = 2000;
+// High enough for a fanned-out stream — a whole small-entity dataset in one
+// query is ~10 series × a week of hourly rows. The backend caps at 50k.
+const MAX_LIMIT = 10_000;
 
 export async function POST(req: Request) {
   let body: {

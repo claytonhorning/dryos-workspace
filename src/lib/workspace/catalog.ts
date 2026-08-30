@@ -38,6 +38,20 @@ export interface Schema {
   /** Dryos tokens burned each time this schema is queried. */
   tokens: number;
   entities: { count: number; label: string; sample: string[] };
+  /**
+   * The row column that names an entity, present when the stream is small
+   * enough to fan out — a stream-level reference then means "all of it", and
+   * a chart pivots the rows into one series per entity instead of quietly
+   * picking the first sample. Streams with thousands of entities (settlement
+   * points, buses) leave this unset: fanning those out is not a chart.
+   */
+  entityKey?: string;
+  /**
+   * Entities a fan-out must leave behind: the aggregate rows the source
+   * publishes alongside the parts. Stacking TOTAL on top of the zones it sums
+   * counts everything twice.
+   */
+  entityOmit?: string[];
   blurb: string;
   variables: Variable[];
   /**
@@ -152,6 +166,8 @@ export const SCHEMAS: Schema[] = [
       label: "weather zones",
       sample: ["COAST", "NORTH_C", "TOTAL"],
     },
+    entityKey: "zone",
+    entityOmit: ["TOTAL"],
     blurb:
       "Metered demand by weather zone, hourly, with ERCOT's own system total as " +
       "its own row. The denominator for scarcity. Collected from ERCOT MIS " +
@@ -182,6 +198,8 @@ export const SCHEMAS: Schema[] = [
       label: "weather zones",
       sample: ["COAST", "NORTH_C", "TOTAL"],
     },
+    entityKey: "zone",
+    entityOmit: ["TOTAL"],
     blurb:
       "ERCOT's own load forecast by weather zone, refreshed every hour, seven " +
       "days out. Served as the newest view of each hour; every revision is " +
@@ -213,6 +231,7 @@ export const SCHEMAS: Schema[] = [
       label: "fuel types",
       sample: ["NATURAL_GAS", "WIND", "SOLAR"],
     },
+    entityKey: "fuel",
     blurb:
       "Output by fuel type across the interconnect, every five minutes. What is " +
       "actually setting the price. Collected from ERCOT's dashboard feed, which " +

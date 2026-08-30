@@ -191,6 +191,36 @@ function titleFor(refs: DataRef[], s: { label: string }[]): string {
   return s.map((x) => x.label).join(" · ");
 }
 
+/**
+ * Whether a lone reference means "all of the stream".
+ *
+ * The explorer hands out stream- and variable-level chips, never entities, so
+ * "chart the fuel mix" used to collapse to whichever entity happened to be the
+ * catalogue's first sample. For a stream that declares an `entityKey` the
+ * honest reading of that chip is every entity it has: the query drops its
+ * entity filter and the emitted code pivots rows into one series per entity
+ * at runtime — which also means an entity ERCOT adds next year shows up
+ * without anyone recomposing the page.
+ */
+function fanoutOf(ref: DataRef): { key: string; omit: string[] } | null {
+  if (ref.kind === "entity" || ref.kind === "query") return null;
+  const schema = schemaFor(ref.schemaId);
+  if (!schema?.entityKey) return null;
+  return { key: schema.entityKey, omit: schema.entityOmit ?? [] };
+}
+
+const WINDOW_SECONDS: Record<string, number> = {
+  "-6h": 21_600,
+  "-24h": 86_400,
+  "-7d": 604_800,
+};
+
+/** Enough rows for every entity across the window, within the route's cap. */
+function fanoutLimit(window: string, cadenceSeconds: number): number {
+  const span = WINDOW_SECONDS[window] ?? 86_400;
+  return Math.min(10_000, Math.ceil(span / Math.max(cadenceSeconds, 60)) * 10);
+}
+
 /** Rendered beside anything drawn from a schema with no collector. */
 function mockTag(any: boolean): string {
   return any
@@ -245,61 +275,71 @@ const chart: ComponentDef = {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
     const name = `Chart${i}`;
-    const title = titleFor(refs, s);
     const stacked = o.shape === "stacked";
     const area = o.shape === "area";
     const Wrap = stacked || area ? "AreaChart" : "LineChart";
-    // A day of a five-minute feed is 288 rows; a week is 2,016. The limit
-    // follows the window instead of quietly truncating the long one.
-    const limit = o.window === "-7d" ? 2000 : 500;
+    const fan = refs.length === 1 ? fanoutOf(refs[0]) : null;
+    const title = fan
+      ? (schemaFor(refs[0].schemaId)?.name ?? s[0].label)
+      : titleFor(refs, s);
+    // A day of a five-minute feed is 288 rows; a week is 2,016 — and a
+    // fanned-out stream multiplies that by its entities. The limit follows
+    // the window instead of quietly truncating the long one.
+    const limit = fan
+      ? fanoutLimit(o.window, refs[0].cadenceSeconds)
+      : o.window === "-7d"
+        ? 2000
+        : 500;
     // Hours carry a day of context; a week needs dates.
     const tickFmt =
       o.window === "-7d"
         ? "(t) => new Date(t).toISOString().slice(5, 10)"
         : "(t) => new Date(t).toISOString().slice(11, 16)";
+    // A fanned-out chart is always several series, whatever its shape, so it
+    // always carries the legend.
+    const legend = stacked || fan;
 
-    const marks = stacked
-      ? // Runtime-ordered: "largest first" puts the biggest series at the
-        // bottom of the stack, which is how every fuel-mix chart reads. The
-        // surface-coloured stroke is the gap between segments, so adjacent
-        // fills never touch — identity is never colour alone.
-        `{ordered.map((sr) => (
-            <Area key={sr.key} type="monotone" stackId="a" dataKey={sr.key} name={sr.label} stroke="var(--surface)" strokeWidth={1} fill={sr.color} fillOpacity={0.85} dot={false} isAnimationActive={false} connectNulls />
-          ))}`
-      : s
-          .map(
-            (x, n) =>
-              `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${PALETTE[n % PALETTE.length]}" ${area ? `fill="${PALETTE[n % PALETTE.length]}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`,
-          )
-          .join("\n          ");
+    const queries = fan
+      ? [{ dataset: s[0].dataset, start: o.window, limit }]
+      : s.map((x) => ({ dataset: x.dataset, node: x.node, start: o.window, limit }));
 
-    return {
-      imports: [
-        Wrap,
-        stacked || area ? "Area" : "Line",
-        "XAxis",
-        "YAxis",
-        "CartesianGrid",
-        "Tooltip",
-        "ResponsiveContainer",
-        "ReferenceLine",
-        ...(stacked ? ["Legend"] : []),
-      ],
-      code: `function ${name}({ w, h }) {
-  const { rows, error, loading } = useSeries(
-    ${JSON.stringify(
-      s.map((x) => ({
-        dataset: x.dataset,
-        node: x.node,
-        start: o.window,
-        limit,
-      })),
-      null,
-      2,
-    ).replace(/\n/g, "\n    ")},
-    ${refreshMs(refs)},
-  );
+    const setup = fan
+      ? `
+  const ENTITY = ${JSON.stringify(fan.key)};
+  const OMIT = ${JSON.stringify(fan.omit)};
+  const COLUMN = ${JSON.stringify(s[0].column)};
 
+  /*
+    Pivot: one point per interval, one key per entity, discovered from the
+    rows rather than declared — an entity the source adds next year appears
+    without this page being recomposed. Colour slots go by alphabetical
+    entity name, so a reload never repaints anyone; past eight entities the
+    eight largest keep the chart and the rest wait for a second tile.
+  */
+  const { merged, names } = React.useMemo(() => {
+    const by = new Map();
+    const size = new Map();
+    (rows[0] || []).forEach((r) => {
+      const e = r[ENTITY];
+      if (e == null || OMIT.includes(e)) return;
+      const t = Date.parse(r.interval_start_utc);
+      const at = by.get(t) || { t };
+      at[e] = r[COLUMN];
+      by.set(t, at);
+      size.set(e, (size.get(e) || 0) + Math.abs(r[COLUMN] ?? 0));
+    });
+    let names = [...size.keys()].sort();
+    if (names.length > 8) {
+      const keep = new Set(
+        [...size.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map((x) => x[0]),
+      );
+      names = names.filter((e) => keep.has(e));
+    }
+    return { merged: [...by.values()].sort((a, b) => a.t - b.t), names };
+  }, [rows]);
+
+  const SERIES = names.map((e, n) => ({ key: e, label: e, color: ${JSON.stringify(PALETTE)}[n % 8] }));`
+      : `
   // One point per interval, every series on the same timestamp.
   const merged = React.useMemo(() => {
     const by = new Map();
@@ -320,17 +360,61 @@ ${
     ? `
   const SERIES = ${JSON.stringify(
     s.map((x, n) => ({ key: x.key, label: x.label, color: PALETTE[n % PALETTE.length] })),
-  )};
-  // Stack order is decided from the data: the biggest series goes to the
-  // bottom. Colours ride with the series, never with the position.
+  )};`
+    : ""
+}`;
+
+    // Stack order is decided from the data: the biggest series goes to the
+    // bottom. Colours ride with the series, never with the position.
+    const orderMemo =
+      stacked || fan
+        ? `
   const ordered = React.useMemo(() => {
-    if (${JSON.stringify(o.order)} !== "size" || !merged.length) return SERIES;
+    if (!${JSON.stringify(stacked)} || ${JSON.stringify(o.order)} !== "size" || !merged.length) return SERIES;
     const mean = (k) => merged.reduce((a, r) => a + (r[k] ?? 0), 0) / merged.length;
     return [...SERIES].sort((a, b) => mean(b.key) - mean(a.key));
-  }, [merged]);
+  }, [merged, SERIES]);
 `
-    : ""
-}
+        : "";
+
+    const marks =
+      stacked || fan
+        ? stacked
+          ? // The surface-coloured stroke is the gap between stacked
+            // segments, so adjacent fills never touch — identity is never
+            // colour alone.
+            `{ordered.map((sr) => (
+            <Area key={sr.key} type="monotone" stackId="a" dataKey={sr.key} name={sr.label} stroke="var(--surface)" strokeWidth={1} fill={sr.color} fillOpacity={0.85} dot={false} isAnimationActive={false} connectNulls />
+          ))}`
+          : `{ordered.map((sr) => (
+            <${area ? "Area" : "Line"} key={sr.key} type="monotone" dataKey={sr.key} name={sr.label} stroke={sr.color} ${area ? "fill={sr.color} fillOpacity={0.12} " : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />
+          ))}`
+        : s
+            .map(
+              (x, n) =>
+                `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${PALETTE[n % PALETTE.length]}" ${area ? `fill="${PALETTE[n % PALETTE.length]}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`,
+            )
+            .join("\n          ");
+
+    return {
+      imports: [
+        Wrap,
+        stacked || area ? "Area" : "Line",
+        "XAxis",
+        "YAxis",
+        "CartesianGrid",
+        "Tooltip",
+        "ResponsiveContainer",
+        "ReferenceLine",
+        ...(legend ? ["Legend"] : []),
+      ],
+      code: `function ${name}({ w, h }) {
+  const { rows, error, loading } = useSeries(
+    ${JSON.stringify(queries, null, 2).replace(/\n/g, "\n    ")},
+    ${refreshMs(refs)},
+  );
+${setup}
+${orderMemo}
   return (
     <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(title)} unit=${JSON.stringify(s[0].unit)} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
@@ -351,7 +435,7 @@ ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
           <ReferenceLine y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />
           <Tooltip content={<ChartTip unit=${JSON.stringify(s[0].unit)} />} />
 ${
-  stacked
+  legend
     ? `          <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />
           `
     : "          "
@@ -394,7 +478,7 @@ const bar: ComponentDef = {
   accepts: (refs) =>
     refs.length === 0
       ? { ok: false, why: "Pick some series." }
-      : refs.length === 1
+      : refs.length === 1 && !fanoutOf(refs[0])
         ? { ok: false, why: "One value is a ticker — add a second series to compare." }
         : refs.length > 8
           ? { ok: false, why: "Eight bars is the most one chart compares well." }
@@ -402,36 +486,55 @@ const bar: ComponentDef = {
             ? { ok: false, why: "Bars compare one unit; these mix units." }
             : { ok: true },
   // Beside a single selection a bar is not a rejected bar, it is a ticker —
-  // the same reasoning that takes the ticker off the shelf beside three.
-  offered: (refs) => refs.length !== 1,
+  // unless the selection is a whole stream, which fans out into a bar per
+  // entity and is exactly what this shape is for.
+  offered: (refs) => refs.length !== 1 || fanoutOf(refs[0]) !== null,
   emit(refs, i, o) {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
     const name = `Bar${i}`;
-    const title = titleFor(refs, s);
+    const fan = refs.length === 1 ? fanoutOf(refs[0]) : null;
+    const title = fan
+      ? (schemaFor(refs[0].schemaId)?.name ?? s[0].label)
+      : titleFor(refs, s);
     const horizontal = o.orient === "h";
 
-    return {
-      imports: [
-        "BarChart",
-        "Bar",
-        "Cell",
-        "XAxis",
-        "YAxis",
-        "CartesianGrid",
-        "Tooltip",
-        "ResponsiveContainer",
-      ],
-      code: `function ${name}({ w, h }) {
-  const { rows, error, loading } = useSeries(
-    ${JSON.stringify(
-      s.map((x) => ({ dataset: x.dataset, node: x.node, limit: 1 })),
-      null,
-      2,
-    ).replace(/\n/g, "\n    ")},
-    ${refreshMs(refs)},
-  );
+    const queries = fan
+      ? // Two intervals' worth of rows covers every entity even when the
+        // newest interval is still filling in.
+        [{ dataset: s[0].dataset, limit: 24 }]
+      : s.map((x) => ({ dataset: x.dataset, node: x.node, limit: 1 }));
 
+    const dataMemo = fan
+      ? `
+  const ENTITY = ${JSON.stringify(fan.key)};
+  const OMIT = ${JSON.stringify(fan.omit)};
+  const COLUMN = ${JSON.stringify(s[0].column)};
+
+  // Rows arrive newest-first, so the first row per entity is its latest
+  // value. Colour slots go by alphabetical entity name — stable across
+  // reloads and untouched by the sort below.
+  const data = React.useMemo(() => {
+    const latest = new Map();
+    (rows[0] || []).forEach((r) => {
+      const e = r[ENTITY];
+      if (e == null || OMIT.includes(e) || latest.has(e)) return;
+      latest.set(e, r[COLUMN]);
+    });
+    const names = [...latest.keys()].sort();
+    const out = names
+      .map((e, n) => ({
+        name: e,
+        full: e,
+        fill: ${JSON.stringify(PALETTE)}[n % 8],
+        v: latest.get(e),
+      }))
+      .filter((d) => d.v != null)
+      .slice(0, 8);
+    if (${JSON.stringify(o.sort)} === "size") out.sort((a, b) => b.v - a.v);
+    return out;
+  }, [rows]);`
+      : `
   // The entity is the bar's name; colour was assigned at selection time and
   // rides with the entity through any sort, never with its rank.
   const SERIES = ${JSON.stringify(
@@ -453,7 +556,25 @@ const bar: ComponentDef = {
     if (${JSON.stringify(o.sort)} === "size") out.sort((a, b) => b.v - a.v);
     if (${JSON.stringify(o.sort)} === "az") out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
-  }, [rows]);
+  }, [rows]);`;
+
+    return {
+      imports: [
+        "BarChart",
+        "Bar",
+        "Cell",
+        "XAxis",
+        "YAxis",
+        "CartesianGrid",
+        "Tooltip",
+        "ResponsiveContainer",
+      ],
+      code: `function ${name}({ w, h }) {
+  const { rows, error, loading } = useSeries(
+    ${JSON.stringify(queries, null, 2).replace(/\n/g, "\n    ")},
+    ${refreshMs(refs)},
+  );
+${dataMemo}
 
   function BarTip({ active, payload }) {
     if (!active || !payload || !payload.length) return null;
