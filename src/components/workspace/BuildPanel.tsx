@@ -507,6 +507,15 @@ function Glyph({ kind, on }: { kind: ComponentKind; on: boolean }) {
           <path d="M11.5 11.5 V5" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
         </>
       )}
+      {kind === "heatmap" && (
+        <>
+          {[2, 6.5, 11].flatMap((x) =>
+            [2, 6.5, 11].map((y) => (
+              <rect key={`${x}-${y}`} x={x} y={y - 1} width="3" height="3" rx="0.5" fill={stroke} opacity={(x + y) / 20} />
+            )),
+          )}
+        </>
+      )}
       {kind === "ticker" && (
         <>
           <rect

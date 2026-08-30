@@ -20,7 +20,7 @@ import { schemaById } from "./catalog";
  * needs. `compose.ts` stitches them into a file.
  */
 
-export type ComponentKind = "chart" | "bar" | "ticker" | "table" | "map";
+export type ComponentKind = "chart" | "bar" | "heatmap" | "ticker" | "table" | "map";
 
 export interface ComponentSpec {
   kind: ComponentKind;
@@ -293,6 +293,18 @@ const chart: ComponentDef = {
       ],
       fallback: "size",
     },
+    {
+      // Two series can also be one question: the difference. RT minus DAM at
+      // a node is the basis trade, and asking for it should not require a
+      // model. Read only when exactly two series are selected.
+      key: "combine",
+      label: "Combine",
+      choices: [
+        { value: "separate", label: "Series" },
+        { value: "spread", label: "Spread (A − B)" },
+      ],
+      fallback: "separate",
+    },
   ],
   // Up to four series read well overlapping. Five to eight only make sense
   // stacked, and stacking sums — so past four the units must agree.
@@ -315,9 +327,14 @@ const chart: ComponentDef = {
     const area = o.shape === "area";
     const Wrap = stacked || area ? "AreaChart" : "LineChart";
     const fan = refs.length === 1 ? fanoutOf(refs[0]) : null;
-    const title = fan
-      ? (schemaFor(refs[0].schemaId)?.name ?? s[0].label)
-      : titleFor(refs, s);
+    // The spread only means anything for exactly two series; any other count
+    // quietly draws them separately rather than failing a shape that renders.
+    const spread = o.combine === "spread" && !fan && s.length === 2;
+    const title = spread
+      ? `${s[0].label} − ${s[1].label}`
+      : fan
+        ? (schemaFor(refs[0].schemaId)?.name ?? s[0].label)
+        : titleFor(refs, s);
     // A day of a five-minute feed is 288 rows; a week is 2,016 — and a
     // fanned-out stream multiplies that by its entities. The limit follows
     // the window instead of quietly truncating the long one.
@@ -389,7 +406,15 @@ const chart: ComponentDef = {
     });`,
       )
       .join("\n    ")}
-    const sorted = [...by.values()].sort((a, b) => a.t - b.t);${slowFill(refs, s)}
+    const sorted = [...by.values()].sort((a, b) => a.t - b.t);${slowFill(refs, s)}${
+      spread
+        ? `
+    // The question is the difference; the sides stay hoverable via the join.
+    for (const row of sorted) {
+      row.sd = row.s0 != null && row.s1 != null ? row.s0 - row.s1 : undefined;
+    }`
+        : ""
+    }
     return sorted;
   }, [rows]);
 ${
@@ -426,7 +451,9 @@ ${
           : `{ordered.map((sr) => (
             <${area ? "Area" : "Line"} key={sr.key} type="monotone" dataKey={sr.key} name={sr.label} stroke={sr.color} ${area ? "fill={sr.color} fillOpacity={0.12} " : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />
           ))}`
-        : s
+        : spread
+          ? `<${area ? "Area" : "Line"} type="monotone" dataKey="sd" name=${JSON.stringify(title)} stroke="${PALETTE[0]}" ${area ? `fill="${PALETTE[0]}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`
+          : s
             .map(
               (x, n) =>
                 `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${PALETTE[n % PALETTE.length]}" ${area ? `fill="${PALETTE[n % PALETTE.length]}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`,
@@ -649,6 +676,143 @@ ${
         </BarChart>
       </ResponsiveContainer>
       </div>
+    </Section>
+  );
+}`,
+    };
+  },
+};
+
+
+const heatmap: ComponentDef = {
+  kind: "heatmap",
+  name: "Heatmap",
+  blurb: "Hour of day against day — where in the day a series lives.",
+  options: [
+    {
+      key: "days",
+      label: "Days",
+      choices: [
+        { value: "7", label: "7 days" },
+        { value: "14", label: "14 days" },
+        { value: "30", label: "30 days" },
+      ],
+      fallback: "14",
+    },
+    {
+      key: "agg",
+      label: "Cell",
+      choices: [
+        { value: "avg", label: "Average" },
+        { value: "max", label: "Peak" },
+      ],
+      fallback: "avg",
+    },
+  ],
+  accepts: (refs) =>
+    refs.length === 0
+      ? { ok: false, why: "Pick a series." }
+      : refs.length > 1
+        ? { ok: false, why: "A heatmap grids one series — hour by day." }
+        : fanoutOf(refs[0])
+          ? { ok: false, why: "Pick a single entity, not the whole stream." }
+          : refs[0].cadenceSeconds > 3600
+            ? { ok: false, why: "Needs an intraday series — a daily one has no hours to grid." }
+            : { ok: true },
+  // Beside several series a heatmap is not a rejected heatmap; the selection
+  // has simply moved past it, the same way it moves past the ticker.
+  offered: (refs) => refs.length <= 1,
+  emit(refs, i, o) {
+    const s = series(refs);
+    const anyMock = s.some((x) => x.mock);
+    const name = `Heatmap${i}`;
+    const days = Number(o.days) || 14;
+    // A month of a five-minute feed is ~8,640 rows; the route caps at 10k.
+    const limit = Math.min(10_000, Math.ceil((days * 86_400) / Math.max(refs[0].cadenceSeconds, 60)) + 48);
+
+    return {
+      imports: [],
+      code: `function ${name}({ w, h }) {
+  const { rows, error, loading } = useSeries(
+    [{ dataset: ${JSON.stringify(s[0].dataset)}, node: ${JSON.stringify(s[0].node)}, start: "-${days}d", limit: ${limit} }],
+    ${refreshMs(refs)},
+  );
+
+  const COLUMN = ${JSON.stringify(s[0].column)};
+  const UNIT = ${JSON.stringify(s[0].unit)};
+  const AGG = ${JSON.stringify(o.agg)};
+
+  /*
+    Bucketed in Central time, because "hour of day" is a claim about when
+    Texans were using power, not about UTC. Intl does the DST arithmetic.
+  */
+  const grid = React.useMemo(() => {
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Chicago",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", hour12: false,
+    });
+    const cells = new Map();
+    (rows[0] || []).forEach((r) => {
+      const v = r[COLUMN];
+      if (typeof v !== "number") return;
+      const parts = fmt.formatToParts(new Date(r.interval_start_utc));
+      const get = (t) => (parts.find((p) => p.type === t) || {}).value;
+      const day = get("year") + "-" + get("month") + "-" + get("day");
+      const hour = Number(get("hour")) % 24;
+      const d = cells.get(day) || {};
+      const c = d[hour] || { sum: 0, n: 0, max: -Infinity };
+      c.sum += v; c.n += 1; c.max = Math.max(c.max, v);
+      d[hour] = c;
+      cells.set(day, d);
+    });
+    const val = (c) => (AGG === "max" ? c.max : c.sum / c.n);
+    const daysList = [...cells.keys()].sort().reverse();
+    let lo = Infinity, hi = -Infinity;
+    daysList.forEach((day) => {
+      const d = cells.get(day);
+      for (const hKey in d) { const x = val(d[hKey]); if (x < lo) lo = x; if (x > hi) hi = x; }
+    });
+    return { daysList, cells, lo, hi, val };
+  }, [rows]);
+
+  const HOURS = Array.from({ length: 24 }, (_, hIdx) => hIdx);
+
+  return (
+    <Section index={${i}} w={w} h={h} title=${JSON.stringify(s[0].label)} unit={UNIT} loading={loading} error={error}>
+${mockTag(anyMock)}      <div style={{ display: "grid", gap: 2, gridTemplateColumns: "auto repeat(24, 1fr)", fontFamily: "var(--mono)", fontSize: 9 }}>
+        <span />
+        {HOURS.map((hr) => (
+          <span key={hr} style={{ color: "var(--faint)", textAlign: "center" }}>
+            {hr % 3 === 0 ? hr : ""}
+          </span>
+        ))}
+        {grid.daysList.map((day) => (
+          <React.Fragment key={day}>
+            <span style={{ alignSelf: "center", color: "var(--faint)", paddingRight: 4 }}>{day.slice(5)}</span>
+            {HOURS.map((hr) => {
+              const c = (grid.cells.get(day) || {})[hr];
+              if (!c) return <span key={hr} style={{ background: "var(--surface-2)", borderRadius: 2, minHeight: 14 }} />;
+              const x = grid.val(c);
+              const t = grid.hi > grid.lo ? (x - grid.lo) / (grid.hi - grid.lo) : 0.5;
+              return (
+                <span
+                  key={hr}
+                  title={day + " " + String(hr).padStart(2, "0") + ":00 CT — " + x.toFixed(1) + " " + UNIT}
+                  style={{
+                    background: "color-mix(in oklab, var(--surface-2), var(--s2) " + Math.round(8 + t * 88) + "%)",
+                    borderRadius: 2,
+                    minHeight: 14,
+                  }}
+                />
+              );
+            })}
+          </React.Fragment>
+        ))}
+      </div>
+      <p style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9.5, margin: "6px 0 0" }}>
+        {grid.lo === Infinity ? "no data yet" : grid.lo.toFixed(1) + " – " + grid.hi.toFixed(1) + " " + UNIT + " · " + (AGG === "max" ? "peak" : "average") + " per hour · Central time"}
+      </p>
     </Section>
   );
 }`,
@@ -1389,7 +1553,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   },
 };
 
-export const COMPONENTS: ComponentDef[] = [chart, bar, ticker, table, map];
+export const COMPONENTS: ComponentDef[] = [chart, bar, heatmap, ticker, table, map];
 
 export function componentDef(kind: ComponentKind): ComponentDef | undefined {
   return COMPONENTS.find((c) => c.kind === kind);
@@ -1405,6 +1569,7 @@ export function componentDef(kind: ComponentKind): ComponentDef | undefined {
 export const DEFAULT_LAYOUT: Record<ComponentKind, { w: number; h: number }> = {
   chart: { w: 6, h: 240 },
   bar: { w: 4, h: 220 },
+  heatmap: { w: 6, h: 280 },
   ticker: { w: 3, h: 150 },
   table: { w: 6, h: 260 },
   map: { w: 6, h: 300 },

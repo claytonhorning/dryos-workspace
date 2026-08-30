@@ -313,12 +313,6 @@ function SetView({
   // Which measure a picked entity refers to. Most streams have one; the rest
   // get a radio, because "wind actual" and "wind forecast" are different picks.
   const [varKey, setVarKey] = useState(schema.variables[0]?.key);
-  // The whole stream as one reference — the fan-out pick, for streams small
-  // enough to take whole. It stays live as entities come and go at the source.
-  const streamRef = useMemo(
-    () => catalogRefs().find((r) => r.schemaId === schema.id && r.kind === "schema"),
-    [schema.id],
-  );
   const [facets, setFacets] = useState<Record<string, number> | null>(null);
   const [rows, setRows] = useState<EntityRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -335,7 +329,7 @@ function SetView({
         url.searchParams.set("dataset", schema.dataset!);
         if (q.trim()) url.searchParams.set("q", q.trim());
         if (facet && !q.trim()) url.searchParams.set("node_type", facet);
-        url.searchParams.set("limit", "24");
+        url.searchParams.set("limit", "2000");
         const res = await fetch(url);
         const json = await res.json();
         if (!res.ok) {
@@ -435,22 +429,6 @@ function SetView({
       </div>
 
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
-        {schema.entityKey && streamRef && (
-          <button
-            onClick={() => onToggle(streamRef)}
-            className={cx(
-              "mb-1.5 w-full rounded-md border px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
-              chosen.has(`${streamRef.snippet}::${streamRef.label}`)
-                ? "border-accent-line bg-accent-dim text-accent"
-                : "border-dashed border-accent-line text-accent hover:bg-accent-dim",
-            )}
-          >
-            {chosen.has(`${streamRef.snippet}::${streamRef.label}`) ? "✓ " : ""}
-            All {schema.entities.count} as one selection — stays current as the
-            set changes
-          </button>
-        )}
-
         {rows.length === 0 && !settled ? (
           <p className="px-1 py-1.5 text-[11.5px] text-faint">Searching…</p>
         ) : rows.length === 0 ? (
@@ -495,12 +473,6 @@ function SetView({
               </button>
             );
           })
-        )}
-        {!q.trim() && facet == null && (
-          <p className="px-1 pt-1.5 text-[10.5px] text-faint">
-            Showing the first {rows.length} alphabetically — search or pick a
-            tier to narrow.
-          </p>
         )}
       </div>
     </>
