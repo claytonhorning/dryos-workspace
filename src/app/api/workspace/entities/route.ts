@@ -22,6 +22,8 @@ export async function GET(req: Request) {
   const url = new URL(`${API}/v1/datasets/${dataset}/nodes`);
   const q = p.get("q");
   if (q) url.searchParams.set("q", q);
+  const nodeType = p.get("node_type");
+  if (nodeType) url.searchParams.set("node_type", nodeType);
   url.searchParams.set("limit", p.get("limit") ?? "12");
 
   try {
