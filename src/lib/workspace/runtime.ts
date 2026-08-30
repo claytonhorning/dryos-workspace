@@ -250,6 +250,8 @@ body {
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { text-align:left; padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
 th { font-family: var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); font-weight:400; }
+/* A dropped tile's gap breathes while its revision composes — see Ghost. */
+@keyframes dr-ghost { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 `;
 
 /**

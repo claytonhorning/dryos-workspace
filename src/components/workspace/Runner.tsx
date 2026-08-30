@@ -36,6 +36,7 @@ export function Runner({
   dropping,
   dropSize,
   onDropAt,
+  placing,
   onResize,
   onReorder,
   flush,
@@ -48,6 +49,12 @@ export function Runner({
   /** Footprint of the incoming tile, so the frame previews it at the right size. */
   dropSize?: { w: number; h: number };
   onDropAt?: (index: number) => void;
+  /**
+   * A drop is being composed and saved. While true the frame keeps the gap
+   * open where the tile will land; when it falls without a new revision
+   * arriving, the placement failed and the gap is released.
+   */
+  placing?: boolean;
   /** A tile's corner was dragged inside the frame. */
   onResize?: (index: number, w: number, h: number) => void;
   /** A tile was dragged onto another one inside the frame. */
@@ -145,7 +152,21 @@ export function Runner({
     return () => window.removeEventListener("message", onMessage);
   }, [answer, onError, onResize, onReorder]);
 
-  const versions = pending != null ? [live, pending] : [live];
+  // Never let the two slots carry the same revision — between the swap and
+  // the effect that clears `pending` there is a render where they could.
+  const versions = pending != null && pending !== live ? [live, pending] : [live];
+
+  // A placement that ends without a new revision failed; release the gap the
+  // frame has been holding. A successful one ends with the swap replacing the
+  // frame, gap and all, with the tile already in place.
+  const wasPlacing = useRef(false);
+  useEffect(() => {
+    const was = wasPlacing.current;
+    wasPlacing.current = Boolean(placing);
+    if (was && !placing && pending == null && version === live) {
+      frame.current?.contentWindow?.postMessage({ __dryos: "dragend" }, "*");
+    }
+  }, [placing, pending, version, live]);
 
   return (
     <div
@@ -175,8 +196,13 @@ export function Runner({
                 "*",
               );
               // The parser-blocking script has run: the new revision is
-              // rendering. Now — and only now — it takes the screen.
-              if (!visible) setLive(v);
+              // rendering. Now — and only now — it takes the screen. Both
+              // states move together, or one render sees two frames wearing
+              // the same key.
+              if (!visible) {
+                setLive(v);
+                setPending(null);
+              }
             }}
             sandbox="allow-scripts"
             className={cx(
@@ -234,8 +260,11 @@ export function Runner({
           }}
           onDrop={(e) => {
             e.preventDefault();
+            // Not "dragend": the gap stays open, pulsing, until the revision
+            // that fills it swaps in. Closing it here reflowed the whole page
+            // twice — once to take the gap out, once to put the tile in.
             frame.current?.contentWindow?.postMessage(
-              { __dryos: "dragend" },
+              { __dryos: "placed" },
               "*",
             );
             // The frame decided where; it told us on the last dragover.

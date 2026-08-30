@@ -388,7 +388,7 @@ function slotAt(grid, x, y) {
  * right place: a "DROP HERE" inside it was the caption on a photograph of
  * itself, and it is the one thing on screen while someone is mid-drag.
  */
-function Ghost({ w, h }) {
+function Ghost({ w, h, placing }) {
   return (
     <div
       style={{
@@ -397,6 +397,8 @@ function Ghost({ w, h }) {
         borderRadius: 8,
         gridColumn: "span " + (w || 6),
         height: h || 240,
+        // Dropped, composing: the gap breathes so the wait reads as work.
+        animation: placing ? "dr-ghost 1.1s ease-in-out infinite" : undefined,
       }}
     />
   );
@@ -523,6 +525,10 @@ export default function App() {
     `  // The tile being moved, and the gap it is currently headed for.`,
     `  const [grabbed, setGrabbed] = useState(null);`,
     `  const [slot, setSlot] = useState(null);`,
+    `  // Dropped and being composed: the gap holds its place, pulsing, until`,
+    `  // the revision that fills it replaces this frame — or the host says the`,
+    `  // placement failed and releases it.`,
+    `  const [placing, setPlacing] = useState(false);`,
     ``,
     `  const tiles = [`,
     ...names.map(
@@ -540,11 +546,15 @@ export default function App() {
     `      const m = e.data;`,
     `      if (!m || typeof m !== "object") return;`,
     `      if (m.__dryos === "dragover" && grid.current) {`,
+    `        setPlacing(false);`,
     `        setGrabbed({ index: null, w: m.w, h: m.h });`,
     `        const at = slotAt(grid.current, m.x, m.y);`,
     `        setSlot(at);`,
     `        parent.postMessage({ __dryos: "slot", index: at }, "*");`,
+    `      } else if (m.__dryos === "placed") {`,
+    `        setPlacing(true);`,
     `      } else if (m.__dryos === "dragend") {`,
+    `        setPlacing(false);`,
     `        onDrop();`,
     `      }`,
     `    };`,
@@ -575,10 +585,10 @@ export default function App() {
     ``,
     `  const shown = [];`,
     `  order.forEach((i, n) => {`,
-    `    if (slot === n) shown.push(<Ghost key="ghost" w={grabbed && grabbed.w} h={grabbed && grabbed.h} />);`,
+    `    if (slot === n) shown.push(<Ghost key="ghost" w={grabbed && grabbed.w} h={grabbed && grabbed.h} placing={placing} />);`,
     `    shown.push(tiles[i]);`,
     `  });`,
-    `  if (slot === order.length) shown.push(<Ghost key="ghost" w={grabbed && grabbed.w} h={grabbed && grabbed.h} />);`,
+    `  if (slot === order.length) shown.push(<Ghost key="ghost" w={grabbed && grabbed.w} h={grabbed && grabbed.h} placing={placing} />);`,
     ``,
     `  return (`,
     // Twelve columns, the way every dashboard grid is divided, so a tile can be

@@ -312,6 +312,7 @@ export default function AppPage() {
             dropping={Boolean(dragging)}
             dropSize={dragging?.layout}
             onDropAt={place}
+            placing={pending}
             onResize={resize}
             onReorder={reorder}
             flush={!asideOpen}
