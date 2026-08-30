@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button, cx } from "@/components/ui";
 import {
   COMPONENTS,
@@ -11,27 +11,30 @@ import {
   withDefaults,
 } from "@/lib/workspace/components";
 import { type DataRef } from "@/lib/workspace/catalog";
+import type { PublishedComponent } from "@/lib/workspace/community";
 import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
 
 /**
  * Two ways to make something, split by whether a model is needed.
  *
- * The top half is the shapes that already exist, laid out as a grid that wraps.
- * A rail that scrolled sideways hid half of them behind a gesture — there are
- * only a handful of shapes and the saved ones sit beside them, so they should
- * all be visible at once rather than discovered by dragging the row.
+ * The top half is a shelf in three sections — the base shapes, the components
+ * you saved, and the ones somebody published. They are listed apart because
+ * they answer different questions: a shape is a starting point, a saved
+ * component is something you already decided, and a published one is somebody
+ * else's decision you are borrowing.
  *
- * A card answers two gestures, because there are two things to do with a shape:
+ * **A card is not draggable, and only the preview is.** One gesture used to
+ * mean two things: dragging a card placed the shape sight-unseen at its
+ * defaults, while clicking it opened the real thing underneath. Judging a
+ * component from its name is the guess the inline preview exists to remove, so
+ * the shelf now does one job — click a card and the component runs, on live
+ * data, right under it — and the thing you drag onto the page is the thing you
+ * are looking at. What lands is what you saw, settings and all, which is not
+ * something a card could ever promise.
  *
- * - **Drag it** onto the page. Nothing else to decide, and the drop is the
- *   answer to where — a button labelled "Add" cannot ask that.
- * - **Click it** to configure it first. Window, shape, how many rows: settings
- *   the generator reads but cannot guess. That opens the component editor, which
- *   is also where the model is reached for — so the shape becomes the starting
- *   point the agent edits, rather than a blank file.
- *
- * The bottom half is for the thing that starts from no shape at all: a sentence,
- * which picks a base for you and opens the same editor already running it.
+ * The bottom half is for the thing that starts from no shape at all: a
+ * sentence, which picks a base for you and opens the component editor already
+ * running it.
  *
  * Every path reads the same selection from the explorer, so the data is chosen
  * once and the only remaining question is what to do with it.
@@ -45,6 +48,17 @@ const HINTS_KEY = "dryos:hints";
  * enough to arrive while they are still looking at the preview wondering.
  */
 const HINT_DELAY = 4000;
+
+/**
+ * The preview box runs the component at the full width of the box it sits in.
+ *
+ * Tall enough for the worst case rather than for the typical one: a fan-out
+ * over eight fuel types spends most of a short tile on its axes and legend and
+ * draws a band you cannot read. A preview that has to be enlarged before it
+ * answers the question is not previewing anything. The box outside it is a
+ * little taller again — the generated grid keeps its own gutter.
+ */
+const PREVIEW_LAYOUT = { w: 12, h: 272 };
 
 export interface TrayPayload {
   kind: ComponentKind;
@@ -74,6 +88,27 @@ export interface EditorStart {
   custom?: { name: string; code: string };
 }
 
+/** Which shelf a card came from. It decides how the preview addresses it. */
+type Shelf = "base" | "saved" | "community";
+
+/**
+ * The component running under the shelf.
+ *
+ * It carries its own references rather than reading the explorer's, because a
+ * saved or published component brings its own data — what was selected in the
+ * explorer has nothing to do with it.
+ */
+interface Preview {
+  /** Card identity, so clicking the open card closes it again. */
+  id: string;
+  shelf: Shelf;
+  def: ComponentDef;
+  name: string;
+  refs: DataRef[];
+  layout: { w: number; h: number };
+  custom?: { name: string; code: string };
+}
+
 export function BuildPanel({
   refs,
   onDragStateChange,
@@ -83,23 +118,24 @@ export function BuildPanel({
   refs: DataRef[];
   onDragStateChange: (payload: TrayPayload | null) => void;
   /**
-   * Open the component editor on a starting point — a bare shape to configure,
+   * Open the component editor on a starting point — the shape being previewed,
    * a saved component to change, or a shape with a request already typed.
    */
   onOpen: (start: EditorStart) => void;
   reloadKey: number;
 }) {
   const [saved, setSaved] = useState<Saved[]>([]);
+  const [community, setCommunity] = useState<PublishedComponent[]>([]);
   const [ask, setAsk] = useState("");
-  /** Which card is in flight, so only that one shakes. */
-  const [carrying, setCarrying] = useState<string | null>(null);
+  /** True while the preview is in flight, so it reads as picked up. */
+  const [carrying, setCarrying] = useState(false);
   /**
-   * The shape being previewed, right here under the shelf. Clicking a card
+   * The component being previewed, right here under the shelf. Clicking a card
    * runs the real thing — the preview route composes a one-tile app on live
-   * data — with its settings beside it, so judging a chart never means
+   * data — with its settings beside it, so judging a component never means
    * leaving the panel, and switching cards switches the preview.
    */
-  const [previewKind, setPreviewKind] = useState<ComponentKind | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [previewOpts, setPreviewOpts] = useState<Record<string, string>>({});
   /**
    * The hint in the corner: shown only after a preview has sat there long
@@ -113,9 +149,6 @@ export function BuildPanel({
   /** One drag is the whole lesson; after that there is nothing left to say. */
   const [dragged, setDragged] = useState(false);
 
-  const previewDef = previewKind
-    ? COMPONENTS.find((c) => c.kind === previewKind)
-    : undefined;
   // The missing parent: a sandboxed frame can only reach data through whoever
   // embeds it, and outside Runner that is this hook or a 30-second timeout.
   const previewFrame = usePreviewHost();
@@ -123,7 +156,10 @@ export function BuildPanel({
   useEffect(() => {
     fetch("/api/workspace/components")
       .then((r) => r.json())
-      .then((d) => setSaved(d.components ?? []))
+      .then((d) => {
+        setSaved(d.components ?? []);
+        setCommunity(d.community ?? []);
+      })
       .catch(() => {});
   }, [reloadKey]);
 
@@ -136,7 +172,40 @@ export function BuildPanel({
     }
   }, []);
 
-  const previewLive = Boolean(previewDef?.accepts(refs).ok);
+  /*
+    A shape the selection has moved past leaves the shelf rather than greying on
+    it. Only the ticker does this today: everything else that cannot take the
+    selection has a reason worth reading, and greying carries the reason.
+  */
+  const offered = COMPONENTS.filter((c) => c.offered?.(refs) ?? true);
+  /** A stable identity for that list — the array itself is new every render. */
+  const offeredKey = offered.map((c) => c.kind).join("|");
+
+  /*
+    A base shape is previewed *against the explorer*, so its references are read
+    live rather than snapshotted when the card was clicked — change the
+    selection and the preview redraws on it, which is the whole reason it is
+    down there. A saved or published component brings its own data and ignores
+    the selection entirely.
+  */
+  const previewRefs = preview
+    ? preview.shelf === "base"
+      ? refs
+      : preview.refs
+    : [];
+  const verdict = preview ? preview.def.accepts(previewRefs) : null;
+  const previewLive = Boolean(verdict?.ok);
+
+  // A shape the selection has moved past is gone from the shelf, so leaving its
+  // preview open would leave a component on screen with no card behind it.
+  useEffect(() => {
+    if (
+      preview?.shelf === "base" &&
+      !offeredKey.split("|").includes(preview.id)
+    ) {
+      setPreview(null);
+    }
+  }, [preview, offeredKey]);
 
   useEffect(() => {
     if (!previewLive || hintsOff || dragged) {
@@ -145,14 +214,7 @@ export function BuildPanel({
     }
     const t = setTimeout(() => setHint(true), HINT_DELAY);
     return () => clearTimeout(t);
-  }, [previewLive, previewKind, hintsOff, dragged]);
-
-  /*
-    A shape the selection has moved past leaves the shelf rather than greying on
-    it. Only the ticker does this today: everything else that cannot take the
-    selection has a reason worth reading, and greying carries the reason.
-  */
-  const offered = COMPONENTS.filter((c) => c.offered?.(refs) ?? true);
+  }, [previewLive, preview?.id, hintsOff, dragged]);
 
   /*
     A custom component still has to start from a shape that compiles, so it
@@ -165,11 +227,65 @@ export function BuildPanel({
     ) ?? COMPONENTS[0];
   const canCustom = refs.length > 0 && base.accepts(refs).ok;
 
+  /**
+   * Which card the preview belongs to. Shelf and id together, because ids are
+   * only unique within a shelf — a published component is free to be called
+   * `chart`, and it must not light up the base shape of that name.
+   */
+  const isOpen = (shelf: Shelf, id: string) =>
+    preview?.shelf === shelf && preview.id === id;
+
+  /** Clicking the open card puts the preview away; any other card swaps it. */
+  function show(next: Preview, options: Record<string, string>) {
+    if (isOpen(next.shelf, next.id)) {
+      setPreview(null);
+      return;
+    }
+    setPreview(next);
+    setPreviewOpts(options);
+  }
+
+  /**
+   * The frame's address.
+   *
+   * A base shape travels whole — it is a kind, some references and some
+   * settings. A saved or published one goes by id, because a refined component
+   * carries its finished source and a few kilobytes of TSX does not belong in
+   * a URL.
+   */
+  function previewSrc(
+    p: Preview,
+    options: Record<string, string>,
+    on: DataRef[],
+  ): string {
+    const q = new URLSearchParams({ bare: "1" });
+    if (p.shelf === "base") {
+      q.set(
+        "spec",
+        JSON.stringify({
+          kind: p.def.kind,
+          refs: on,
+          options,
+          layout: PREVIEW_LAYOUT,
+        }),
+      );
+    } else {
+      q.set(p.shelf === "saved" ? "component" : "community", p.id);
+      q.set("options", JSON.stringify(options));
+      q.set("w", String(PREVIEW_LAYOUT.w));
+      q.set("h", String(PREVIEW_LAYOUT.h));
+    }
+    return `/api/workspace/preview?${q.toString()}`;
+  }
+
   function submit() {
     if (!ask.trim() || !canCustom) return;
     onOpen({ def: base, refs, ask: ask.trim() });
     setAsk("");
   }
+
+  /* A frozen source ignores settings, so offering selects would be a lie. */
+  const tunable = preview ? !preview.custom : false;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
@@ -177,138 +293,171 @@ export function BuildPanel({
         <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
           Build
         </span>
+        <span className="ml-auto font-mono text-[9.5px] text-faint">
+          click a card · drag its preview onto the screen
+        </span>
       </div>
 
-      {/* ── Components, on a grid that wraps ─────────────────────────── */}
-      <div className="flex min-h-0 flex-1 flex-col px-3 pt-2">
-        <div className="flex shrink-0 items-baseline gap-2">
-          <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-            Components
-          </span>
-          <span className="ml-auto font-mono text-[9.5px] text-faint">
-            drag to place · click to set up
-          </span>
-        </div>
-
-        {/*
-          Two columns, wrapping into as many rows as there are shapes. Rows grow
-          to their content (`auto-rows-min`) so a short list does not stretch
-          four cards over the whole half.
-        */}
-        <div className="dr-scroll mt-2 grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto pb-2">
+      {/* ── The shelf, in three sections ─────────────────────────────── */}
+      <div className="dr-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-2 pb-2">
+        <Section
+          title="Components"
+          note="the shapes every screen is built from"
+        >
           {offered.map((c) => {
-            const verdict = c.accepts(refs);
+            const v = c.accepts(refs);
             return (
               <Card
                 key={c.kind}
                 kind={c.kind}
                 title={c.name}
-                body={verdict.ok ? c.blurb : verdict.why!}
-                enabled={verdict.ok}
-                carrying={carrying === c.kind}
-                onOpen={() => {
-                  if (previewKind === c.kind) {
-                    setPreviewKind(null);
-                    return;
-                  }
-                  setPreviewKind(c.kind);
-                  setPreviewOpts(withDefaults(c));
-                }}
-                onDragStart={() => {
-                  setCarrying(c.kind);
-                  onDragStateChange({
-                    kind: c.kind,
-                    // A card dragged while its preview is open places what
-                    // the preview shows, tuned settings and all.
-                    options: previewKind === c.kind ? previewOpts : withDefaults(c),
-                    refs,
-                    layout: DEFAULT_LAYOUT[c.kind],
-                  });
-                }}
-                onDragEnd={() => {
-                  setCarrying(null);
-                  onDragStateChange(null);
-                }}
-              />
-            );
-          })}
-
-          {saved.map((c) => {
-            const def = COMPONENTS.find((d) => d.kind === c.kind);
-            return (
-              <Card
-                key={c.id}
-                kind={c.kind}
-                title={c.name}
-                body={`Saved · ${c.refs.length} series`}
-                enabled
-                custom
-                carrying={carrying === c.id}
-                // A saved component opens on its own data and its own source —
-                // what was saved, not what the explorer happens to hold now.
-                onOpen={
-                  def
-                    ? () =>
-                        onOpen({
-                          def,
-                          refs: c.refs,
-                          name: c.name,
-                          options: c.options,
-                          custom: c.custom ?? undefined,
-                        })
-                    : undefined
+                body={v.ok ? c.blurb : v.why!}
+                enabled={v.ok}
+                open={isOpen("base", c.kind)}
+                onOpen={() =>
+                  show(
+                    {
+                      id: c.kind,
+                      shelf: "base",
+                      def: c,
+                      name: c.name,
+                      refs,
+                      layout: DEFAULT_LAYOUT[c.kind],
+                    },
+                    withDefaults(c),
+                  )
                 }
-                onDragStart={() => {
-                  setCarrying(c.id);
-                  onDragStateChange({
-                    kind: c.kind,
-                    options: c.options,
-                    custom: c.custom ?? undefined,
-                    refs: c.refs,
-                    layout: c.layout ?? DEFAULT_LAYOUT[c.kind],
-                  });
-                }}
-                onDragEnd={() => {
-                  setCarrying(null);
-                  onDragStateChange(null);
-                }}
-                onDelete={async () => {
-                  await fetch(`/api/workspace/components?id=${encodeURIComponent(c.id)}`, {
-                    method: "DELETE",
-                  });
-                  const d = await fetch("/api/workspace/components").then((r) => r.json());
-                  setSaved(d.components ?? []);
-                }}
               />
             );
           })}
-        </div>
+        </Section>
+
+        {/*
+          Kept even while empty. The section is the answer to "where did the
+          thing I saved go" — a heading that only exists once something is in
+          it cannot answer that, and one line saying how to fill it can.
+        */}
+        <Section title="Your components" note="saved from the editor">
+          {saved.length === 0 ? (
+            <Empty>
+              Build something, refine it, and <em>Save</em> keeps it here for
+              the next screen.
+            </Empty>
+          ) : (
+            saved.map((c) => {
+              const def = COMPONENTS.find((d) => d.kind === c.kind);
+              if (!def) return null;
+              return (
+                <Card
+                  key={c.id}
+                  kind={c.kind}
+                  title={c.name}
+                  body={`${def.name} · ${c.refs.length} series`}
+                  meta={c.custom ? "refined" : undefined}
+                  enabled
+                  accent
+                  open={isOpen("saved", c.id)}
+                  // Opens on its own data and its own source — what was saved,
+                  // not what the explorer happens to hold now.
+                  onOpen={() =>
+                    show(
+                      {
+                        id: c.id,
+                        shelf: "saved",
+                        def,
+                        name: c.name,
+                        refs: c.refs,
+                        layout: c.layout ?? DEFAULT_LAYOUT[c.kind],
+                        custom: c.custom ?? undefined,
+                      },
+                      withDefaults(def, c.options),
+                    )
+                  }
+                  onDelete={async () => {
+                    if (isOpen("saved", c.id)) setPreview(null);
+                    await fetch(
+                      `/api/workspace/components?id=${encodeURIComponent(c.id)}`,
+                      { method: "DELETE" },
+                    );
+                    const d = await fetch("/api/workspace/components").then((r) =>
+                      r.json(),
+                    );
+                    setSaved(d.components ?? []);
+                  }}
+                />
+              );
+            })
+          )}
+        </Section>
+
+        {community.length > 0 && (
+          <Section title="Community" note="published, ready to take">
+            {community.map((c) => {
+              const def = COMPONENTS.find((d) => d.kind === c.kind);
+              if (!def) return null;
+              return (
+                <Card
+                  key={c.id}
+                  kind={c.kind}
+                  title={c.name}
+                  body={c.blurb}
+                  meta={`by ${c.author}`}
+                  enabled
+                  accent
+                  open={isOpen("community", c.id)}
+                  onOpen={() =>
+                    show(
+                      {
+                        id: c.id,
+                        shelf: "community",
+                        def,
+                        name: c.name,
+                        refs: c.refs,
+                        layout: c.layout ?? DEFAULT_LAYOUT[c.kind],
+                        custom: c.custom ?? undefined,
+                      },
+                      withDefaults(def, c.options),
+                    )
+                  }
+                />
+              );
+            })}
+          </Section>
+        )}
       </div>
 
-      {previewDef && (
+      {preview && (
         <div className="shrink-0 border-t border-line px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-              {previewDef.name} · preview
+            <span className="truncate font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+              {preview.name} · preview
             </span>
             <button
-              onClick={() => onOpen({ def: previewDef, refs, options: previewOpts })}
-              className="ml-auto text-[11px] text-accent transition-colors hover:brightness-110"
+              onClick={() =>
+                onOpen({
+                  def: preview.def,
+                  refs: previewRefs,
+                  name: preview.shelf === "base" ? undefined : preview.name,
+                  options: previewOpts,
+                  custom: preview.custom,
+                })
+              }
+              className="ml-auto shrink-0 text-[11px] text-accent transition-colors hover:brightness-110"
             >
               Refine with AI ›
             </button>
             <button
-              onClick={() => setPreviewKind(null)}
+              onClick={() => setPreview(null)}
               aria-label="Close preview"
-              className="rounded border border-line px-1.5 py-[2px] text-[10px] text-faint hover:text-ink"
+              className="shrink-0 rounded border border-line px-1.5 py-[2px] text-[10px] text-faint hover:text-ink"
             >
               ✕
             </button>
           </div>
 
-          {previewDef.options.length > 0 && (
+          {tunable && preview.def.options.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {previewDef.options.map((o) => (
+              {preview.def.options.map((o) => (
                 <label key={o.key} className="flex items-center gap-1 text-[10.5px] text-faint">
                   {o.label}
                   <select
@@ -329,30 +478,36 @@ export function BuildPanel({
             </div>
           )}
 
-          {previewDef.accepts(refs).ok ? (
+          {previewLive ? (
             <div
               // The widget itself is the handle: what you drag is what lands,
               // so the accent border belongs to the thing being carried rather
-              // than to a chip pointing at it.
+              // than to a chip pointing at it. It is also the *only* handle —
+              // the cards above place nothing.
               draggable
               onDragStart={(e) => {
+                e.dataTransfer.setData(DRAG_TYPE, "1");
                 e.dataTransfer.effectAllowed = "copy";
-                setCarrying(previewDef.kind);
+                setCarrying(true);
                 setDragged(true);
                 setHint(false);
                 onDragStateChange({
-                  kind: previewDef.kind,
+                  kind: preview.def.kind,
                   options: previewOpts,
-                  refs,
-                  layout: DEFAULT_LAYOUT[previewDef.kind],
+                  custom: preview.custom,
+                  refs: previewRefs,
+                  layout: preview.layout,
                 });
               }}
               onDragEnd={() => {
-                setCarrying(null);
+                setCarrying(false);
                 onDragStateChange(null);
               }}
               title="Drag onto the page to place exactly what you see"
-              className="relative mt-2 h-56 cursor-grab overflow-hidden rounded-md border border-accent bg-code active:cursor-grabbing"
+              className={cx(
+                "relative mt-2 h-80 cursor-grab overflow-hidden rounded-md border border-accent bg-code active:cursor-grabbing",
+                carrying && "dr-jiggle",
+              )}
             >
               <iframe
                 ref={previewFrame}
@@ -360,16 +515,11 @@ export function BuildPanel({
                 // thing rather than mutating a stale frame. `bare` strips the
                 // tile chrome, and the preview-only layout spans the grid so
                 // the component fills the box — the drag payload keeps the
-                // small default, so what lands on the page is unchanged.
-                key={JSON.stringify({ k: previewKind, o: previewOpts, r: refs.length })}
-                src={`/api/workspace/preview?bare=1&spec=${encodeURIComponent(
-                  JSON.stringify({
-                    kind: previewKind,
-                    refs,
-                    options: previewOpts,
-                    layout: { w: 12, h: 178 },
-                  }),
-                )}`}
+                // component's own footprint, so what lands is unchanged.
+                key={`${preview.shelf}:${preview.id}:${JSON.stringify(previewOpts)}:${previewRefs
+                  .map((r) => r.schemaId + r.label)
+                  .join("|")}`}
+                src={previewSrc(preview, previewOpts, previewRefs)}
                 sandbox="allow-scripts"
                 className="h-full w-full border-0"
                 title="Component preview"
@@ -377,15 +527,18 @@ export function BuildPanel({
               {/*
                 Pointer events do not cross into an iframe, so a drag started
                 over the frame would never reach this wrapper. A transparent
-                sheet catches it — nothing is drawn on it, the widget under it
-                is the whole message.
+                sheet catches it — and carries the one label on the whole
+                shelf, because the shelf no longer answers a drag and something
+                has to say where the gesture moved to.
               */}
-              <div className="absolute inset-0" aria-hidden />
+              <div className="absolute inset-0 flex items-start justify-start p-1.5">
+                <span className="pointer-events-none rounded border border-accent-line bg-surface/85 px-1.5 py-[2px] font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase backdrop-blur">
+                  ⠿ drag onto the screen
+                </span>
+              </div>
             </div>
           ) : (
-            <p className="mt-2 text-[11.5px] text-muted">
-              {previewDef.accepts(refs).why}
-            </p>
+            <p className="mt-2 text-[11.5px] text-muted">{verdict?.why}</p>
           )}
         </div>
       )}
@@ -447,7 +600,8 @@ export function BuildPanel({
         >
           <div className="flex items-start gap-2">
             <p className="text-[12px] leading-snug text-ink">
-              Drag the widget onto the screen to place it.
+              Drag the preview onto the screen to place it. The cards above only
+              open it.
             </p>
             <button
               onClick={() => setHint(false)}
@@ -478,70 +632,113 @@ export function BuildPanel({
 }
 
 /**
- * One shape, answering both gestures.
+ * One heading and the cards under it.
  *
- * Dragging places it as it comes; clicking opens it to be set up first. A drag
- * never produces a click, so the two do not collide — and it stays a `div`
- * because `draggable` on a `<button>` is unreliable outside Chrome. Keyboard
- * users get the click half through role and Enter, which is the half that can be
- * expressed without a pointer.
+ * Three shelves rather than one list, because "a shape", "something I made" and
+ * "something somebody published" are three different things to be looking for,
+ * and a single grid makes you read every card to tell them apart.
+ */
+function Section({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="shrink-0">
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+          {title}
+        </span>
+        <span className="ml-auto truncate font-mono text-[9.5px] text-faint">
+          {note}
+        </span>
+      </div>
+      {/*
+        Two columns, wrapping into as many rows as there are cards. Rows grow to
+        their content (`auto-rows-min`) so a short section does not stretch its
+        cards over the space a longer one would have used.
+      */}
+      <div className="mt-1.5 grid auto-rows-min grid-cols-2 gap-2">{children}</div>
+    </div>
+  );
+}
+
+/** A section with nothing in it yet, saying how it fills rather than vanishing. */
+function Empty({ children }: { children: ReactNode }) {
+  return (
+    <p className="col-span-2 rounded-md border border-dashed border-line px-2.5 py-2 text-[11px] leading-snug text-faint">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * One component on the shelf, answering one gesture.
+ *
+ * Clicking it runs the thing underneath. It is not draggable, and that is the
+ * point: a card dragged onto the page placed something nobody had looked at
+ * yet, at settings nobody had chosen. The preview is the drag handle now, so
+ * what lands is always what was on screen a moment before.
+ *
+ * It stays a `div` with a role rather than a `<button>` only because the
+ * surrounding grid styles it as a tile; Enter and Space open it like a button.
  */
 function Card({
   kind,
   title,
   body,
+  meta,
   enabled,
-  custom,
-  carrying,
+  accent,
+  open,
   onOpen,
-  onDragStart,
-  onDragEnd,
   onDelete,
 }: {
   kind: ComponentKind;
   title: string;
   body: string;
+  /** A word about where it came from — an author, or that it was refined. */
+  meta?: string;
   enabled: boolean;
-  custom?: boolean;
-  /** This is the card the cursor has hold of right now. */
-  carrying?: boolean;
-  onOpen?: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  /** Saved components can leave the shelf; the built-in shapes cannot. */
+  /** Saved and published components wear the accent; the base shapes do not. */
+  accent?: boolean;
+  /** Its preview is the one currently open. */
+  open?: boolean;
+  onOpen: () => void;
+  /** Saved components can leave the shelf; shapes and published ones cannot. */
   onDelete?: () => void;
 }) {
-  const open = enabled && onOpen ? onOpen : undefined;
+  const act = enabled ? onOpen : undefined;
   return (
     <div
-      draggable={enabled}
-      onDragStart={(e) => {
-        e.dataTransfer.setData(DRAG_TYPE, "1");
-        e.dataTransfer.effectAllowed = "copy";
-        onDragStart();
-      }}
-      onDragEnd={onDragEnd}
-      onClick={open}
+      onClick={act}
       onKeyDown={(e) => {
-        if (open && (e.key === "Enter" || e.key === " ")) {
+        if (act && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
-          open();
+          act();
         }
       }}
-      role={open ? "button" : undefined}
-      tabIndex={open ? 0 : undefined}
+      role={act ? "button" : undefined}
+      tabIndex={act ? 0 : undefined}
+      aria-pressed={act ? Boolean(open) : undefined}
       title={body}
       className={cx(
         "min-w-0 rounded-md border px-2.5 py-2 text-left transition-colors outline-none",
         enabled
-          ? "cursor-grab bg-surface-2 hover:border-accent-line focus-visible:border-accent-line active:cursor-grabbing"
+          ? "cursor-pointer bg-surface-2 hover:border-accent-line focus-visible:border-accent-line"
           : "cursor-not-allowed border-dashed border-line bg-surface-2 opacity-45",
-        enabled && (custom ? "border-accent-line/60" : "border-line"),
-        carrying && "dr-jiggle border-accent-line",
+        enabled && (accent ? "border-accent-line/60" : "border-line"),
+        // The open card stays lit while its preview is below, so the two read
+        // as one thing rather than as a card and an unrelated widget.
+        open && "border-accent bg-accent-dim",
       )}
     >
       <div className="flex items-center gap-1.5">
-        <Glyph kind={kind} on={Boolean(custom)} />
+        <Glyph kind={kind} on={Boolean(accent || open)} />
         <span className="truncate text-[12px] font-medium text-ink">
           {title}
         </span>
@@ -562,6 +759,11 @@ function Card({
       <p className="mt-1 line-clamp-2 text-[10.5px] leading-snug text-faint">
         {body}
       </p>
+      {meta && (
+        <p className="mt-0.5 truncate font-mono text-[9px] tracking-[0.08em] text-faint uppercase">
+          {meta}
+        </p>
+      )}
     </div>
   );
 }

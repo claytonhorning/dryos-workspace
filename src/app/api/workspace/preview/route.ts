@@ -16,14 +16,20 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   const params = new URL(req.url).searchParams;
-  const spec = params.get("spec") ?? "";
   // `preview=1` for a tile on a shelf, which has no host to answer its queries
   // and should not bill one anyway. The editor omits it and gets live data.
   const preview = params.get("preview") === "1";
   const bare = params.get("bare") === "1";
 
+  // Everything else is the script route's business — an inline `spec`, or the
+  // `component`/`community` id it resolves one from — so it is forwarded whole
+  // rather than named here twice.
+  const inner = new URLSearchParams(params);
+  inner.delete("preview");
+  inner.delete("bare");
+
   return new Response(
-    buildDocument(`/api/workspace/preview/script?spec=${encodeURIComponent(spec)}`, { preview, bare }),
+    buildDocument(`/api/workspace/preview/script?${inner.toString()}`, { preview, bare }),
     { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
   );
 }

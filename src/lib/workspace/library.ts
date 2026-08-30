@@ -35,6 +35,18 @@ export async function listSaved(): Promise<SavedComponent[]> {
   return (data ?? []).map((r) => r.data as SavedComponent);
 }
 
+/** One saved component, for the preview route that runs it by id. */
+export async function getSaved(id: string): Promise<SavedComponent | null> {
+  await importLocalOnce();
+  const supabase = await supabaseServer();
+  const { data } = await supabase
+    .from("components")
+    .select("data")
+    .eq("id", id)
+    .maybeSingle();
+  return (data?.data as SavedComponent) ?? null;
+}
+
 export async function saveComponent(
   spec: ComponentSpec,
   name: string,

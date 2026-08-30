@@ -370,7 +370,12 @@ export function buildDocument(
   const token = process.env.MAPBOX_TOKEN ?? process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
   const grant = `<script>window.dryos.MAPBOX_TOKEN=${JSON.stringify(token)};</script>`;
 
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body><div id="root"></div>${bare}<script>${THEME_SHIM}</script><script>${shim}</script>${grant}<script src="${scriptUrl}"></script></body></html>`;
+  // Written into an attribute, so the query string's separators are escaped
+  // rather than left for the HTML parser to guess at — a URL carrying more
+  // than one parameter is otherwise a run of would-be entity references.
+  const src = scriptUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body><div id="root"></div>${bare}<script>${THEME_SHIM}</script><script>${shim}</script>${grant}<script src="${src}"></script></body></html>`;
 }
 
 /** Shown in place of the app when a revision will not build. */
