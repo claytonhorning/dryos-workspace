@@ -10,6 +10,7 @@ import {
   withDefaults,
 } from "@/lib/workspace/components";
 import { refreshCost, tokenLabel, type DataRef } from "@/lib/workspace/catalog";
+import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
 import { readNdjson } from "@/lib/workspace/ndjson";
 import { useTheme } from "@/lib/useTheme";
 
@@ -93,7 +94,13 @@ export function ComponentEditor({
   };
 
   const cost = refreshCost(refs);
-  const previewUrl = `/api/workspace/preview?theme=${theme}&spec=${encodeURIComponent(JSON.stringify(spec))}`;
+  // The frame's missing parent — without it every query dies on the timeout.
+  const previewFrame = usePreviewHost();
+  // Preview-only layout: span the grid and fill the box. `spec` itself keeps
+  // the small default, because it is also what "Add to dashboard" places.
+  const previewUrl = `/api/workspace/preview?bare=1&theme=${theme}&spec=${encodeURIComponent(
+    JSON.stringify({ ...spec, layout: { w: 12, h: 214 } }),
+  )}`;
 
   const refine = useCallback(
     async (override?: string) => {
@@ -167,6 +174,7 @@ export function ComponentEditor({
         {/* ── The component, running ─────────────────────────────────── */}
         <div className="border-b border-line bg-code p-2">
           <iframe
+            ref={previewFrame}
             // Recompiled whenever the spec changes: a stale preview is worse
             // than no preview, because it answers confidently and wrongly.
             key={previewUrl}

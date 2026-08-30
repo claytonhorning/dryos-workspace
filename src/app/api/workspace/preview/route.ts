@@ -20,9 +20,10 @@ export async function GET(req: Request) {
   // `preview=1` for a tile on a shelf, which has no host to answer its queries
   // and should not bill one anyway. The editor omits it and gets live data.
   const preview = params.get("preview") === "1";
+  const bare = params.get("bare") === "1";
 
   return new Response(
-    buildDocument(`/api/workspace/preview/script?spec=${encodeURIComponent(spec)}`, { preview }),
+    buildDocument(`/api/workspace/preview/script?spec=${encodeURIComponent(spec)}`, { preview, bare }),
     { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
   );
 }

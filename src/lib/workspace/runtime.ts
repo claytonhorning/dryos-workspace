@@ -352,8 +352,15 @@ export async function compile(source: string): Promise<CompileResult> {
  * The shim stays inline: it is small, contains no tag-like text, and has to
  * exist before the app runs.
  */
-export function buildDocument(scriptUrl: string, opts?: { preview?: boolean }) {
+export function buildDocument(
+  scriptUrl: string,
+  opts?: { preview?: boolean; bare?: boolean },
+) {
   const shim = opts?.preview ? PREVIEW_SHIM : RUNTIME_SHIM;
+  // A preview is for looking, not arranging: `bare` strips the tile chrome —
+  // drag handle, resize corner, remove, configure, full-screen — so the
+  // component fills its box and offers nothing that would not work here.
+  const bare = opts?.bare ? "<script>window.__dryosBare=true;</script>" : "";
 
   // The one credential an app is handed, and only because of what it is: a
   // Mapbox public token is meant to be read by the browser drawing the map, and
@@ -363,7 +370,7 @@ export function buildDocument(scriptUrl: string, opts?: { preview?: boolean }) {
   const token = process.env.MAPBOX_TOKEN ?? process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
   const grant = `<script>window.dryos.MAPBOX_TOKEN=${JSON.stringify(token)};</script>`;
 
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body><div id="root"></div><script>${THEME_SHIM}</script><script>${shim}</script>${grant}<script src="${scriptUrl}"></script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body><div id="root"></div>${bare}<script>${THEME_SHIM}</script><script>${shim}</script>${grant}<script src="${scriptUrl}"></script></body></html>`;
 }
 
 /** Shown in place of the app when a revision will not build. */

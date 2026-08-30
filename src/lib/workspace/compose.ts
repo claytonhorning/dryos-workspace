@@ -138,6 +138,8 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
   const [dragging, setDragging] = useState(false);
   const [over, setOver] = useState(null);
   const [full, setFull] = useState(false);
+  // Stamped by buildDocument for previews: looking, not arranging.
+  const bare = typeof window !== "undefined" && window.__dryosBare;
 
   useEffect(() => setSize({ w: w || 6, h: h || 240 }), [w, h]);
 
@@ -237,6 +239,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
           The header is the handle. Dragging a tile by its body would fight every
           chart underneath it for the same gesture.
         */}
+        {!bare && (
         <span
           draggable={!full}
           onDragStart={(e) => {
@@ -260,9 +263,11 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         >
           ⠿
         </span>
+        )}
         <h2 style={{ color: "var(--ink)", fontSize: 13, fontWeight: 600, margin: 0 }}>{title}</h2>
         {unit && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>{unit}</span>}
         {loading && <span style={{ color: "var(--accent)", fontFamily: "var(--mono)", fontSize: 10 }}>loading…</span>}
+        {!bare && (
         <button
           onClick={() => setFull((v) => !v)}
           title={full ? "Back to the dashboard (Esc)" : "Fill the screen"}
@@ -280,7 +285,8 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         >
           {full ? "✕" : "⤢"}
         </button>
-        {!full && window.parent !== window && (
+        )}
+        {!bare && !full && window.parent !== window && (
           <button
             onClick={() =>
               window.dispatchEvent(
@@ -302,7 +308,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
             ⚙
           </button>
         )}
-        {!full && window.parent !== window && (
+        {!bare && !full && window.parent !== window && (
           <button
             onClick={() =>
               // One click, no "are you sure": the revision this writes is the
@@ -354,7 +360,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       </div>
 
       {/* Bottom-right corner, the way every resizable panel has worked forever. */}
-      {!full && (
+      {!bare && !full && (
         <span
           onPointerDown={grab}
           title="Drag to resize"

@@ -11,6 +11,7 @@ import {
   withDefaults,
 } from "@/lib/workspace/components";
 import { type DataRef } from "@/lib/workspace/catalog";
+import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
 
 /**
  * Two ways to make something, split by whether a model is needed.
@@ -96,6 +97,9 @@ export function BuildPanel({
   const previewDef = previewKind
     ? COMPONENTS.find((c) => c.kind === previewKind)
     : undefined;
+  // The missing parent: a sandboxed frame can only reach data through whoever
+  // embeds it, and outside Runner that is this hook or a 30-second timeout.
+  const previewFrame = usePreviewHost();
 
   useEffect(() => {
     fetch("/api/workspace/components")
@@ -283,11 +287,20 @@ export function BuildPanel({
           {previewDef.accepts(refs).ok ? (
             <div className="mt-2 h-56 overflow-hidden rounded-md border border-line bg-code">
               <iframe
+                ref={previewFrame}
                 // Keyed by the spec so a settings change reloads the real
-                // thing rather than mutating a stale frame.
+                // thing rather than mutating a stale frame. `bare` strips the
+                // tile chrome, and the preview-only layout spans the grid so
+                // the component fills the box — the drag payload keeps the
+                // small default, so what lands on the page is unchanged.
                 key={JSON.stringify({ k: previewKind, o: previewOpts, r: refs.length })}
-                src={`/api/workspace/preview?spec=${encodeURIComponent(
-                  JSON.stringify({ kind: previewKind, refs, options: previewOpts }),
+                src={`/api/workspace/preview?bare=1&spec=${encodeURIComponent(
+                  JSON.stringify({
+                    kind: previewKind,
+                    refs,
+                    options: previewOpts,
+                    layout: { w: 12, h: 178 },
+                  }),
                 )}`}
                 sandbox="allow-scripts"
                 className="h-full w-full border-0"
