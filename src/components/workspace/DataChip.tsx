@@ -67,14 +67,14 @@ export function RefMeta({ refr, className }: { refr: DataRef; className?: string
  * ticks and what a query costs; those are the chips now. Mock keeps its badge
  * unconditionally — an unlabelled mock is still the one unforgivable state.
  */
-export function MetaBadges({ refr }: { refr: DataRef }) {
+export function MetaBadges({ cadence, tokens }: { cadence: string; tokens: number }) {
   return (
     <span className="flex flex-wrap items-center gap-1">
       <span className="inline-flex shrink-0 items-center rounded-sm border border-line bg-surface px-1.5 py-px font-mono text-[9px] text-muted">
-        {refr.cadence}
+        {cadence}
       </span>
       <span className="inline-flex shrink-0 items-center rounded-sm border border-line-strong bg-surface px-1.5 py-px font-mono text-[9px] text-ink">
-        {tokenLabel(refr.tokens)}
+        {tokenLabel(tokens)}
       </span>
     </span>
   );
@@ -125,11 +125,12 @@ export function DataChip({
           <AvailabilityBadge availability="mock" className="ml-auto" />
         )}
       </span>
-      <span className="truncate text-[10.5px] text-muted">{refr.path}</span>
+      {/* No path line: the card sits under a group header that already says
+          it, and a fact printed twice at this size is just a taller card. */}
       {refr.sublabel && (
         <span className="truncate font-mono text-[9.5px] text-faint">{refr.sublabel}</span>
       )}
-      <MetaBadges refr={refr} />
+      <MetaBadges cadence={refr.cadence} tokens={refr.tokens} />
     </button>
   );
 }

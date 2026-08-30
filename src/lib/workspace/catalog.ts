@@ -1297,8 +1297,9 @@ export function usdLabel(dollars: number): string {
  * is the answer's shape. The sublabel leads with the variable key because that
  * is where `components.ts` reads the column from.
  */
-export function entityRef(schema: Schema, node: string): DataRef {
-  const v = schema.variables[0];
+export function entityRef(schema: Schema, node: string, varKey?: string): DataRef {
+  const v =
+    schema.variables.find((x) => x.key === varKey) ?? schema.variables[0];
   return {
     kind: "entity",
     schemaId: schema.id,

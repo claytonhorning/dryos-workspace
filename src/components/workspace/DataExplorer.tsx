@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { cx } from "@/components/ui";
-import { DataChip } from "@/components/workspace/DataChip";
+import { DataChip, MetaBadges } from "@/components/workspace/DataChip";
 import {
   SCHEMAS,
   type DataRef,
@@ -61,25 +61,30 @@ export function DataExplorer({
     [selected],
   );
 
+  // One card per stream. The card is the stream; what is inside it is the
+  // set view's business.
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return SCHEMAS.filter((s) => domainOf(s) === domain)
-      .map((schema) => ({
-        schema,
-        refs: refs.filter(
-          (r) =>
-            r.schemaId === schema.id &&
-            (category === ALL || categoryOf(schema) === category) &&
-            (!q ||
-              r.label.toLowerCase().includes(q) ||
-              r.path.toLowerCase().includes(q) ||
-              (r.sublabel ?? "").toLowerCase().includes(q)),
-        ),
-      }))
-      .filter((g) => g.refs.length > 0);
+    return SCHEMAS.filter(
+      (s) =>
+        domainOf(s) === domain &&
+        (category === ALL || categoryOf(s) === category) &&
+        (!q ||
+          s.name.toLowerCase().includes(q) ||
+          s.path.join(" ").toLowerCase().includes(q) ||
+          s.variables.some(
+            (v) =>
+              v.label.toLowerCase().includes(q) ||
+              v.key.toLowerCase().includes(q) ||
+              v.unit.toLowerCase().includes(q),
+          )),
+    ).map((schema) => ({
+      schema,
+      streamRef: refs.find((r) => r.schemaId === schema.id && r.kind === "schema"),
+    }));
   }, [refs, domain, category, query]);
 
-  const shown = groups.reduce((n, g) => n + g.refs.length, 0);
+  const shown = groups.length;
 
   if (drill) {
     return (
@@ -163,33 +168,31 @@ export function DataExplorer({
               <h3 className="flex items-baseline px-0.5 pb-1.5 font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
                 {g.schema.path.slice(1).join(" › ")}
                 <span className="ml-auto normal-case tracking-normal text-muted">
-                  {g.schema.entityKey
-                    ? `all ${entityCountLabel(g.schema)}`
-                    : entityCountLabel(g.schema)}
+                  {entityCountLabel(g.schema)}
                 </span>
               </h3>
-              {needsPicking(g.schema) ? (
-                <DrillRow
-                  schema={g.schema}
-                  picked={
-                    selected.filter(
-                      (r) => r.kind === "entity" && r.schemaId === g.schema.id,
-                    ).length
-                  }
-                  onOpen={() => setDrill(g.schema)}
-                />
-              ) : (
-                <div className="grid gap-1.5 sm:grid-cols-2">
-                  {g.refs.map((r) => (
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {/* A stream with entities opens; one with a single series has
+                    nothing to choose, so its card selects directly. Same card,
+                    same height — only the affordance differs. */}
+                {hasEntities(g.schema) ? (
+                  <DrillRow
+                    schema={g.schema}
+                    picked={countPicked(selected, g.schema)}
+                    onOpen={() => setDrill(g.schema)}
+                  />
+                ) : (
+                  g.streamRef && (
                     <DataChip
-                      key={`${r.snippet}-${r.label}`}
-                      refr={r}
-                      selected={chosen.has(`${r.snippet}::${r.label}`)}
-                      onClick={() => onToggle(r)}
+                      refr={g.streamRef}
+                      selected={chosen.has(
+                        `${g.streamRef.snippet}::${g.streamRef.label}`,
+                      )}
+                      onClick={() => onToggle(g.streamRef!)}
                     />
-                  ))}
-                </div>
-              )}
+                  )
+                )}
+              </div>
             </section>
           ))
         )}
@@ -204,15 +207,24 @@ export function DataExplorer({
   );
 }
 
-/**
- * The size of the set decides the gesture. A stream that fans out takes
- * everything by default — eight fuels is a chart. A stream of a thousand
- * settlement points is a question, so it opens instead of selecting.
- */
-function needsPicking(schema: Schema): boolean {
-  return Boolean(schema.dataset) && !schema.entityKey && schema.entities.count > 12;
+/** A stream with more than one entity has something to choose. */
+function hasEntities(schema: Schema): boolean {
+  return Boolean(schema.dataset) && schema.entities.count > 1;
 }
 
+/** Entities picked from this stream, for the card's badge. */
+function countPicked(selected: DataRef[], schema: Schema): number {
+  return selected.filter(
+    (r) =>
+      r.schemaId === schema.id && (r.kind === "entity" || r.kind === "schema"),
+  ).length;
+}
+
+/**
+ * A large stream on the shelf — the same card as every other stream, because
+ * a row among cards read as a lesser thing rather than a different gesture.
+ * Only the affordance differs: `›` where a selectable card would tick.
+ */
 function DrillRow({
   schema,
   picked,
@@ -225,22 +237,25 @@ function DrillRow({
   return (
     <button
       onClick={onOpen}
-      className="flex w-full items-center gap-2 rounded-md border border-line bg-surface-2 px-2.5 py-2 text-left transition-colors hover:border-line-strong"
+      className="group flex w-full flex-col gap-0.5 rounded border border-line bg-surface-2 px-2 py-1.5 text-left transition-colors hover:border-accent-line"
     >
-      <div className="min-w-0">
-        <div className="truncate text-[12.5px] text-ink">{schema.name}</div>
-        <div className="truncate text-[10.5px] text-faint">
-          {entityCountLabel(schema)} — open to choose which
-        </div>
-      </div>
-      {picked > 0 && (
-        <span className="ml-auto shrink-0 rounded-full border border-accent-line bg-accent-dim px-2 py-[2px] font-mono text-[10px] text-accent">
-          {picked} picked
+      <span className="flex items-center gap-1.5">
+        <span className="truncate font-mono text-[11px] text-ink">
+          {schema.name}
         </span>
-      )}
-      <span className={cx("shrink-0 text-faint", picked > 0 ? "" : "ml-auto")}>
-        ›
+        {picked > 0 && (
+          <span className="shrink-0 rounded-full border border-accent-line bg-accent-dim px-1.5 py-px font-mono text-[9px] text-accent">
+            {picked} picked
+          </span>
+        )}
+        <span className="ml-auto shrink-0 text-[11px] text-faint group-hover:text-ink">
+          ›
+        </span>
       </span>
+      <span className="truncate font-mono text-[9.5px] text-faint">
+        {entityCountLabel(schema)} · choose which
+      </span>
+      <MetaBadges cadence={schema.cadence.label} tokens={schema.tokens} />
     </button>
   );
 }
@@ -276,6 +291,15 @@ function SetView({
 }) {
   const [q, setQ] = useState("");
   const [facet, setFacet] = useState<string | null>(null);
+  // Which measure a picked entity refers to. Most streams have one; the rest
+  // get a radio, because "wind actual" and "wind forecast" are different picks.
+  const [varKey, setVarKey] = useState(schema.variables[0]?.key);
+  // The whole stream as one reference — the fan-out pick, for streams small
+  // enough to take whole. It stays live as entities come and go at the source.
+  const streamRef = useMemo(
+    () => catalogRefs().find((r) => r.schemaId === schema.id && r.kind === "schema"),
+    [schema.id],
+  );
   const [facets, setFacets] = useState<Record<string, number> | null>(null);
   const [rows, setRows] = useState<EntityRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -347,6 +371,24 @@ function SetView({
           placeholder={`Search ${entityCountLabel(schema)}…`}
           className="w-full rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
         />
+        {schema.variables.length > 1 && (
+          <div className="dr-scroll flex gap-1 overflow-x-auto">
+            {schema.variables.map((v) => (
+              <button
+                key={v.key}
+                onClick={() => setVarKey(v.key)}
+                className={cx(
+                  "shrink-0 rounded-full border px-2.5 py-[3px] text-[10.5px] transition-colors",
+                  v.key === varKey
+                    ? "border-accent-line bg-accent-dim text-accent"
+                    : "border-line text-muted hover:border-line-strong hover:text-ink",
+                )}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+        )}
         {facets && !q.trim() && (
           <div className="dr-scroll flex gap-1 overflow-x-auto">
             {Object.entries(facets)
@@ -385,11 +427,27 @@ function SetView({
           </div>
         )}
 
+        {schema.entityKey && streamRef && (
+          <button
+            onClick={() => onToggle(streamRef)}
+            className={cx(
+              "mb-1.5 w-full rounded-md border px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
+              chosen.has(`${streamRef.snippet}::${streamRef.label}`)
+                ? "border-accent-line bg-accent-dim text-accent"
+                : "border-dashed border-accent-line text-accent hover:bg-accent-dim",
+            )}
+          >
+            {chosen.has(`${streamRef.snippet}::${streamRef.label}`) ? "✓ " : ""}
+            All {schema.entities.count} as one selection — stays current as the
+            set changes
+          </button>
+        )}
+
         {addableAll && (
           <button
             onClick={() => {
               for (const row of rows) {
-                const ref = entityRef(schema, row.node);
+                const ref = entityRef(schema, row.node, varKey);
                 if (!chosen.has(`${ref.snippet}::${ref.label}`)) onToggle(ref);
               }
             }}
@@ -407,7 +465,7 @@ function SetView({
           </p>
         ) : (
           rows.map((row) => {
-            const ref = entityRef(schema, row.node);
+            const ref = entityRef(schema, row.node, varKey);
             const picked = chosen.has(`${ref.snippet}::${ref.label}`);
             const note = entityNote(row.node);
             return (
