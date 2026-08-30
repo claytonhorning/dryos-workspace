@@ -20,12 +20,28 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     index?: number;
     w?: number;
     h?: number;
-    from?: number;
-    to?: number;
+    x?: number;
+    y?: number;
+    swap?: { index: number; x: number; y: number } | null;
   };
 
-  if (body.from !== undefined && body.to !== undefined) {
-    const moved = await moveTile(id, body.from, body.to, composeApp, compile);
+  // A move: one tile to a place of its own, and at most one other tile trading
+  // places with it. Never a third — the canvas does not reflow.
+  if (body.index !== undefined && body.x !== undefined && body.y !== undefined) {
+    const moved = await moveTile(
+      id,
+      body.index,
+      { x: Math.max(0, Math.round(body.x)), y: Math.max(0, Math.round(body.y)) },
+      body.swap
+        ? {
+            index: body.swap.index,
+            x: Math.max(0, Math.round(body.swap.x)),
+            y: Math.max(0, Math.round(body.swap.y)),
+          }
+        : null,
+      composeApp,
+      compile,
+    );
     if (!moved) {
       return NextResponse.json({ error: "That did not build." }, { status: 409 });
     }

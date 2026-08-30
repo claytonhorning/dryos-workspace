@@ -16,9 +16,9 @@ import { useTheme } from "@/lib/useTheme";
  * That same isolation is why dropping something onto the canvas takes two
  * halves. An iframe swallows the pointer events a drag needs, so the host keeps
  * a transparent sheet over the frame purely to catch them — and forwards each
- * position inward, where the grid opens a real gap at the size of the tile that
- * is coming. Nothing is labelled and nothing is drawn out here: what you see is
- * the layout you are about to get.
+ * position inward, where the canvas draws the rectangle the tile would take.
+ * Nothing is labelled and nothing is drawn out here: what you see is the layout
+ * you are about to get.
  *
  * A saved revision arrives as a new `version`, and the new bundle takes a
  * moment to compile and boot. Swapping frames immediately painted that moment
@@ -38,7 +38,7 @@ export function Runner({
   onDropAt,
   placing,
   onResize,
-  onReorder,
+  onMove,
   onRemove,
   onConfigure,
   flush,
@@ -50,7 +50,12 @@ export function Runner({
   dropping?: boolean;
   /** Footprint of the incoming tile, so the frame previews it at the right size. */
   dropSize?: { w: number; h: number };
-  onDropAt?: (index: number) => void;
+  /**
+   * The place on the canvas the frame says the drop would take — null when it
+   * never found one, which is a release over ground the tile does not fit on.
+   * Guessing a corner there would drop it on top of something.
+   */
+  onDropAt?: (at: { x: number; y: number } | null) => void;
   /**
    * A drop is being composed and saved. While true the frame keeps the gap
    * open where the tile will land; when it falls without a new revision
@@ -59,8 +64,16 @@ export function Runner({
   placing?: boolean;
   /** A tile's corner was dragged inside the frame. */
   onResize?: (index: number, w: number, h: number) => void;
-  /** A tile was dragged onto another one inside the frame. */
-  onReorder?: (from: number, to: number) => void;
+  /**
+   * A tile was dragged somewhere else on the canvas inside the frame. At most
+   * one other tile comes with it, and only by trading places — a move never
+   * pushes anything.
+   */
+  onMove?: (
+    index: number,
+    at: { x: number; y: number },
+    swap: { index: number; x: number; y: number } | null,
+  ) => void;
   /**
    * A tile's ✕ was clicked inside the frame. The frame has already hidden the
    * tile optimistically; resolve false and it is restored.
@@ -75,8 +88,8 @@ export function Runner({
   const frame = useRef<HTMLIFrameElement | null>(null);
   const shell = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(0);
-  /** The gap the frame says the pointer is currently over. */
-  const slot = useRef<number | null>(null);
+  /** The place on the canvas the frame says the pointer is currently over. */
+  const spot = useRef<{ x: number; y: number } | null>(null);
   const theme = useTheme();
 
   /** The revision on screen, and the one loading invisibly behind it. */
@@ -137,9 +150,15 @@ export function Runner({
       const m = e.data as
         | { __dryos: "call"; id: number; op: string; payload: unknown }
         | { __dryos: "error"; message: string }
-        | { __dryos: "slot"; index: number }
+        | { __dryos: "spot"; x: number; y: number }
         | { __dryos: "resize"; index: number; w: number; h: number }
-        | { __dryos: "reorder"; from: number; to: number }
+        | {
+            __dryos: "move";
+            index: number;
+            x: number;
+            y: number;
+            swap: { index: number; x: number; y: number } | null;
+          }
         | { __dryos: "remove"; index: number }
         | { __dryos: "configure"; index: number };
       if (!m || typeof m !== "object") return;
@@ -149,14 +168,14 @@ export function Runner({
       if (m.__dryos === "call") void answer(e.source as Window, m.id, m.op, m.payload);
       else if (e.source !== frame.current?.contentWindow) return;
       else if (m.__dryos === "error") onError?.(m.message);
-      else if (m.__dryos === "slot") {
-        slot.current = m.index;
+      else if (m.__dryos === "spot") {
+        spot.current = { x: m.x, y: m.y };
       } else if (m.__dryos === "resize") {
         // The frame has already applied it; this is only the save. Nothing here
         // touches `version`, so the tile is not remounted under the cursor.
         onResize?.(m.index, m.w, m.h);
-      } else if (m.__dryos === "reorder") {
-        onReorder?.(m.from, m.to);
+      } else if (m.__dryos === "move") {
+        onMove?.(m.index, { x: m.x, y: m.y }, m.swap);
       } else if (m.__dryos === "remove") {
         // The frame hid the tile before asking; only a failed save puts it
         // back, so the gesture reads as instant on the path that matters.
@@ -170,7 +189,7 @@ export function Runner({
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [answer, onError, onResize, onReorder, onRemove, onConfigure]);
+  }, [answer, onError, onResize, onMove, onRemove, onConfigure]);
 
   // Never let the two slots carry the same revision — between the swap and
   // the effect that clears `pending` there is a render where they could.
@@ -288,8 +307,8 @@ export function Runner({
               "*",
             );
             // The frame decided where; it told us on the last dragover.
-            onDropAt?.(slot.current ?? 0);
-            slot.current = null;
+            onDropAt?.(spot.current);
+            spot.current = null;
           }}
         />
       )}

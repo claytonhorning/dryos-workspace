@@ -1,4 +1,4 @@
-import { type DataRef, schemaFor } from "./catalog";
+import { type DataRef, grainSeconds, schemaFor } from "./catalog";
 import { ERCOT_POINTS, ERCOT_VIEW, hasGeography } from "./geo";
 import { schemaById } from "./catalog";
 
@@ -28,13 +28,24 @@ export interface ComponentSpec {
   /** Settings chosen in the builder. Missing keys fall back to the default. */
   options?: Record<string, string>;
   /**
-   * Where it sits on the canvas: `w` columns out of twelve, `h` in pixels.
+   * Where it sits on the canvas: `x` columns from the left of twelve, `y`
+   * pixels from the top, `w` columns wide, `h` pixels tall.
+   *
+   * The position is the load-bearing half. A tile used to have only a place in
+   * a sequence, which meant moving one necessarily pushed every one after it —
+   * a tile could not be somewhere, only after something. With a place of its
+   * own a move moves one tile, a hole left behind stays a hole, and nothing on
+   * the canvas is derived from anything else's position.
+   *
+   * `x`/`y` are optional because pages written before this existed have none;
+   * `packLayout` flows those into the arrangement the old grid gave them, once,
+   * on the next write.
    *
    * A dropped tile arrives deliberately small and is resized by dragging its
    * corner. Sizing a component is a judgement about the dashboard around it, not
    * about the component, so it is not something a generator can guess.
    */
-  layout?: { w: number; h: number };
+  layout?: { x?: number; y?: number; w: number; h: number };
   /**
    * A saved custom component: its name and its finished section source.
    *
@@ -146,9 +157,11 @@ function node(ref: DataRef): string | null {
  * emit nothing.
  */
 function slowFill(refs: DataRef[], s: { key: string }[]): string {
-  const cadences = refs.map((r) => r.cadenceSeconds);
-  const finest = Math.min(...cadences);
-  const slow = s.filter((_, i) => cadences[i] > finest).map((x) => x.key);
+  // Grain, not cadence: "slower" here is about how far apart the rows are, not
+  // about when the file arrived.
+  const grains = refs.map(grainOf);
+  const finest = Math.min(...grains);
+  const slow = s.filter((_, i) => grains[i] > finest).map((x) => x.key);
   if (!slow.length) return "";
   return `
     // A slower series holds its value between publishes — the hourly price is
@@ -251,10 +264,31 @@ const WINDOW_SECONDS: Record<string, number> = {
   "-7d": 604_800,
 };
 
+/** Every span a shape can ask for, in seconds. Keys are query start values. */
+const SPAN_SECONDS: Record<string, number> = {
+  ...WINDOW_SECONDS,
+  "-12h": 43_200,
+  "-2d": 172_800,
+  "-14d": 1_209_600,
+  "-30d": 2_592_000,
+};
+
+/**
+ * Seconds between two rows of this reference.
+ *
+ * Read from today's catalogue rather than from the stored reference, which
+ * carries the publish cadence and predates the distinction — a page composed
+ * last month still grids at the right resolution. See `grainSeconds`.
+ */
+function grainOf(ref: DataRef): number {
+  const schema = schemaFor(ref.schemaId);
+  return schema ? grainSeconds(schema) : ref.cadenceSeconds;
+}
+
 /** Enough rows for every entity across the window, within the route's cap. */
-function fanoutLimit(window: string, cadenceSeconds: number): number {
+function fanoutLimit(window: string, grainSecs: number): number {
   const span = WINDOW_SECONDS[window] ?? 86_400;
-  return Math.min(10_000, Math.ceil(span / Math.max(cadenceSeconds, 60)) * 10);
+  return Math.min(10_000, Math.ceil(span / Math.max(grainSecs, 60)) * 10);
 }
 
 /** Rendered beside anything drawn from a schema with no collector. */
@@ -339,7 +373,7 @@ const chart: ComponentDef = {
     // fanned-out stream multiplies that by its entities. The limit follows
     // the window instead of quietly truncating the long one.
     const limit = fan
-      ? fanoutLimit(o.window, refs[0].cadenceSeconds)
+      ? fanoutLimit(o.window, grainOf(refs[0]))
       : o.window === "-7d"
         ? 2000
         : 500;
@@ -687,17 +721,44 @@ ${
 const heatmap: ComponentDef = {
   kind: "heatmap",
   name: "Heatmap",
-  blurb: "Hour of day against day — where in the day a series lives.",
+  blurb: "Time gridded against itself — where in the day, or where in the hour, a series lives.",
   options: [
     {
-      key: "days",
-      label: "Days",
+      /*
+        Which grid, and the honest default is "whichever the data is".
+
+        A heatmap's whole claim is that a cell is one reading, so the grid has
+        to be the shape of the readings. Five-minute prices gridded hour by day
+        average twelve SCED runs into one square and hide exactly the spikes
+        somebody opened a heatmap to find; day-ahead hourly prices gridded the
+        same way are one reading per cell and read perfectly. So the axes follow
+        the granularity, and the setting is here for the times you want the other
+        reading of the same series.
+      */
+      key: "grid",
+      label: "Grid",
       choices: [
-        { value: "7", label: "7 days" },
-        { value: "14", label: "14 days" },
-        { value: "30", label: "30 days" },
+        { value: "auto", label: "Match the data" },
+        { value: "day", label: "Day × hour" },
+        { value: "hour", label: "Hour × interval" },
       ],
-      fallback: "14",
+      fallback: "auto",
+    },
+    {
+      // "Match the grid", because a day of hours and a month of days are the
+      // same amount of grid, and neither default is right for the other.
+      key: "span",
+      label: "Span",
+      choices: [
+        { value: "auto", label: "Match the grid" },
+        { value: "-12h", label: "12 hours" },
+        { value: "-24h", label: "24 hours" },
+        { value: "-2d", label: "2 days" },
+        { value: "-7d", label: "7 days" },
+        { value: "-14d", label: "14 days" },
+        { value: "-30d", label: "30 days" },
+      ],
+      fallback: "auto",
     },
     {
       key: "agg",
@@ -713,11 +774,13 @@ const heatmap: ComponentDef = {
     refs.length === 0
       ? { ok: false, why: "Pick a series." }
       : refs.length > 1
-        ? { ok: false, why: "A heatmap grids one series — hour by day." }
+        ? { ok: false, why: "A heatmap grids one series against time." }
         : fanoutOf(refs[0])
           ? { ok: false, why: "Pick a single entity, not the whole stream." }
-          : refs[0].cadenceSeconds > 3600
-            ? { ok: false, why: "Needs an intraday series — a daily one has no hours to grid." }
+          : // Grain, not cadence: the day-ahead market publishes once a day and
+            // is still twenty-four hourly readings, which is a grid.
+            grainOf(refs[0]) > 3600
+            ? { ok: false, why: "Needs intraday readings — a daily series has no hours to grid." }
             : { ok: true },
   // Beside several series a heatmap is not a rejected heatmap; the selection
   // has simply moved past it, the same way it moves past the ticker.
@@ -726,21 +789,71 @@ const heatmap: ComponentDef = {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
     const name = `Heatmap${i}`;
-    const days = Number(o.days) || 14;
-    // A month of a five-minute feed is ~8,640 rows; the route caps at 10k.
-    const limit = Math.min(10_000, Math.ceil((days * 86_400) / Math.max(refs[0].cadenceSeconds, 60)) + 48);
+    const grain = grainOf(refs[0]);
+    /*
+      The one decision everything below is derived from. Left to itself it
+      follows the data: several readings inside an hour make the hour worth a
+      row of its own, one reading an hour does not.
+
+      Asked for hour rows by an hourly series it gives day rows anyway — one
+      column is not a grid — rather than refusing a shape that renders
+      perfectly well, which is how `combine: spread` treats a selection that
+      is not two series.
+    */
+    const asked: "hour" | "day" =
+      o.grid === "auto" ? (grain < 3600 ? "hour" : "day") : o.grid === "hour" ? "hour" : "day";
+    const mode: "hour" | "day" = asked === "hour" && grain >= 3600 ? "day" : asked;
+    const cellSeconds = mode === "hour" ? grain : 3600;
+    const rowSeconds = mode === "hour" ? 3600 : 86_400;
+    // Twelve five-minute slots in an hour, twenty-four hours in a day: one
+    // expression, because the grid is always a row divided by its cell.
+    const cols = Math.max(1, Math.round(rowSeconds / cellSeconds));
+    // Half a day of hours and a fortnight of days are about the same amount of
+    // grid, and both land inside a tile at its arriving size rather than
+    // scrolling half of themselves out of sight.
+    const span = o.span === "auto" ? (mode === "hour" ? "-12h" : "-14d") : o.span;
+    const spanSeconds = SPAN_SECONDS[span] ?? 1_209_600;
+    /*
+      Rows, not publishes: a fortnight of the day-ahead market is 336 hourly
+      rows behind a daily cadence, and asking for 14 drew two days of grid and
+      called it a fortnight. The headroom is for the forward-looking reports,
+      whose newest rows are in the future — the query has a start and no end, so
+      tomorrow's prices arrive first and would otherwise eat into the window.
+    */
+    const limit = Math.min(10_000, Math.ceil(spanSeconds / Math.max(grain, 60)) + 48);
+    // The most rows the span can hold, plus the two partials at either edge.
+    const maxRows = Math.ceil(spanSeconds / rowSeconds) + 2;
+    const cellLabel =
+      mode === "day"
+        ? "hour"
+        : cellSeconds % 60 === 0
+          ? `${cellSeconds / 60} minutes`
+          : `${cellSeconds} seconds`;
 
     return {
       imports: [],
       code: `function ${name}({ w, h }) {
   const { rows, error, loading } = useSeries(
-    [{ dataset: ${JSON.stringify(s[0].dataset)}, node: ${JSON.stringify(s[0].node)}, start: "-${days}d", limit: ${limit} }],
+    [{ dataset: ${JSON.stringify(s[0].dataset)}, node: ${JSON.stringify(s[0].node)}, start: "${span}", limit: ${limit} }],
     ${refreshMs(refs)},
   );
 
   const COLUMN = ${JSON.stringify(s[0].column)};
   const UNIT = ${JSON.stringify(s[0].unit)};
   const AGG = ${JSON.stringify(o.agg)};
+  /*
+    The grid, decided from the granularity of the data when the page was
+    composed. "day" is a row per day and a column per hour; "hour" is a row per
+    hour and a column per interval within it — twelve for a five-minute feed —
+    so a cell is always exactly one reading rather than an average of however
+    many happened to land in an hour.
+  */
+  const MODE = ${JSON.stringify(mode)};
+  const CELL_SECONDS = ${cellSeconds};
+  const COLS = Array.from({ length: ${cols} }, (_, n) => n);
+  const MAX_ROWS = ${maxRows};
+
+  const pad2 = (n) => String(n).padStart(2, "0");
 
   /*
     Bucketed in Central time, because "hour of day" is a claim about when
@@ -750,7 +863,7 @@ const heatmap: ComponentDef = {
     const fmt = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Chicago",
       year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", hour12: false,
+      hour: "2-digit", minute: "2-digit", hour12: false,
     });
     const cells = new Map();
     (rows[0] || []).forEach((r) => {
@@ -760,24 +873,49 @@ const heatmap: ComponentDef = {
       const get = (t) => (parts.find((p) => p.type === t) || {}).value;
       const day = get("year") + "-" + get("month") + "-" + get("day");
       const hour = Number(get("hour")) % 24;
-      const d = cells.get(day) || {};
-      const c = d[hour] || { sum: 0, n: 0, max: -Infinity };
+      // A row is a day or an hour; a column is an hour of that day or an
+      // interval of that hour. SCED stamps its runs a few seconds past the
+      // interval (:05:19), so the minute decides the slot, not the clock.
+      const key = MODE === "hour" ? day + " " + pad2(hour) : day;
+      const col =
+        MODE === "hour"
+          ? Math.min(COLS.length - 1, Math.floor((Number(get("minute")) * 60) / CELL_SECONDS))
+          : hour;
+      const d = cells.get(key) || {};
+      const c = d[col] || { sum: 0, n: 0, max: -Infinity };
       c.sum += v; c.n += 1; c.max = Math.max(c.max, v);
-      d[hour] = c;
-      cells.set(day, d);
+      d[col] = c;
+      cells.set(key, d);
     });
     const val = (c) => (AGG === "max" ? c.max : c.sum / c.n);
-    const daysList = [...cells.keys()].sort().reverse();
+    // Newest first, and never more grid than the span asked for — the query
+    // carries headroom for rows published ahead of now.
+    const keys = [...cells.keys()].sort().reverse().slice(0, MAX_ROWS);
     let lo = Infinity, hi = -Infinity;
-    daysList.forEach((day) => {
-      const d = cells.get(day);
-      for (const hKey in d) { const x = val(d[hKey]); if (x < lo) lo = x; if (x > hi) hi = x; }
+    keys.forEach((key) => {
+      const d = cells.get(key);
+      for (const cKey in d) { const x = val(d[cKey]); if (x < lo) lo = x; if (x > hi) hi = x; }
     });
-    return { daysList, cells, lo, hi, val };
+    return { keys, cells, lo, hi, val };
   }, [rows]);
 
-  const HOURS = Array.from({ length: 24 }, (_, hIdx) => hIdx);
   const [hover, setHover] = React.useState(null);
+
+  /*
+    A column is an hour or a clock minute, and only some of them are labelled:
+    every third hour, every quarter of an hour. Enough to place a cell without
+    a strip of numbers competing with the grid it labels.
+  */
+  const colLabel = (c) => (MODE === "day" ? String(c) : ":" + pad2(Math.round((c * CELL_SECONDS) / 60)));
+  const colShown = (c) =>
+    MODE === "day" ? c % 3 === 0 : ((c * CELL_SECONDS) / 60) % 15 === 0;
+  // The date is only repeated when it changes: down a column of hours, every
+  // row saying 08-30 is noise until the row where it stops being true.
+  const rowLabel = (key, prev) =>
+    MODE === "day"
+      ? key.slice(5)
+      : (prev && prev.slice(0, 10) === key.slice(0, 10) ? "" : key.slice(5, 10) + " ") +
+        key.slice(11) + ":00";
 
   /*
     Ours, not the browser's. title= waits about a second before it appears,
@@ -793,17 +931,24 @@ const heatmap: ComponentDef = {
   const track = (e) => {
     const el = e.target.closest ? e.target.closest("[data-cell]") : null;
     if (!el) return setHover((prev) => (prev ? null : prev));
-    const day = el.dataset.day;
-    const hr = Number(el.dataset.hr);
+    const key = el.dataset.key;
+    const col = Number(el.dataset.col);
     setHover((prev) => {
-      if (prev && prev.day === day && prev.hour === hr) return prev;
+      if (prev && prev.key === key && prev.col === col) return prev;
       const r = el.getBoundingClientRect();
-      return { day, hour: hr, x: r.left + r.width / 2, top: r.top, bottom: r.bottom };
+      return { key, col, x: r.left + r.width / 2, top: r.top, bottom: r.bottom };
     });
   };
 
-  const hc = hover ? (grid.cells.get(hover.day) || {})[hover.hour] : null;
-  const pad2 = (n) => String(n).padStart(2, "0");
+  const hc = hover ? (grid.cells.get(hover.key) || {})[hover.col] : null;
+  // Minutes from midnight: the row supplies the hour in the hour grid, the
+  // column supplies it in the day grid, and the cell's own length ends it.
+  const startMin = !hover
+    ? 0
+    : MODE === "hour"
+      ? Number(hover.key.slice(11)) * 60 + (hover.col * CELL_SECONDS) / 60
+      : hover.col * 60;
+  const clock = (m) => pad2(Math.floor(m / 60) % 24) + ":" + pad2(Math.round(m) % 60);
   // Prices want cents; load does not want four digits of them.
   const num = (v) =>
     Math.abs(v) >= 1000 ? v.toFixed(0) : Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(2);
@@ -813,29 +958,31 @@ const heatmap: ComponentDef = {
 ${mockTag(anyMock)}      <div
         onMouseMove={track}
         onMouseLeave={() => setHover(null)}
-        style={{ display: "grid", gap: 2, gridTemplateColumns: "auto repeat(24, 1fr)", fontFamily: "var(--mono)", fontSize: 9 }}
+        style={{ display: "grid", gap: 2, gridTemplateColumns: "auto repeat(" + COLS.length + ", 1fr)", fontFamily: "var(--mono)", fontSize: 9 }}
       >
         <span />
-        {HOURS.map((hr) => (
-          <span key={hr} style={{ color: hover && hover.hour === hr ? "var(--ink)" : "var(--faint)", textAlign: "center" }}>
-            {hr % 3 === 0 || (hover && hover.hour === hr) ? hr : ""}
+        {COLS.map((c) => (
+          <span key={c} style={{ color: hover && hover.col === c ? "var(--ink)" : "var(--faint)", textAlign: "center" }}>
+            {colShown(c) || (hover && hover.col === c) ? colLabel(c) : ""}
           </span>
         ))}
-        {grid.daysList.map((day) => (
-          <React.Fragment key={day}>
-            <span style={{ alignSelf: "center", color: hover && hover.day === day ? "var(--ink)" : "var(--faint)", paddingRight: 4 }}>{day.slice(5)}</span>
-            {HOURS.map((hr) => {
-              const c = (grid.cells.get(day) || {})[hr];
-              if (!c) return <span key={hr} style={{ background: "var(--surface-2)", borderRadius: 2, minHeight: 16 }} />;
-              const x = grid.val(c);
+        {grid.keys.map((key, n) => (
+          <React.Fragment key={key}>
+            <span style={{ alignSelf: "center", color: hover && hover.key === key ? "var(--ink)" : "var(--faint)", paddingRight: 4, whiteSpace: "nowrap" }}>
+              {rowLabel(key, grid.keys[n - 1])}
+            </span>
+            {COLS.map((c) => {
+              const cell = (grid.cells.get(key) || {})[c];
+              if (!cell) return <span key={c} style={{ background: "var(--surface-2)", borderRadius: 2, minHeight: 16 }} />;
+              const x = grid.val(cell);
               const t = grid.hi > grid.lo ? (x - grid.lo) / (grid.hi - grid.lo) : 0.5;
-              const on = hover && hover.day === day && hover.hour === hr;
+              const on = hover && hover.key === key && hover.col === c;
               return (
                 <span
-                  key={hr}
+                  key={c}
                   data-cell=""
-                  data-day={day}
-                  data-hr={hr}
+                  data-key={key}
+                  data-col={c}
                   style={{
                     background: "color-mix(in oklab, var(--surface-2), var(--s2) " + Math.round(8 + t * 88) + "%)",
                     borderRadius: 2,
@@ -894,23 +1041,23 @@ ${mockTag(anyMock)}      <div
           }}
         >
           <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".08em" }}>
-            {pad2(hover.hour)}:00 – {pad2((hover.hour + 1) % 24)}:00 CT
+            {clock(startMin)} – {clock(startMin + CELL_SECONDS / 60)} CT
           </div>
           <div style={{ color: "var(--ink)", fontSize: 17, fontWeight: 600, lineHeight: 1.3, whiteSpace: "nowrap" }}>
             {num(grid.val(hc))}
             <span style={{ color: "var(--faint)", fontSize: 11, fontWeight: 400 }}> {UNIT}</span>
           </div>
           <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
-            {new Date(hover.day + "T12:00:00Z").toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" })}
-            {" · " + hc.n + (hc.n === 1 ? " interval" : " intervals")}
-            {/* The aggregate not on show above: an hour's peak is the question
-                an average invites, and the reverse. */}
+            {new Date(hover.key.slice(0, 10) + "T12:00:00Z").toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" })}
+            {" · " + hc.n + (hc.n === 1 ? " reading" : " readings")}
+            {/* The aggregate not on show above: a cell's peak is the question
+                an average invites, and the reverse. One reading is both. */}
             {hc.n > 1 ? (AGG === "max" ? " · avg " + num(hc.sum / hc.n) : " · peak " + num(hc.max)) : ""}
           </div>
         </div>
       ) : null}
       <p style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9.5, margin: "6px 0 0" }}>
-        {grid.lo === Infinity ? "no data yet" : grid.lo.toFixed(1) + " – " + grid.hi.toFixed(1) + " " + UNIT + " · " + (AGG === "max" ? "peak" : "average") + " per hour · Central time"}
+        {grid.lo === Infinity ? "no data yet" : grid.lo.toFixed(1) + " – " + grid.hi.toFixed(1) + " " + UNIT + " · " + (AGG === "max" ? "peak" : "average") + " per ${cellLabel} · Central time"}
       </p>
     </Section>
   );
@@ -1665,7 +1812,10 @@ export function componentDef(kind: ComponentKind): ComponentDef | undefined {
  * its corner to the size that suits the dashboard. A component that lands
  * full-bleed has already made the decision for you.
  */
-export const DEFAULT_LAYOUT: Record<ComponentKind, { w: number; h: number }> = {
+export const DEFAULT_LAYOUT: Record<
+  ComponentKind,
+  NonNullable<ComponentSpec["layout"]>
+> = {
   chart: { w: 6, h: 240 },
   bar: { w: 4, h: 220 },
   heatmap: { w: 6, h: 280 },
@@ -1673,3 +1823,80 @@ export const DEFAULT_LAYOUT: Record<ComponentKind, { w: number; h: number }> = {
   table: { w: 6, h: 260 },
   map: { w: 6, h: 300 },
 };
+
+/** The canvas: twelve columns, a 12px gutter, and 10px of vertical travel. */
+export const GRID = { cols: 12, gap: 12, snap: 10 } as const;
+
+/** A tile's rectangle once it has one: columns across, pixels down. */
+export type Placed = { x: number; y: number; w: number; h: number };
+
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+
+/** Do two tiles share any ground? Half-open on both axes. */
+export function overlaps(a: Placed, b: Placed): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/** The first free pixel below everything already on the canvas. */
+export function below(manifest: ComponentSpec[]): number {
+  return manifest.reduce((m, spec) => {
+    const l = spec.layout;
+    if (typeof l?.y !== "number") return m;
+    return Math.max(m, l.y + l.h);
+  }, 0);
+}
+
+/**
+ * Give every tile an explicit place, without moving one that already has one.
+ *
+ * Every write goes through this, and that is the point: the first time anyone
+ * touches a page written before positions existed, the arrangement it had is
+ * frozen into the manifest exactly as the old flow grid drew it — same order,
+ * same wrap, same row heights — and from then on nothing is derived from a
+ * neighbour. A page that has never been rearranged therefore looks identical
+ * after this change, which is the only acceptable migration for someone's
+ * screen.
+ */
+export function packLayout(manifest: ComponentSpec[]): ComponentSpec[] {
+  const size = manifest.map((spec) => ({
+    w: clamp(Math.round(spec.layout?.w ?? 6), 1, GRID.cols),
+    h: Math.max(120, Math.round(spec.layout?.h ?? 240)),
+  }));
+
+  // Everything that already has a place keeps it, and keeps it first: a page
+  // caught mid-migration has both kinds in it, and the tile somebody put
+  // somewhere is the one the others have to be laid around — not the reverse.
+  const at: (Placed | null)[] = manifest.map((spec, i) => {
+    const { x, y } = spec.layout ?? {};
+    if (typeof x !== "number" || typeof y !== "number") return null;
+    return {
+      x: clamp(Math.round(x), 0, GRID.cols - size[i].w),
+      y: Math.max(0, Math.round(y)),
+      ...size[i],
+    };
+  });
+  const taken: Placed[] = at.filter((p): p is Placed => p !== null);
+
+  // The old grid's own rule for the rest: fill the row, wrap when the span no
+  // longer fits, and start the next row below the tallest tile in this one.
+  let col = 0;
+  let top = 0;
+  let rowH = 0;
+  manifest.forEach((_, i) => {
+    if (at[i]) return;
+    const { w, h } = size[i];
+    if (col + w > GRID.cols) {
+      col = 0;
+      top += rowH + GRID.gap;
+      rowH = 0;
+    }
+    const box: Placed = { x: col, y: top, w, h };
+    while (taken.some((t) => overlaps(box, t))) box.y += GRID.snap;
+    col += w;
+    rowH = Math.max(rowH, h);
+    taken.push(box);
+    at[i] = box;
+  });
+
+  return manifest.map((spec, i) => ({ ...spec, layout: at[i]! }));
+}

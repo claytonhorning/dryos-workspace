@@ -38,6 +38,18 @@ export interface Schema {
   availability: Availability;
   /** How often a new value lands, in words and in seconds. */
   cadence: { label: string; seconds: number };
+  /**
+   * How far apart two rows are, when that is not how often they arrive.
+   *
+   * `cadence` is delivery; this is resolution, and for the forward-looking
+   * reports they are different numbers. The day-ahead market posts the whole of
+   * tomorrow in one file at 12:35 — a daily cadence — but that file is
+   * twenty-four hourly rows, and anything reasoning about the *shape* of the
+   * data (how many rows a window holds, what a grid cell is) has to ask about
+   * the rows rather than the delivery. Read through `grainSeconds`; unset means
+   * the two agree, which is true of every real-time feed.
+   */
+  intervalSeconds?: number;
   /** Dryos tokens burned each time this schema is queried. */
   tokens: number;
   /**
@@ -134,6 +146,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-dam-lmp-bus",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86_400 },
+    intervalSeconds: 3_600,
     tokens: 0.5,
     // Bus-level, not settlement points: NP4-183 prices every electrical bus,
     // which is what ERCOT actually publishes hourly for the day-ahead market.
@@ -295,6 +308,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-dam-spp",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    intervalSeconds: 3_600,
     tokens: 0.5,
     entities: {
       count: 1118,
@@ -407,6 +421,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-dam-lambda",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    intervalSeconds: 3_600,
     tokens: 0.25,
     entities: {
       count: 1,
@@ -435,6 +450,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-dam-shadow-prices",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    intervalSeconds: 3_600,
     tokens: 0.5,
     entities: {
       count: 263,
@@ -472,6 +488,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-dam-energy-bought",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    intervalSeconds: 3_600,
     tokens: 0.5,
     entities: {
       count: 1049,
@@ -500,6 +517,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-dam-energy-sold",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    intervalSeconds: 3_600,
     tokens: 0.5,
     entities: {
       count: 1049,
@@ -528,6 +546,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-dam-mcpc",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
+    intervalSeconds: 3_600,
     tokens: 0.25,
     entities: {
       count: 5,
@@ -615,6 +634,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-dam-as-plan",
     availability: "live",
     cadence: { label: "daily, 7-day plan", seconds: 86400 },
+    intervalSeconds: 3_600,
     tokens: 0.25,
     entities: {
       count: 5,
@@ -704,6 +724,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-system-demand",
     availability: "live",
     cadence: { label: "15-min, posted hourly", seconds: 3600 },
+    intervalSeconds: 900,
     tokens: 0.25,
     entities: {
       count: 1,
@@ -1044,6 +1065,7 @@ export const SCHEMAS: Schema[] = [
     dataset: "ercot-temperature-forecast",
     availability: "live",
     cadence: { label: "daily, rolling window", seconds: 86400 },
+    intervalSeconds: 3_600,
     tokens: 0.25,
     entities: {
       count: 8,
@@ -1114,6 +1136,18 @@ export function tokenLabel(tokens: number): string {
  */
 export function creditLabel(tokens: number): string {
   return `${tokenAmount(tokens)} dryos credit${tokens === 1 ? "" : "s"}`;
+}
+
+/**
+ * Seconds between two rows — the resolution of the data, not its delivery.
+ *
+ * The one question to ask when the answer is about the rows: how many a window
+ * holds, and how much time one grid cell is. `cadence.seconds` answers a
+ * different question — how often to poll — and for the day-ahead market the two
+ * differ by a factor of twenty-four.
+ */
+export function grainSeconds(schema: Schema): number {
+  return schema.intervalSeconds ?? schema.cadence.seconds;
 }
 
 /** Per-day cost of holding one query open at the schema's own cadence. */

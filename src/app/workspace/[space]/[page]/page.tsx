@@ -170,7 +170,7 @@ export default function AppPage() {
    * involved, so this returns in about a second.
    */
   const place = useCallback(
-    async (index: number) => {
+    async (at: { x: number; y: number } | null) => {
       const payload = dragging;
       setDragging(null);
       if (!payload || pending) return;
@@ -185,9 +185,13 @@ export default function AppPage() {
             component: payload.kind,
             options: payload.options,
             custom: payload.custom,
-            layout: payload.layout,
+            // The place comes with the size: the ghost the frame drew is what
+            // the tile becomes, so there is nothing left for the server to
+            // decide about where it goes. Released where it does not fit there
+            // was no ghost, and no place is the honest thing to send — the
+            // server puts it under everything instead of on top of something.
+            layout: at ? { ...payload.layout, x: at.x, y: at.y } : payload.layout,
             refs: payload.refs ?? attached,
-            at: index,
           }),
         });
         if (!res.ok && !res.headers.get("content-type")?.includes("ndjson")) {
@@ -280,7 +284,7 @@ export default function AppPage() {
    * and remount it mid-gesture.
    */
   const arrange = useCallback(
-    async (body: Record<string, number>) => {
+    async (body: Record<string, unknown>) => {
       // A page without a manifest has nothing to write a layout into — the
       // frame has already applied the gesture live, and posting the save
       // would only surface a 409 for a change that cannot persist.
@@ -300,8 +304,12 @@ export default function AppPage() {
     [arrange],
   );
 
-  const reorder = useCallback(
-    (from: number, to: number) => void arrange({ from, to }),
+  const move = useCallback(
+    (
+      index: number,
+      at: { x: number; y: number },
+      swap: { index: number; x: number; y: number } | null,
+    ) => void arrange({ index, x: at.x, y: at.y, swap }),
     [arrange],
   );
 
@@ -411,7 +419,7 @@ export default function AppPage() {
             onDropAt={place}
             placing={pending}
             onResize={resize}
-            onReorder={reorder}
+            onMove={move}
             onRemove={remove}
             onConfigure={configure}
             flush={!asideOpen}

@@ -1,4 +1,9 @@
-import { type ComponentSpec, componentDef, withDefaults } from "./components";
+import {
+  type ComponentSpec,
+  componentDef,
+  packLayout,
+  withDefaults,
+} from "./components";
 import type { DataRef } from "./catalog";
 
 /**
@@ -119,6 +124,35 @@ function useFrameTheme() {
 }
 
 /**
+ * The canvas is twelve columns wide and a tile carries its own place on it —
+ * \`x\` in columns, \`y\` in pixels down from the top.
+ *
+ * Not a flow of tiles in an order. An order means a tile has no position of its
+ * own, only a position relative to its neighbours, so moving one necessarily
+ * pushes every one after it. Placed, a tile is where it was put: a move moves
+ * one tile, and the hole it leaves is allowed to stay a hole.
+ */
+const GRID_COLS = 12;
+const GRID_GAP = 12;
+/** Vertical travel, the same 10px the resize corner already rounded to. */
+const GRID_SNAP = 10;
+
+/**
+ * The left edge of column \`x\`, and the width of \`w\` columns.
+ *
+ * Kept as \`calc\` against the canvas's own width rather than resolved to pixels,
+ * so a tile stays on its column when the panel beside it is dragged wider.
+ */
+function gridX(x) {
+  const track = "(100% - " + (GRID_COLS - 1) * GRID_GAP + "px) / " + GRID_COLS;
+  return "calc(" + track + " * " + x + " + " + x * GRID_GAP + "px)";
+}
+function gridW(w) {
+  const track = "(100% - " + (GRID_COLS - 1) * GRID_GAP + "px) / " + GRID_COLS;
+  return "calc(" + track + " * " + w + " + " + (w - 1) * GRID_GAP + "px)";
+}
+
+/**
  * Every section has the same frame, so the page reads as one thing.
  *
  * It carries the three things the host cannot do for it, all for the same
@@ -177,24 +211,73 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
   function grab(e) {
     e.preventDefault();
     const host = box.current;
-    const grid = host.parentElement;
+    // On a canvas the tile sits inside its own positioned slot, so the column
+    // width comes from the canvas rather than from the box one level up. In the
+    // annex there is no slot and the parent is the grid itself.
+    const parentEl = host.parentElement;
+    const slot = parentEl && parentEl.dataset.slot != null ? parentEl : null;
+    const grid = slot ? slot.parentElement : parentEl;
     // One column, in pixels, from the grid the tile actually sits in.
-    const col = (grid.clientWidth - 11 * 12) / 12;
+    const col = (grid.clientWidth - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS;
+    const me = slot ? { x: Number(slot.dataset.x), y: Number(slot.dataset.y) } : null;
+    const others = slot
+      ? tileRects(grid).filter((t) => t.index !== Number(slot.dataset.slot))
+      : [];
     const start = { x: e.clientX, y: e.clientY, w: size.w, h: size.h };
     setDragging(true);
 
-    const measure = (ev) => ({
-      w: Math.max(2, Math.min(12, start.w + Math.round((ev.clientX - start.x) / (col + 12)))),
-      h: Math.max(120, Math.min(900, Math.round((start.h + (ev.clientY - start.y)) / 10) * 10)),
-    });
+    /*
+      Nothing gets out of the way, so growing stops where the neighbour starts —
+      the way a window stops at the edge of a screen.
 
-    const move = (ev) => setSize(measure(ev));
+      Height settles first, against the width the tile already had, and width is
+      then measured against the height that settled. That order is not a
+      preference: it is the one that cannot overlap. Anything the final
+      rectangle could touch has to overlap it on both axes, and the width pass
+      only exempts tiles that clear the settled height — so a tile the height
+      pass let by is a tile the width pass stops at. Taking width first instead
+      let a tile *underneath* count as a neighbour to the side, and a tall drag
+      collapsed the tile to its minimum width.
+    */
+    const measure = (ev) => {
+      let w = Math.max(2, Math.min(GRID_COLS, start.w + Math.round((ev.clientX - start.x) / (col + GRID_GAP))));
+      let h = Math.max(120, Math.min(900, Math.round((start.h + (ev.clientY - start.y)) / GRID_SNAP) * GRID_SNAP));
+      if (me) {
+        others.forEach((o) => {
+          if (o.y >= me.y && o.x < me.x + start.w && me.x < o.x + o.w) h = Math.min(h, o.y - GRID_GAP - me.y);
+        });
+        h = Math.max(120, h);
+        w = Math.min(w, GRID_COLS - me.x);
+        others.forEach((o) => {
+          if (o.x >= me.x && o.y < me.y + h && me.y < o.y + o.h) w = Math.min(w, o.x - me.x);
+        });
+        w = Math.max(2, w);
+      }
+      return { w: w, h: h };
+    };
+
+    const move = (ev) => {
+      const next = measure(ev);
+      setSize(next);
+      // The slot is React's, but it has to follow the corner in real time.
+      // These are the same expressions React writes, so when the finished size
+      // reaches state there is nothing to undo and nothing to flash.
+      if (slot) {
+        slot.style.width = gridW(next.w);
+        slot.style.height = next.h + "px";
+      }
+    };
     const up = (ev) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDragging(false);
       const final = measure(ev);
       setSize(final);
+      // The canvas keeps everyone's rectangle, so it has to hear about this one
+      // — the next drag measures its gaps against it.
+      window.dispatchEvent(
+        new CustomEvent("dryos:tilesized", { detail: { index, w: final.w, h: final.h } }),
+      );
       if (window.parent !== window) {
         parent.postMessage({ __dryos: "resize", index, w: final.w, h: final.h }, "*");
       }
@@ -249,9 +332,20 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
           onDragStart={(e) => {
             e.dataTransfer.setData("text/dryos-tile", String(index));
             e.dataTransfer.effectAllowed = "move";
-            // The grid decides where it lands; this only says what is in flight.
+            // The canvas decides where it lands; this only says what is in
+            // flight — and where inside it the cursor took hold, so the tile
+            // travels under the hand instead of snapping its corner there.
+            const r = box.current.getBoundingClientRect();
             window.dispatchEvent(
-              new CustomEvent("dryos:tilegrab", { detail: { index, w: size.w, h: size.h } }),
+              new CustomEvent("dryos:tilegrab", {
+                detail: {
+                  index,
+                  w: size.w,
+                  h: size.h,
+                  offX: e.clientX - r.left,
+                  offY: e.clientY - r.top,
+                },
+              }),
             );
           }}
           onDragEnd={() => window.dispatchEvent(new CustomEvent("dryos:tiledrop"))}
@@ -407,54 +501,99 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
   );
 }
 
-/**
- * Which gap in the grid a pointer is over.
- *
- * Nearest tile centre, then before or after by which half of it you are on.
- * Distance rather than containment because the pointer spends most of a drag in
- * the gutters between tiles and below the last row, and every one of those
- * positions still has an obvious answer.
- */
-function slotAt(grid, x, y) {
-  const tiles = [...grid.querySelectorAll(":scope > [data-tile]")];
-  if (!tiles.length) return 0;
+/** Every tile's rectangle, read off the canvas the App just rendered. */
+function tileRects(grid) {
+  return [...grid.querySelectorAll(":scope > [data-slot]")].map((el) => ({
+    index: Number(el.dataset.slot),
+    x: Number(el.dataset.x),
+    y: Number(el.dataset.y),
+    w: Number(el.dataset.w),
+    h: Number(el.dataset.h),
+  }));
+}
 
-  let best = 0;
-  let bestRect = null;
-  let bestDistance = Infinity;
-
-  tiles.forEach((el, i) => {
-    const r = el.getBoundingClientRect();
-    const dx = x - (r.left + r.width / 2);
-    const dy = y - (r.top + r.height / 2);
-    const d = dx * dx + dy * dy;
-    if (d < bestDistance) {
-      bestDistance = d;
-      best = i;
-      bestRect = r;
-    }
-  });
-
-  return x < bestRect.left + bestRect.width / 2 ? best : best + 1;
+/** Do two tiles share any ground? Half-open on both axes. */
+function tileOverlaps(a, b) {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
 /**
- * Where the tile will be, drawn at the size it will be.
+ * Where a dragged tile would land.
  *
- * The grid reflows around it, so this is not a marker pointing at a position —
- * it is the position, already taken. An empty gap of the right size in the
- * right place: a "DROP HERE" inside it was the caption on a photograph of
- * itself, and it is the one thing on screen while someone is mid-drag.
+ * Three answers, in order: the free rectangle under the cursor; a swap with the
+ * tile it is squarely on top of, when both still land clear; or nothing, in
+ * which case the caller holds the preview it already had rather than showing
+ * one it would not honour. No answer ever moves a third tile — that is the
+ * whole rule, and the reason a hole left behind stays a hole.
  */
-function Ghost({ w, h, placing }) {
+function tileLanding(grid, rects, self, drag, px, py) {
+  const r = grid.getBoundingClientRect();
+  const stride = (r.width - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS + GRID_GAP;
+  const w = drag.w;
+  const h = drag.h;
+  const want = {
+    x: Math.max(0, Math.min(GRID_COLS - w, Math.round((px - r.left - drag.offX) / stride))),
+    y: Math.max(0, Math.round((py - r.top - drag.offY) / GRID_SNAP) * GRID_SNAP),
+    w: w,
+    h: h,
+  };
+
+  const others = rects.filter((t) => t.index !== self);
+  if (!others.some((o) => tileOverlaps(want, o))) return { x: want.x, y: want.y, swap: null };
+  // Nothing was picked up — an incoming tile has no place to trade.
+  if (self === null || self === undefined) return null;
+
+  // Squarely on top of one tile: the two trade places. Most-overlapped rather
+  // than whatever the pointer happens to be inside, because the rectangle in
+  // flight is what has to fit, not the cursor.
+  const mine = rects.find((t) => t.index === self);
+  let hit = null;
+  let most = 0;
+  others.forEach((o) => {
+    const area =
+      Math.max(0, Math.min(want.x + w, o.x + o.w) - Math.max(want.x, o.x)) *
+      Math.max(0, Math.min(want.y + h, o.y + o.h) - Math.max(want.y, o.y));
+    if (area > most) {
+      most = area;
+      hit = o;
+    }
+  });
+  if (!hit || !mine) return null;
+
+  const a = { x: Math.min(hit.x, GRID_COLS - w), y: hit.y, w: w, h: h };
+  const b = { x: Math.min(mine.x, GRID_COLS - hit.w), y: mine.y, w: hit.w, h: hit.h };
+  const rest = others.filter((o) => o.index !== hit.index);
+  // A swap that would sit on a third tile is not a swap.
+  if (tileOverlaps(a, b)) return null;
+  if (rest.some((o) => tileOverlaps(a, o) || tileOverlaps(b, o))) return null;
+  return { x: a.x, y: a.y, swap: { index: hit.index, x: b.x, y: b.y, w: b.w, h: b.h } };
+}
+
+/**
+ * Where the tile will be, drawn at the size it will be, in the place it will be.
+ *
+ * Not a marker pointing at a position — it is the position, already taken. It
+ * used to be an element in the flow, which meant the preview shoved every tile
+ * aside to show itself, and shoving them changed the answer to where the
+ * pointer was: the gap moved, so the gap moved. Placed absolutely it disturbs
+ * nothing, so what it shows is stable and is exactly what a drop produces.
+ *
+ * A second, quieter one appears on a swap — that tile is going somewhere too,
+ * and it is the only case where anything but the tile in hand moves.
+ */
+function Ghost({ x, y, w, h, placing, trading }) {
   return (
     <div
       style={{
-        background: "var(--accent-dim, rgba(232,255,61,.06))",
-        border: "1px dashed var(--accent)",
+        background: trading ? "transparent" : "var(--accent-dim, rgba(232,255,61,.06))",
+        border: "1px dashed " + (trading ? "var(--line-strong)" : "var(--accent)"),
         borderRadius: 8,
-        gridColumn: "span " + (w || 6),
         height: h || 240,
+        left: gridX(x || 0),
+        pointerEvents: "none",
+        position: "absolute",
+        top: y || 0,
+        width: gridW(w || 6),
         // Dropped, composing: the gap breathes so the wait reads as work.
         animation: placing ? "dr-ghost 1.1s ease-in-out infinite" : undefined,
       }}
@@ -508,20 +647,36 @@ const RECHARTS_ALL = [
 ];
 
 /**
- * Give a saved component the function name its slot expects.
+ * Give a saved component the function name and the index its slot expects.
  *
  * A custom component was authored standing alone, so its function is named for
- * its own kind. Two of the same kind in one dashboard would then collide, and
- * the index is what keeps them apart.
+ * its own kind and its `Section` was handed whichever index it had at the time —
+ * always 0, since the editor composes it as a one-tile app. Two of the same kind
+ * in one dashboard would collide on the name; every one of them would collide on
+ * the index, and the index is what a resize, a remove or a drag reports itself
+ * as. Both are rewritten to the slot the component is actually landing in.
  */
 function renameSection(code: string, index: number): string {
-  return code.replace(
-    /^function\s+([A-Za-z0-9_]+?)\d*\s*\(/m,
-    (_m, base) => `function ${base}${index}(`,
-  );
+  return code
+    .replace(
+      /^function\s+([A-Za-z0-9_]+?)\d*\s*\(/m,
+      (_m, base) => `function ${base}${index}(`,
+    )
+    // Only the outer frame's own tag — a refinement may reorder its props, but
+    // it is still the first `<Section` in the file.
+    .replace(/<Section\b[^>]*>/, (tag) =>
+      tag.replace(/\bindex=\{\d+\}/, `index={${index}}`),
+    );
 }
 
-export function composeApp(manifest: ComponentSpec[]): string {
+export function composeApp(input: ComponentSpec[]): string {
+  // Every tile gets an explicit place before anything is emitted. A page from
+  // before positions existed is frozen into the arrangement the old flow grid
+  // gave it — same wrap, same rows — so nothing on anyone's screen moves the
+  // first time this runs.
+  const manifest = packLayout(input);
+  const placed = manifest.map((spec) => spec.layout as Required<NonNullable<ComponentSpec["layout"]>>);
+
   const sections = manifest
     .map((spec, i) => {
       // A saved custom component carries its own finished source — possibly
@@ -576,13 +731,25 @@ export default function App() {
     "",
     `export default function App() {`,
     `  const grid = useRef(null);`,
+    `  // Stamped by buildDocument for thumbnails and previews: looking, not`,
+    `  // arranging, so no room is kept below the last tile to drop into.`,
+    `  const bare = typeof window !== "undefined" && window.__dryosBare;`,
     ``,
-    `  // Order lives here so a move lands instantly. The host saves it in the`,
-    `  // background; nothing waits on that round trip.`,
-    `  const [order, setOrder] = useState([${manifest.map((_, i) => i).join(", ")}]);`,
-    `  // The tile being moved, and the gap it is currently headed for.`,
-    `  const [grabbed, setGrabbed] = useState(null);`,
-    `  const [slot, setSlot] = useState(null);`,
+    `  // Where every tile sits. Held here so a move lands instantly; the host`,
+    `  // saves it behind the gesture and nothing waits on that round trip.`,
+    `  // Nothing in here is derived from anything else in here — which is what`,
+    `  // makes moving one tile move exactly one tile.`,
+    `  const [pos, setPos] = useState([`,
+    ...placed.map(
+      (l) => `    { x: ${l.x}, y: ${l.y}, w: ${l.w}, h: ${l.h} },`,
+    ),
+    `  ]);`,
+    `  // The tile in flight — a ref, because it changes on every dragover event`,
+    `  // and none of those should cost a render.`,
+    `  const drag = useRef(null);`,
+    `  const [moving, setMoving] = useState(null);`,
+    `  // The rectangle the drop would take, and its partner if it is a swap.`,
+    `  const [ghost, setGhost] = useState(null);`,
     `  // Dropped and being composed: the gap holds its place, pulsing, until`,
     `  // the revision that fills it replaces this frame — or the host says the`,
     `  // placement failed and releases it.`,
@@ -591,18 +758,43 @@ export default function App() {
     `  // the gesture, and a failed save restores them via "restore".`,
     `  const [hidden, setHidden] = useState(() => new Set());`,
     ``,
-    `  const tiles = [`,
-    ...names.map(
-      (n, i) =>
-        `    <${n} key={${i}} w={${manifest[i].layout?.w ?? 6}} h={${manifest[i].layout?.h ?? 240}} moving={grabbed && grabbed.index === ${i}} />,`,
-    ),
-    `  ];`,
+    `  // Memoised so the elements keep their identity: a ghost tracking the`,
+    `  // cursor must not re-render a dozen charts to move itself one column.`,
+    `  const tiles = useMemo(() => [`,
+    ...names.map((n, i) => `    <${n} key={${i}} w={pos[${i}].w} h={pos[${i}].h} />,`),
+    `  ], [pos]);`,
+    ``,
+    `  // What a drop would do, and the preview of it. Refs only, so it is safe`,
+    `  // to call from the message handler that was mounted once.`,
+    `  function propose(px, py) {`,
+    `    const g = drag.current;`,
+    `    if (!g || !grid.current) return null;`,
+    `    const at = tileLanding(grid.current, tileRects(grid.current), g.index, g, px, py);`,
+    `    // Nowhere valid under the cursor: hold the preview already showing`,
+    `    // rather than flicker one that would not be honoured.`,
+    `    if (!at) return null;`,
+    `    setGhost((prev) =>`,
+    `      prev &&`,
+    `      prev.x === at.x &&`,
+    `      prev.y === at.y &&`,
+    `      prev.w === g.w &&`,
+    `      prev.h === g.h &&`,
+    `      Boolean(prev.swap) === Boolean(at.swap) &&`,
+    `      (!prev.swap || prev.swap.index === at.swap.index)`,
+    `        ? prev`,
+    `        : { x: at.x, y: at.y, w: g.w, h: g.h, swap: at.swap },`,
+    `    );`,
+    `    return at;`,
+    `  }`,
     ``,
     `  // An in-frame drag announces itself; one from the host arrives by message,`,
     `  // because a drag started outside this document cannot fire events inside it.`,
     `  useEffect(() => {`,
-    `    const onGrab = (e) => setGrabbed(e.detail);`,
-    `    const onDrop = () => { setGrabbed(null); setSlot(null); };`,
+    `    const onGrab = (e) => { drag.current = e.detail; setMoving(e.detail.index); };`,
+    `    const onDrop = () => { drag.current = null; setMoving(null); setGhost(null); };`,
+    `    const onSized = (e) => setPos((prev) =>`,
+    `      prev.map((p, i) => (i === e.detail.index ? { x: p.x, y: p.y, w: e.detail.w, h: e.detail.h } : p)),`,
+    `    );`,
     `    const onRemove = (e) => {`,
     `      const i = e.detail.index;`,
     `      setHidden((prev) => { const next = new Set(prev); next.add(i); return next; });`,
@@ -617,10 +809,13 @@ export default function App() {
     `      if (m.__dryos === "restore") setHidden(new Set());`,
     `      if (m.__dryos === "dragover" && grid.current) {`,
     `        setPlacing(false);`,
-    `        setGrabbed({ index: null, w: m.w, h: m.h });`,
-    `        const at = slotAt(grid.current, m.x, m.y);`,
-    `        setSlot(at);`,
-    `        parent.postMessage({ __dryos: "slot", index: at }, "*");`,
+    `        const r = grid.current.getBoundingClientRect();`,
+    `        const stride = (r.width - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS + GRID_GAP;`,
+    `        // Nothing was picked up out here, so the incoming tile hangs`,
+    `        // centred on the cursor rather than by a corner.`,
+    `        drag.current = { index: null, w: m.w, h: m.h, offX: (m.w * stride - GRID_GAP) / 2, offY: m.h / 2 };`,
+    `        const at = propose(m.x, m.y);`,
+    `        if (at) parent.postMessage({ __dryos: "spot", x: at.x, y: at.y }, "*");`,
     `      } else if (m.__dryos === "placed") {`,
     `        setPlacing(true);`,
     `      } else if (m.__dryos === "dragend") {`,
@@ -630,59 +825,96 @@ export default function App() {
     `    };`,
     `    window.addEventListener("dryos:tilegrab", onGrab);`,
     `    window.addEventListener("dryos:tiledrop", onDrop);`,
+    `    window.addEventListener("dryos:tilesized", onSized);`,
     `    window.addEventListener("dryos:tileremove", onRemove);`,
     `    window.addEventListener("dryos:tileconfigure", onConfigure);`,
     `    window.addEventListener("message", onHost);`,
     `    return () => {`,
     `      window.removeEventListener("dryos:tilegrab", onGrab);`,
     `      window.removeEventListener("dryos:tiledrop", onDrop);`,
+    `      window.removeEventListener("dryos:tilesized", onSized);`,
     `      window.removeEventListener("dryos:tileremove", onRemove);`,
     `      window.removeEventListener("dryos:tileconfigure", onConfigure);`,
     `      window.removeEventListener("message", onHost);`,
     `    };`,
     `  }, []);`,
     ``,
-    `  function move(to) {`,
-    `    if (!grabbed || grabbed.index === null) return;`,
-    `    const from = grabbed.index;`,
-    `    setOrder((prev) => {`,
-    `      const at = prev.indexOf(from);`,
-    `      if (at < 0) return prev;`,
-    `      const next = prev.filter((n) => n !== from);`,
-    `      next.splice(to > at ? to - 1 : to, 0, from);`,
-    `      return next;`,
-    `    });`,
-    `    if (window.parent !== window) {`,
-    `      parent.postMessage({ __dryos: "reorder", from: order.indexOf(from), to }, "*");`,
-    `    }`,
-    `  }`,
-    ``,
-    `  const shown = [];`,
-    `  order.forEach((i, n) => {`,
-    `    if (slot === n) shown.push(<Ghost key="ghost" w={grabbed && grabbed.w} h={grabbed && grabbed.h} placing={placing} />);`,
-    `    if (!hidden.has(i)) shown.push(tiles[i]);`,
-    `  });`,
-    `  if (slot === order.length) shown.push(<Ghost key="ghost" w={grabbed && grabbed.w} h={grabbed && grabbed.h} placing={placing} />);`,
+    `  // How far down the arrangement actually reaches.`,
+    `  let bottom = 0;`,
+    `  pos.forEach((p, i) => { if (!hidden.has(i)) bottom = Math.max(bottom, p.y + p.h); });`,
+    `  if (ghost) bottom = Math.max(bottom, ghost.y + ghost.h);`,
     ``,
     `  return (`,
-    // Twelve columns, the way every dashboard grid is divided, so a tile can be
-    // a third, a half or the full width without anyone doing arithmetic.
     `    <div`,
     `      ref={grid}`,
     `      onDragOver={(e) => {`,
-    `        if (!grabbed || grabbed.index === null) return;`,
+    `        if (!drag.current || drag.current.index === null) return;`,
     `        e.preventDefault();`,
-    `        setSlot(slotAt(grid.current, e.clientX, e.clientY));`,
+    `        propose(e.clientX, e.clientY);`,
     `      }}`,
     `      onDrop={(e) => {`,
     `        e.preventDefault();`,
-    `        if (slot !== null) move(slot);`,
-    `        setGrabbed(null);`,
-    `        setSlot(null);`,
+    `        const g = drag.current;`,
+    `        const to = ghost;`,
+    `        if (g && g.index !== null && to) {`,
+    `          setPos((prev) => prev.map((p, i) =>`,
+    `            i === g.index`,
+    `              ? { x: to.x, y: to.y, w: p.w, h: p.h }`,
+    `              : to.swap && i === to.swap.index`,
+    `                ? { x: to.swap.x, y: to.swap.y, w: p.w, h: p.h }`,
+    `                : p,`,
+    `          ));`,
+    `          if (window.parent !== window) {`,
+    `            parent.postMessage({`,
+    `              __dryos: "move",`,
+    `              index: g.index,`,
+    `              x: to.x,`,
+    `              y: to.y,`,
+    `              swap: to.swap ? { index: to.swap.index, x: to.swap.x, y: to.swap.y } : null,`,
+    `            }, "*");`,
+    `          }`,
+    `        }`,
+    `        drag.current = null;`,
+    `        setMoving(null);`,
+    `        setGhost(null);`,
     `      }}`,
-    `      style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(12, 1fr)", minHeight: "100%" }}`,
+    // Deep enough for everything on it, and never shallower than the frame:
+    // the canvas is the drop target, so ground you can see but cannot drop on
+    // is ground the arrangement does not have. The extra strip past the last
+    // tile is what a page grows into.
+    `      style={{`,
+    `        height: bottom + (bare ? 0 : 120),`,
+    `        minHeight: bare ? undefined : "calc(100vh - 32px)",`,
+    `        position: "relative",`,
+    `        width: "100%",`,
+    `      }}`,
     `    >`,
-    `      {shown}`,
+    `      {tiles.map((tile, i) => hidden.has(i) ? null : (`,
+    `        <div`,
+    `          key={i}`,
+    // The slot is what holds the place, so it is also what everything else
+    // measures against — the resize corner, the landing, the ghost.
+    `          data-slot={i}`,
+    `          data-x={pos[i].x}`,
+    `          data-y={pos[i].y}`,
+    `          data-w={pos[i].w}`,
+    `          data-h={pos[i].h}`,
+    `          style={{`,
+    `            height: pos[i].h,`,
+    `            left: gridX(pos[i].x),`,
+    `            opacity: moving === i ? 0.35 : 1,`,
+    `            position: "absolute",`,
+    `            top: pos[i].y,`,
+    `            width: gridW(pos[i].w),`,
+    `          }}`,
+    `        >`,
+    `          {tile}`,
+    `        </div>`,
+    `      ))}`,
+    `      {ghost && <Ghost x={ghost.x} y={ghost.y} w={ghost.w} h={ghost.h} placing={placing} />}`,
+    `      {ghost && ghost.swap && (`,
+    `        <Ghost x={ghost.swap.x} y={ghost.swap.y} w={ghost.swap.w} h={ghost.swap.h} trading />`,
+    `      )}`,
     `    </div>`,
     `  );`,
     `}`,

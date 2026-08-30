@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/lib/supabase/server";
 import { importLocalOnce } from "./import";
-import type { ComponentSpec } from "./components";
+import { type ComponentSpec, packLayout } from "./components";
 import type { App, AppSummary, Revision } from "./types";
 
 /**
@@ -189,19 +189,28 @@ export async function deleteApp(id: string): Promise<boolean> {
  */
 export async function moveTile(
   id: string,
-  from: number,
-  to: number,
+  index: number,
+  to: { x: number; y: number },
+  swap: { index: number; x: number; y: number } | null,
   compose: (manifest: ComponentSpec[]) => string,
   build?: Build,
 ): Promise<App | null> {
   const app = await getApp(id);
-  if (!app?.manifest?.[from]) return null;
+  if (!app?.manifest?.[index]) return null;
 
-  const manifest = [...app.manifest];
-  const [moved] = manifest.splice(from, 1);
-  // Removing the tile shifts everything after it down one, so a destination
-  // past the origin has to come back by one to land where it was aimed.
-  manifest.splice(to > from ? to - 1 : to, 0, moved);
+  // Freeze everyone's place before moving one. That is what makes a move a
+  // move: from here on no tile's position is implied by another's, so the ones
+  // nobody dragged stay exactly where they were and the hole left behind is
+  // allowed to stay a hole.
+  const packed = packLayout(app.manifest);
+  const at = (i: number, p: { x: number; y: number }) => ({
+    ...packed[i],
+    layout: { ...packed[i].layout!, x: p.x, y: p.y },
+  });
+
+  const manifest = packed.map((spec, i) =>
+    i === index ? at(i, to) : swap && i === swap.index ? at(i, swap) : spec,
+  );
 
   return regenerate(app, manifest, compose, build);
 }
@@ -258,9 +267,13 @@ export async function setLayout(
   const app = await getApp(id);
   if (!app?.manifest?.[index]) return null;
 
+  // Same freeze as a move, and for the same reason: a resize must not be the
+  // thing that decides where anybody else sits.
+  const packed = packLayout(app.manifest);
+
   return regenerate(
     app,
-    app.manifest.map((c, i) => (i === index ? { ...c, layout } : c)),
+    packed.map((c, i) => (i === index ? { ...c, layout: { ...c.layout!, ...layout } } : c)),
     compose,
     build,
   );

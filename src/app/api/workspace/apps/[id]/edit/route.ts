@@ -7,7 +7,10 @@ import { ndjsonStream } from "@/lib/workspace/ndjson";
 import { addRevision, getApp } from "@/lib/workspace/store";
 import {
   DEFAULT_LAYOUT,
+  GRID,
+  below,
   componentDef,
+  packLayout,
   type ComponentKind,
 } from "@/lib/workspace/components";
 import type { DataRef } from "@/lib/workspace/catalog";
@@ -39,7 +42,7 @@ export async function POST(
   if (!app)
     return NextResponse.json({ error: "No such screen." }, { status: 404 });
 
-  const { intent, refs, component, options, custom, layout, at, replaceAt } =
+  const { intent, refs, component, options, custom, layout, replaceAt } =
     (await req.json()) as {
       intent?: string;
       refs?: DataRef[];
@@ -47,9 +50,8 @@ export async function POST(
       options?: Record<string, string>;
       /** A saved component's finished source, used verbatim. */
       custom?: { name: string; code: string };
-      layout?: { w: number; h: number };
-      /** Where in the stack it was dropped. Appended when absent. */
-      at?: number;
+      /** Size, and the place on the canvas the drop landed on. */
+      layout?: { x?: number; y?: number; w: number; h: number };
       /** Reconfigure the tile at this index instead of adding a new one. */
       replaceAt?: number;
     };
@@ -83,10 +85,13 @@ export async function POST(
     return ndjsonStream(async (send) => {
       send({ type: "phase", phase: "composing" });
 
-      // Dropped between two sections, so it is spliced in rather than pushed —
-      // or, with `replaceAt`, swapped for the tile being reconfigured, which
-      // keeps its place and its size.
-      const manifest = [...app.manifest!];
+      // A tile carries its own place, so the drop arrives knowing where it
+      // goes and the manifest order is only paint order — appending is enough.
+      // Everyone else is frozen where they already are first, so nothing on the
+      // page shifts to make room. With `replaceAt` the new component takes over
+      // the tile being reconfigured, keeping its place and its size: that is
+      // what makes ⚙ a change to a tile rather than a swap of one.
+      const manifest = packLayout(app.manifest!);
       const replacing =
         replaceAt != null && manifest[replaceAt] !== undefined;
       if (replacing) {
@@ -95,19 +100,21 @@ export async function POST(
           refs: chosen,
           options,
           custom,
-          layout: layout ?? manifest[replaceAt!]?.layout ?? DEFAULT_LAYOUT[def.kind],
+          layout: manifest[replaceAt!]?.layout ?? layout ?? DEFAULT_LAYOUT[def.kind],
         });
       } else {
-        const where = Math.max(
-          0,
-          Math.min(at ?? manifest.length, manifest.length),
-        );
-        manifest.splice(where, 0, {
+        const size = layout ?? DEFAULT_LAYOUT[def.kind];
+        manifest.push({
           kind: def.kind,
           refs: chosen,
           options,
           custom,
-          layout: layout ?? DEFAULT_LAYOUT[def.kind],
+          // No place named — the only honest answer is under everything else,
+          // which is where a page grows.
+          layout:
+            typeof size.x === "number" && typeof size.y === "number"
+              ? size
+              : { ...size, x: 0, y: below(manifest) + (manifest.length ? GRID.gap : 0) },
         });
       }
       const source = composeApp(manifest);
@@ -203,11 +210,12 @@ export async function POST(
         ])
       : undefined;
 
-    // The app is not composed, so there is no index to splice at — the position
-    // becomes a sentence instead, which is the one form the agent can act on.
+    // The app is not composed, so there is no canvas to place it on — the
+    // position becomes a sentence instead, which is the one form the agent can
+    // act on, and "above everything" is all a y coordinate survives as.
     const place =
-      def && at !== undefined
-        ? at === 0
+      def && typeof layout?.y === "number"
+        ? layout.y === 0
           ? " Put it at the top."
           : " Put it below what is already there."
         : "";
