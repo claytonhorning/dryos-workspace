@@ -257,6 +257,23 @@ export default function AppPage() {
     [arrange],
   );
 
+  // Confirmed on the tile itself, inside the frame — by the time this fires
+  // the person has clicked "remove?" on the thing being removed. The revision
+  // it writes is the undo path.
+  const remove = useCallback(
+    async (index: number) => {
+      const res = await fetch(`/api/workspace/apps/${id}/remove`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ index }),
+      });
+      const data = await res.json();
+      if (res.ok) setApp(data.app);
+      else setError(data.error ?? "That tile did not remove.");
+    },
+    [id],
+  );
+
   async function revert(revisionId: string) {
     const res = await fetch(`/api/workspace/apps/${id}/revert`, {
       method: "POST",
@@ -315,6 +332,7 @@ export default function AppPage() {
             placing={pending}
             onResize={resize}
             onReorder={reorder}
+            onRemove={remove}
             flush={!asideOpen}
           />
 

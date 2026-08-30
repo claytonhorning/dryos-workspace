@@ -138,6 +138,15 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
   const [dragging, setDragging] = useState(false);
   const [over, setOver] = useState(null);
   const [full, setFull] = useState(false);
+  // Removal arms on the first click and fires on the second — confirmed on the
+  // tile itself, because that is the thing being deleted. It disarms on its
+  // own so a stray click does not leave a live trigger lying around.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3500);
+    return () => clearTimeout(t);
+  }, [armed]);
 
   useEffect(() => setSize({ w: w || 6, h: h || 240 }), [w, h]);
 
@@ -280,6 +289,28 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         >
           {full ? "✕" : "⤢"}
         </button>
+        {!full && window.parent !== window && (
+          <button
+            onClick={() => {
+              if (!armed) { setArmed(true); return; }
+              setArmed(false);
+              parent.postMessage({ __dryos: "remove", index }, "*");
+            }}
+            title={armed ? "Click again to remove this tile" : "Remove from the dashboard"}
+            style={{
+              background: armed ? "var(--fail)" : "transparent",
+              border: "1px solid " + (armed ? "var(--fail)" : "var(--line)"),
+              borderRadius: 4,
+              color: armed ? "var(--bg)" : "var(--faint)",
+              cursor: "pointer",
+              fontSize: 10,
+              lineHeight: 1,
+              padding: "3px 5px",
+            }}
+          >
+            {armed ? "remove?" : "✕"}
+          </button>
+        )}
       </header>
 
       {/*

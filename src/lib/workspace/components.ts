@@ -149,7 +149,9 @@ function series(refs: DataRef[]) {
     node: node(r) ?? schemaFor(r.schemaId)?.entities.sample[0] ?? "",
     column: column(r),
     unit: unit(r),
-    label: node(r) ? `${r.label} · ${node(r)}` : r.label,
+    // An entity-picked ref is already named by its entity; repeating it as
+    // "HB_NORTH · HB_NORTH" would be a stutter.
+    label: node(r) && node(r) !== r.label ? `${r.label} · ${node(r)}` : r.label,
     mock: r.availability === "mock",
   }));
 }

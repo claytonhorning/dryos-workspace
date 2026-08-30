@@ -39,6 +39,7 @@ export function Runner({
   placing,
   onResize,
   onReorder,
+  onRemove,
   flush,
 }: {
   appId: string;
@@ -59,6 +60,8 @@ export function Runner({
   onResize?: (index: number, w: number, h: number) => void;
   /** A tile was dragged onto another one inside the frame. */
   onReorder?: (from: number, to: number) => void;
+  /** A tile's ✕ was confirmed inside the frame. */
+  onRemove?: (index: number) => void;
   /** Edge to edge: no radius, no border. The screen is the whole view. */
   flush?: boolean;
 }) {
@@ -130,7 +133,8 @@ export function Runner({
         | { __dryos: "error"; message: string }
         | { __dryos: "slot"; index: number }
         | { __dryos: "resize"; index: number; w: number; h: number }
-        | { __dryos: "reorder"; from: number; to: number };
+        | { __dryos: "reorder"; from: number; to: number }
+        | { __dryos: "remove"; index: number };
       if (!m || typeof m !== "object") return;
       // Data calls are answered for either frame — the incoming one starts
       // querying while it is still invisible. Layout gestures only mean
@@ -146,11 +150,13 @@ export function Runner({
         onResize?.(m.index, m.w, m.h);
       } else if (m.__dryos === "reorder") {
         onReorder?.(m.from, m.to);
+      } else if (m.__dryos === "remove") {
+        onRemove?.(m.index);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [answer, onError, onResize, onReorder]);
+  }, [answer, onError, onResize, onReorder, onRemove]);
 
   // Never let the two slots carry the same revision — between the swap and
   // the effect that clears `pending` there is a render where they could.

@@ -265,3 +265,30 @@ export async function setLayout(
     build,
   );
 }
+
+/**
+ * Remove a tile, as a revision.
+ *
+ * Unlike a resize this is destructive, so it goes into history the way any
+ * other change does — revert is the undo, and the history line says what left
+ * the page. Only a composed app can do it: nothing can splice one section out
+ * of source a model rewrote.
+ */
+export async function removeTile(
+  id: string,
+  index: number,
+  intent: string,
+  compose: (manifest: ComponentSpec[]) => string,
+  build?: Build,
+): Promise<App | null> {
+  const app = await getApp(id);
+  if (!app?.manifest?.[index]) return null;
+
+  const manifest = app.manifest.filter((_, i) => i !== index);
+  const source = compose(manifest);
+  if (build) {
+    const built = await build(source);
+    if (!built.js) return null;
+  }
+  return addRevision(id, { intent, source, manifest, author: "you" });
+}

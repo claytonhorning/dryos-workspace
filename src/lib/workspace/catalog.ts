@@ -1283,3 +1283,27 @@ export function usdLabel(dollars: number): string {
   if (dollars < 100) return `$${dollars.toFixed(2)}`;
   return `$${Math.round(dollars).toLocaleString()}`;
 }
+
+/**
+ * A reference to one entity of a stream, from the entity picker.
+ *
+ * The explorer's own chips stop at streams and variables; for a stream with a
+ * thousand settlement points, which ones you mean is a real question, and this
+ * is the answer's shape. The sublabel leads with the variable key because that
+ * is where `components.ts` reads the column from.
+ */
+export function entityRef(schema: Schema, node: string): DataRef {
+  const v = schema.variables[0];
+  return {
+    kind: "entity",
+    schemaId: schema.id,
+    path: pathLabel(schema),
+    label: node,
+    sublabel: `${v?.key ?? "value"} · ${schema.name}`,
+    availability: schema.availability,
+    cadence: schema.cadence.label,
+    cadenceSeconds: schema.cadence.seconds,
+    tokens: schema.tokens,
+    snippet: `dryos.query({ dataset: ${JSON.stringify(schema.dataset ?? schema.id)}, node: ${JSON.stringify(node)}, start: "-24h" })`,
+  };
+}
