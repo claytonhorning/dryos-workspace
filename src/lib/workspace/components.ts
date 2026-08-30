@@ -777,32 +777,73 @@ const heatmap: ComponentDef = {
   }, [rows]);
 
   const HOURS = Array.from({ length: 24 }, (_, hIdx) => hIdx);
+  const [hover, setHover] = React.useState(null);
+
+  /*
+    Ours, not the browser's. title= waits about a second before it appears,
+    draws in the OS's colours — near-white on a dark grid — and can only say one
+    flat line. On a chart whose whole point is "which hour", a hint you wait for
+    and then squint at is not a hint.
+
+    Delegated to the grid and updated only when the cell under the pointer
+    changes, so 700 cells do not re-render at pointer rate. It anchors to the
+    cell rather than trailing the cursor: the box is then already where the eye
+    is, and it never sits on top of the cell it is describing.
+  */
+  const track = (e) => {
+    const el = e.target.closest ? e.target.closest("[data-cell]") : null;
+    if (!el) return setHover((prev) => (prev ? null : prev));
+    const day = el.dataset.day;
+    const hr = Number(el.dataset.hr);
+    setHover((prev) => {
+      if (prev && prev.day === day && prev.hour === hr) return prev;
+      const r = el.getBoundingClientRect();
+      return { day, hour: hr, x: r.left + r.width / 2, top: r.top, bottom: r.bottom };
+    });
+  };
+
+  const hc = hover ? (grid.cells.get(hover.day) || {})[hover.hour] : null;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  // Prices want cents; load does not want four digits of them.
+  const num = (v) =>
+    Math.abs(v) >= 1000 ? v.toFixed(0) : Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(2);
 
   return (
     <Section index={${i}} w={w} h={h} title=${JSON.stringify(s[0].label)} unit={UNIT} loading={loading} error={error}>
-${mockTag(anyMock)}      <div style={{ display: "grid", gap: 2, gridTemplateColumns: "auto repeat(24, 1fr)", fontFamily: "var(--mono)", fontSize: 9 }}>
+${mockTag(anyMock)}      <div
+        onMouseMove={track}
+        onMouseLeave={() => setHover(null)}
+        style={{ display: "grid", gap: 2, gridTemplateColumns: "auto repeat(24, 1fr)", fontFamily: "var(--mono)", fontSize: 9 }}
+      >
         <span />
         {HOURS.map((hr) => (
-          <span key={hr} style={{ color: "var(--faint)", textAlign: "center" }}>
-            {hr % 3 === 0 ? hr : ""}
+          <span key={hr} style={{ color: hover && hover.hour === hr ? "var(--ink)" : "var(--faint)", textAlign: "center" }}>
+            {hr % 3 === 0 || (hover && hover.hour === hr) ? hr : ""}
           </span>
         ))}
         {grid.daysList.map((day) => (
           <React.Fragment key={day}>
-            <span style={{ alignSelf: "center", color: "var(--faint)", paddingRight: 4 }}>{day.slice(5)}</span>
+            <span style={{ alignSelf: "center", color: hover && hover.day === day ? "var(--ink)" : "var(--faint)", paddingRight: 4 }}>{day.slice(5)}</span>
             {HOURS.map((hr) => {
               const c = (grid.cells.get(day) || {})[hr];
-              if (!c) return <span key={hr} style={{ background: "var(--surface-2)", borderRadius: 2, minHeight: 14 }} />;
+              if (!c) return <span key={hr} style={{ background: "var(--surface-2)", borderRadius: 2, minHeight: 16 }} />;
               const x = grid.val(c);
               const t = grid.hi > grid.lo ? (x - grid.lo) / (grid.hi - grid.lo) : 0.5;
+              const on = hover && hover.day === day && hover.hour === hr;
               return (
                 <span
                   key={hr}
-                  title={day + " " + String(hr).padStart(2, "0") + ":00 CT — " + x.toFixed(1) + " " + UNIT}
+                  data-cell=""
+                  data-day={day}
+                  data-hr={hr}
                   style={{
                     background: "color-mix(in oklab, var(--surface-2), var(--s2) " + Math.round(8 + t * 88) + "%)",
                     borderRadius: 2,
-                    minHeight: 14,
+                    minHeight: 16,
+                    cursor: "crosshair",
+                    // A ring, not a border: a border would resize the cell under
+                    // the pointer and walk the whole grid out from under it.
+                    boxShadow: on ? "0 0 0 1.5px var(--ink)" : undefined,
                   }}
                 />
               );
@@ -810,6 +851,64 @@ ${mockTag(anyMock)}      <div style={{ display: "grid", gap: 2, gridTemplateColu
           </React.Fragment>
         ))}
       </div>
+      {hover && hc ? (
+        <div
+          style={{
+            /*
+              Fixed: this frame's viewport is the tile, so the tooltip escapes
+              the grid without needing a positioned ancestor, and clears a
+              full-screen section (z-index 50) as well.
+            */
+            /*
+              Placed by transform from the frame's top-left, not by left/top.
+              A fixed box positioned near the right edge is shrink-wrapped into
+              whatever space is left there, which wrapped every line of it into a
+              column; laid out at the origin it takes its natural width first and
+              is moved afterwards.
+
+              Centred on the cell, then clamped to half of the capped width —
+              measured clamping would cost a second render on every cell the
+              pointer crosses, and the cap is what makes the arithmetic true
+              rather than hopeful. Above the cell where there is room for it,
+              below where there is not.
+            */
+            position: "fixed",
+            left: 0,
+            top: 0,
+            transform:
+              "translate(" +
+              Math.min(Math.max(hover.x, 104), Math.max(104, window.innerWidth - 104)) +
+              "px, " +
+              (hover.top > 108 ? hover.top - 8 : hover.bottom + 8) +
+              "px) translate(-50%, " +
+              (hover.top > 108 ? "-100%" : "0") +
+              ")",
+            background: "var(--surface-2)",
+            border: "1px solid var(--line-strong)",
+            borderRadius: 6,
+            boxShadow: "0 6px 20px rgba(0,0,0,.45)",
+            maxWidth: 200,
+            padding: "7px 10px",
+            pointerEvents: "none",
+            zIndex: 60,
+          }}
+        >
+          <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".08em" }}>
+            {pad2(hover.hour)}:00 – {pad2((hover.hour + 1) % 24)}:00 CT
+          </div>
+          <div style={{ color: "var(--ink)", fontSize: 17, fontWeight: 600, lineHeight: 1.3, whiteSpace: "nowrap" }}>
+            {num(grid.val(hc))}
+            <span style={{ color: "var(--faint)", fontSize: 11, fontWeight: 400 }}> {UNIT}</span>
+          </div>
+          <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
+            {new Date(hover.day + "T12:00:00Z").toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" })}
+            {" · " + hc.n + (hc.n === 1 ? " interval" : " intervals")}
+            {/* The aggregate not on show above: an hour's peak is the question
+                an average invites, and the reverse. */}
+            {hc.n > 1 ? (AGG === "max" ? " · avg " + num(hc.sum / hc.n) : " · peak " + num(hc.max)) : ""}
+          </div>
+        </div>
+      ) : null}
       <p style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9.5, margin: "6px 0 0" }}>
         {grid.lo === Infinity ? "no data yet" : grid.lo.toFixed(1) + " – " + grid.hi.toFixed(1) + " " + UNIT + " · " + (AGG === "max" ? "peak" : "average") + " per hour · Central time"}
       </p>
