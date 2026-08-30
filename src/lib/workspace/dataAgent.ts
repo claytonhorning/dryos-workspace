@@ -180,7 +180,7 @@ async function runTool(
       makeRef(s, {
         kind: "schema",
         label: s.name,
-        sublabel: `${s.entities.count.toLocaleString()} ${s.entities.label}`,
+        sublabel: `${s.entities.count.toLocaleString()} ${s.entities.label ?? "entities"}`,
         snippet: querySnippet(s),
       }),
       ...s.variables.map((v) =>
@@ -203,7 +203,7 @@ async function runTool(
           availability: s.availability,
           cadence: s.cadence.label,
           tokensPerQuery: s.tokens,
-          entities: `${s.entities.count} ${s.entities.label}`,
+          entities: `${s.entities.count} ${s.entities.label ?? "entities"}`,
           blurb: s.blurb,
           variables: s.variables.map((v) => ({
             key: v.key,
@@ -233,13 +233,13 @@ async function runTool(
         makeRef(schema, {
           kind: "entity",
           label: n,
-          sublabel: `${schema.entities.label.replace(/s$/, "")} · mock`,
+          sublabel: `${(schema.entities.label ?? "entities").replace(/s$/, "")} · mock`,
         }),
       );
       return {
         text: JSON.stringify({ schema: schema.id, mock: true, entities: found.slice(0, limit) }),
         refs,
-        summary: `listed ${found.length} mock ${schema.entities.label}`,
+        summary: `listed ${found.length} mock ${schema.entities.label ?? "entities"}`,
       };
     }
 

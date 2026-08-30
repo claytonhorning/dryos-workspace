@@ -13,6 +13,7 @@ import {
   domainOf,
   domainSummary,
   domains,
+  entityCountLabel,
   entityRef,
 } from "@/lib/workspace/catalog";
 import { entityNote } from "@/lib/workspace/entityNotes";
@@ -163,8 +164,8 @@ export function DataExplorer({
                 {g.schema.path.slice(1).join(" › ")}
                 <span className="ml-auto normal-case tracking-normal text-muted">
                   {g.schema.entityKey
-                    ? `all ${g.schema.entities.count} ${g.schema.entities.label}`
-                    : `${g.schema.entities.count.toLocaleString()} ${g.schema.entities.label}`}
+                    ? `all ${entityCountLabel(g.schema)}`
+                    : entityCountLabel(g.schema)}
                 </span>
               </h3>
               {needsPicking(g.schema) ? (
@@ -229,8 +230,7 @@ function DrillRow({
       <div className="min-w-0">
         <div className="truncate text-[12.5px] text-ink">{schema.name}</div>
         <div className="truncate text-[10.5px] text-faint">
-          {schema.entities.count.toLocaleString()} {schema.entities.label} — open
-          to choose which
+          {entityCountLabel(schema)} — open to choose which
         </div>
       </div>
       {picked > 0 && (
@@ -335,7 +335,7 @@ function SetView({
         </button>
         <span className="truncate text-[12.5px] text-ink">{schema.name}</span>
         <span className="ml-auto shrink-0 font-mono text-[9.5px] text-faint">
-          {schema.entities.count.toLocaleString()} {schema.entities.label}
+          {entityCountLabel(schema)}
         </span>
       </div>
 
@@ -344,7 +344,7 @@ function SetView({
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder={`Search ${schema.entities.count.toLocaleString()} ${schema.entities.label}…`}
+          placeholder={`Search ${entityCountLabel(schema)}…`}
           className="w-full rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
         />
         {facets && !q.trim() && (

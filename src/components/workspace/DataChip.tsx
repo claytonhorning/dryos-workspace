@@ -59,6 +59,28 @@ export function RefMeta({ refr, className }: { refr: DataRef; className?: string
 }
 
 /**
+ * The same two facts as chips, for the explorer's cards.
+ *
+ * Live stopped being worth a badge the day the whole catalogue became live —
+ * a label that is true of everything says nothing. What varies between
+ * streams, and what someone weighs before wiring one up, is how often it
+ * ticks and what a query costs; those are the chips now. Mock keeps its badge
+ * unconditionally — an unlabelled mock is still the one unforgivable state.
+ */
+export function MetaBadges({ refr }: { refr: DataRef }) {
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      <span className="inline-flex shrink-0 items-center rounded-sm border border-line bg-surface px-1.5 py-px font-mono text-[9px] text-muted">
+        {refr.cadence}
+      </span>
+      <span className="inline-flex shrink-0 items-center rounded-sm border border-line-strong bg-surface px-1.5 py-px font-mono text-[9px] text-ink">
+        {tokenLabel(refr.tokens)}
+      </span>
+    </span>
+  );
+}
+
+/**
  * One box in the explorer. Clicking it selects the reference for a change.
  *
  * Selection is shown with a filled ground and a tick rather than only a border
@@ -99,13 +121,15 @@ export function DataChip({
         >
           {refr.label}
         </span>
-        <AvailabilityBadge availability={refr.availability} className="ml-auto" />
+        {refr.availability === "mock" && (
+          <AvailabilityBadge availability="mock" className="ml-auto" />
+        )}
       </span>
       <span className="truncate text-[10.5px] text-muted">{refr.path}</span>
       {refr.sublabel && (
         <span className="truncate font-mono text-[9.5px] text-faint">{refr.sublabel}</span>
       )}
-      <RefMeta refr={refr} />
+      <MetaBadges refr={refr} />
     </button>
   );
 }
@@ -144,7 +168,7 @@ export function AttachedChip({
       <span className="flex min-w-0 flex-col leading-tight">
         <span className="flex items-center gap-1.5">
           <span className="truncate font-mono text-[11px] text-ink">{refr.label}</span>
-          <AvailabilityBadge availability={refr.availability} />
+          {refr.availability === "mock" && <AvailabilityBadge availability="mock" />}
         </span>
         <RefMeta refr={refr} />
       </span>

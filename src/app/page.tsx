@@ -71,7 +71,7 @@ export default async function LandingPage() {
             figure={tokenLabel(LIVE_SCHEMA.tokens)}
             unit="per query"
             label={pathLabel(LIVE_SCHEMA)}
-            body={`${LIVE_SCHEMA.entities.count.toLocaleString()} ${LIVE_SCHEMA.entities.label}, repriced ${LIVE_SCHEMA.cadence.label}, validated against the source on every run.`}
+            body={`${LIVE_SCHEMA.entities.count.toLocaleString()} ${LIVE_SCHEMA.entities.label ?? "entities"}, repriced ${LIVE_SCHEMA.cadence.label}, validated against the source on every run.`}
           />
           <Price
             figure="Free"

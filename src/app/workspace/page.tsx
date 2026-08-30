@@ -106,7 +106,7 @@ export default function WorkspacePage() {
           <p className="mt-3 text-[15px] leading-relaxed text-muted">
             Every screen here is wired to the live feed —{" "}
             {LIVE_SCHEMA.entities.count.toLocaleString()}{" "}
-            {LIVE_SCHEMA.entities.label}, repriced {LIVE_SCHEMA.cadence.label}{" "}
+            {LIVE_SCHEMA.entities.label ?? "entities"}, repriced {LIVE_SCHEMA.cadence.label}{" "}
             at {tokenLabel(LIVE_SCHEMA.tokens)} a query. A workspace is a set of
             pages; a page is components you arrange the way you want them.
           </p>

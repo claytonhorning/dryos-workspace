@@ -236,7 +236,7 @@ export function mockRows(input: {
       const row: Record<string, unknown> = {
         interval_start_utc: new Date(at).toISOString(),
         node,
-        node_type: schema.entities.label.replace(/s$/, "").toUpperCase().replace(/ /g, "_"),
+        node_type: (schema.entities.label ?? "entity").replace(/s$/, "").toUpperCase().replace(/ /g, "_"),
       };
       for (const v of schema.variables) {
         row[v.key] = v.mock ? value(v.mock, node, at, v.key, step) : null;

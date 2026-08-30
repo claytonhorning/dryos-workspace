@@ -40,7 +40,12 @@ export interface Schema {
   cadence: { label: string; seconds: number };
   /** Dryos tokens burned each time this schema is queried. */
   tokens: number;
-  entities: { count: number; label: string; sample: string[] };
+  /**
+   * `label` is optional and legacy: the UI counts entities generically now
+   * ("1,118 entities"), so no stream has to invent a noun. Kept where it
+   * exists for prose surfaces that still read it.
+   */
+  entities: { count: number; label?: string; sample: string[] };
   /**
    * The row column that names an entity, present when the stream is small
    * enough to fan out — a stream-level reference then means "all of it", and
@@ -1211,7 +1216,7 @@ export function catalogRefs(): DataRef[] {
     makeRef(s, {
       kind: "schema",
       label: s.name,
-      sublabel: `${s.entities.count.toLocaleString()} ${s.entities.label}`,
+      sublabel: entityCountLabel(s),
       snippet: querySnippet(s),
     }),
     ...s.variables.map((v) =>
@@ -1306,4 +1311,13 @@ export function entityRef(schema: Schema, node: string): DataRef {
     tokens: schema.tokens,
     snippet: `dryos.query({ dataset: ${JSON.stringify(schema.dataset ?? schema.id)}, node: ${JSON.stringify(node)}, start: "-24h" })`,
   };
+}
+
+/**
+ * "1,118 entities" — the generic count. One noun for every industry, so a new
+ * stream never has to coin its own "settlement points".
+ */
+export function entityCountLabel(schema: Schema): string {
+  const n = schema.entities.count;
+  return `${n.toLocaleString()} ${n === 1 ? "entity" : "entities"}`;
 }
