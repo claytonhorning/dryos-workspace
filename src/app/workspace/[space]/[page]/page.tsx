@@ -16,7 +16,7 @@ import {
 } from "@/components/workspace/BuildPanel";
 import { ComponentEditor } from "@/components/workspace/ComponentEditor";
 import { CostPanel } from "@/components/workspace/CostPanel";
-import type { ComponentSpec } from "@/lib/workspace/components";
+import { componentDef, type ComponentSpec } from "@/lib/workspace/components";
 import { readNdjson } from "@/lib/workspace/ndjson";
 import type { App, AppSummary } from "@/lib/workspace/types";
 
@@ -78,6 +78,8 @@ export default function AppPage() {
    *  silently, and silence about your own data is not reassuring. */
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
+  /** Which tile the editor should put its result back into, from a ⚙ click. */
+  const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [pullOpen, setPullOpen] = useState(false);
@@ -190,6 +192,7 @@ export default function AppPage() {
             custom: spec.custom,
             layout: spec.layout,
             refs: spec.refs,
+            replaceAt: replaceIndex ?? undefined,
           }),
         });
         const ct = res.headers.get("content-type");
@@ -208,9 +211,10 @@ export default function AppPage() {
         });
       } finally {
         setPending(false);
+        setReplaceIndex(null);
       }
     },
-    [id],
+    [id, replaceIndex],
   );
 
   /** Keep a component so it shows up on the shelf for the next dashboard too. */
@@ -270,8 +274,37 @@ export default function AppPage() {
       const data = await res.json();
       if (res.ok) setApp(data.app);
       else setError(data.error ?? "That tile did not remove.");
+      // The frame already hid the tile; false puts it back.
+      return res.ok;
     },
     [id],
+  );
+
+  /**
+   * A tile's ⚙: reopen the editor on what the tile actually is — its shape,
+   * its references, its settings, the source a refinement left behind — and
+   * remember which slot to put the result back into.
+   */
+  const configure = useCallback(
+    (index: number) => {
+      const spec = app?.manifest?.[index];
+      const def = spec ? componentDef(spec.kind) : undefined;
+      if (!spec || !def) {
+        setError(
+          "This page was edited by the model, so tiles cannot be reconfigured in place — describe the change instead.",
+        );
+        return;
+      }
+      setReplaceIndex(index);
+      setEditing({
+        def,
+        refs: spec.refs ?? [],
+        options: spec.options,
+        custom: spec.custom,
+        name: spec.custom?.name,
+      });
+    },
+    [app],
   );
 
   async function revert(revisionId: string) {
@@ -333,6 +366,7 @@ export default function AppPage() {
             onResize={resize}
             onReorder={reorder}
             onRemove={remove}
+            onConfigure={configure}
             flush={!asideOpen}
           />
 
@@ -412,7 +446,10 @@ export default function AppPage() {
                   initialName={editing.name}
                   initialOptions={editing.options}
                   initialCode={editing.custom?.code}
-                  onClose={() => setEditing(null)}
+                  onClose={() => {
+                    setEditing(null);
+                    setReplaceIndex(null);
+                  }}
                   onAdd={addSpec}
                   onSave={saveSpec}
                 />

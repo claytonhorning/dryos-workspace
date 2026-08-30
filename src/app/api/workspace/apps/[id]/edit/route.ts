@@ -39,7 +39,7 @@ export async function POST(
   if (!app)
     return NextResponse.json({ error: "No such screen." }, { status: 404 });
 
-  const { intent, refs, component, options, custom, layout, at } =
+  const { intent, refs, component, options, custom, layout, at, replaceAt } =
     (await req.json()) as {
       intent?: string;
       refs?: DataRef[];
@@ -50,6 +50,8 @@ export async function POST(
       layout?: { w: number; h: number };
       /** Where in the stack it was dropped. Appended when absent. */
       at?: number;
+      /** Reconfigure the tile at this index instead of adding a new one. */
+      replaceAt?: number;
     };
 
   const said = intent?.trim() ?? "";
@@ -81,19 +83,33 @@ export async function POST(
     return ndjsonStream(async (send) => {
       send({ type: "phase", phase: "composing" });
 
-      // Dropped between two sections, so it is spliced in rather than pushed.
+      // Dropped between two sections, so it is spliced in rather than pushed —
+      // or, with `replaceAt`, swapped for the tile being reconfigured, which
+      // keeps its place and its size.
       const manifest = [...app.manifest!];
-      const where = Math.max(
-        0,
-        Math.min(at ?? manifest.length, manifest.length),
-      );
-      manifest.splice(where, 0, {
-        kind: def.kind,
-        refs: chosen,
-        options,
-        custom,
-        layout: layout ?? DEFAULT_LAYOUT[def.kind],
-      });
+      const replacing =
+        replaceAt != null && manifest[replaceAt] !== undefined;
+      if (replacing) {
+        manifest.splice(replaceAt!, 1, {
+          kind: def.kind,
+          refs: chosen,
+          options,
+          custom,
+          layout: layout ?? manifest[replaceAt!]?.layout ?? DEFAULT_LAYOUT[def.kind],
+        });
+      } else {
+        const where = Math.max(
+          0,
+          Math.min(at ?? manifest.length, manifest.length),
+        );
+        manifest.splice(where, 0, {
+          kind: def.kind,
+          refs: chosen,
+          options,
+          custom,
+          layout: layout ?? DEFAULT_LAYOUT[def.kind],
+        });
+      }
       const source = composeApp(manifest);
 
       // Gated exactly like a model's output. A generator can be wrong too, and
@@ -109,9 +125,11 @@ export async function POST(
       }
 
       const updated = await addRevision(id, {
-        intent: custom
-          ? `Add the “${custom.name}” component.`
-          : describeComponent(def.kind, chosen),
+        intent: replacing
+          ? `Reconfigured ${custom ? `“${custom.name}”` : describeComponent(def.kind, chosen)}`
+          : custom
+            ? `Add the “${custom.name}” component.`
+            : describeComponent(def.kind, chosen),
         refs: chosen.length ? chosen : undefined,
         manifest,
         source,

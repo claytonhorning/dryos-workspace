@@ -40,6 +40,7 @@ export function Runner({
   onResize,
   onReorder,
   onRemove,
+  onConfigure,
   flush,
 }: {
   appId: string;
@@ -60,8 +61,13 @@ export function Runner({
   onResize?: (index: number, w: number, h: number) => void;
   /** A tile was dragged onto another one inside the frame. */
   onReorder?: (from: number, to: number) => void;
-  /** A tile's ✕ was confirmed inside the frame. */
-  onRemove?: (index: number) => void;
+  /**
+   * A tile's ✕ was clicked inside the frame. The frame has already hidden the
+   * tile optimistically; resolve false and it is restored.
+   */
+  onRemove?: (index: number) => Promise<boolean> | boolean | void;
+  /** A tile's ⚙ was clicked inside the frame. */
+  onConfigure?: (index: number) => void;
   /** Edge to edge: no radius, no border. The screen is the whole view. */
   flush?: boolean;
 }) {
@@ -134,7 +140,8 @@ export function Runner({
         | { __dryos: "slot"; index: number }
         | { __dryos: "resize"; index: number; w: number; h: number }
         | { __dryos: "reorder"; from: number; to: number }
-        | { __dryos: "remove"; index: number };
+        | { __dryos: "remove"; index: number }
+        | { __dryos: "configure"; index: number };
       if (!m || typeof m !== "object") return;
       // Data calls are answered for either frame — the incoming one starts
       // querying while it is still invisible. Layout gestures only mean
@@ -151,12 +158,19 @@ export function Runner({
       } else if (m.__dryos === "reorder") {
         onReorder?.(m.from, m.to);
       } else if (m.__dryos === "remove") {
-        onRemove?.(m.index);
+        // The frame hid the tile before asking; only a failed save puts it
+        // back, so the gesture reads as instant on the path that matters.
+        const src = e.source as Window;
+        void Promise.resolve(onRemove?.(m.index)).then((ok) => {
+          if (ok === false) src.postMessage({ __dryos: "restore" }, "*");
+        });
+      } else if (m.__dryos === "configure") {
+        onConfigure?.(m.index);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [answer, onError, onResize, onReorder, onRemove]);
+  }, [answer, onError, onResize, onReorder, onRemove, onConfigure]);
 
   // Never let the two slots carry the same revision — between the swap and
   // the effect that clears `pending` there is a render where they could.

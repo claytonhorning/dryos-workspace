@@ -138,15 +138,6 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
   const [dragging, setDragging] = useState(false);
   const [over, setOver] = useState(null);
   const [full, setFull] = useState(false);
-  // Removal arms on the first click and fires on the second — confirmed on the
-  // tile itself, because that is the thing being deleted. It disarms on its
-  // own so a stray click does not leave a live trigger lying around.
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 3500);
-    return () => clearTimeout(t);
-  }, [armed]);
 
   useEffect(() => setSize({ w: w || 6, h: h || 240 }), [w, h]);
 
@@ -291,24 +282,50 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         </button>
         {!full && window.parent !== window && (
           <button
-            onClick={() => {
-              if (!armed) { setArmed(true); return; }
-              setArmed(false);
-              parent.postMessage({ __dryos: "remove", index }, "*");
-            }}
-            title={armed ? "Click again to remove this tile" : "Remove from the dashboard"}
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent("dryos:tileconfigure", { detail: { index } }),
+              )
+            }
+            title="Configure this component"
             style={{
-              background: armed ? "var(--fail)" : "transparent",
-              border: "1px solid " + (armed ? "var(--fail)" : "var(--line)"),
+              background: "transparent",
+              border: "1px solid var(--line)",
               borderRadius: 4,
-              color: armed ? "var(--bg)" : "var(--faint)",
+              color: "var(--faint)",
               cursor: "pointer",
               fontSize: 10,
               lineHeight: 1,
               padding: "3px 5px",
             }}
           >
-            {armed ? "remove?" : "✕"}
+            ⚙
+          </button>
+        )}
+        {!full && window.parent !== window && (
+          <button
+            onClick={() =>
+              // One click, no "are you sure": the revision this writes is the
+              // undo, which is a better safety net than a second click nobody
+              // reads. The grid hides the tile the same instant; the save
+              // catches up behind the gesture.
+              window.dispatchEvent(
+                new CustomEvent("dryos:tileremove", { detail: { index } }),
+              )
+            }
+            title="Remove from the dashboard"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--line)",
+              borderRadius: 4,
+              color: "var(--faint)",
+              cursor: "pointer",
+              fontSize: 10,
+              lineHeight: 1,
+              padding: "3px 5px",
+            }}
+          >
+            ✕
           </button>
         )}
       </header>
@@ -560,6 +577,9 @@ export default function App() {
     `  // the revision that fills it replaces this frame — or the host says the`,
     `  // placement failed and releases it.`,
     `  const [placing, setPlacing] = useState(false);`,
+    `  // Removed tiles vanish here first; the saved revision catches up behind`,
+    `  // the gesture, and a failed save restores them via "restore".`,
+    `  const [hidden, setHidden] = useState(() => new Set());`,
     ``,
     `  const tiles = [`,
     ...names.map(
@@ -573,9 +593,18 @@ export default function App() {
     `  useEffect(() => {`,
     `    const onGrab = (e) => setGrabbed(e.detail);`,
     `    const onDrop = () => { setGrabbed(null); setSlot(null); };`,
+    `    const onRemove = (e) => {`,
+    `      const i = e.detail.index;`,
+    `      setHidden((prev) => { const next = new Set(prev); next.add(i); return next; });`,
+    `      if (window.parent !== window) parent.postMessage({ __dryos: "remove", index: i }, "*");`,
+    `    };`,
+    `    const onConfigure = (e) => {`,
+    `      if (window.parent !== window) parent.postMessage({ __dryos: "configure", index: e.detail.index }, "*");`,
+    `    };`,
     `    const onHost = (e) => {`,
     `      const m = e.data;`,
     `      if (!m || typeof m !== "object") return;`,
+    `      if (m.__dryos === "restore") setHidden(new Set());`,
     `      if (m.__dryos === "dragover" && grid.current) {`,
     `        setPlacing(false);`,
     `        setGrabbed({ index: null, w: m.w, h: m.h });`,
@@ -591,10 +620,14 @@ export default function App() {
     `    };`,
     `    window.addEventListener("dryos:tilegrab", onGrab);`,
     `    window.addEventListener("dryos:tiledrop", onDrop);`,
+    `    window.addEventListener("dryos:tileremove", onRemove);`,
+    `    window.addEventListener("dryos:tileconfigure", onConfigure);`,
     `    window.addEventListener("message", onHost);`,
     `    return () => {`,
     `      window.removeEventListener("dryos:tilegrab", onGrab);`,
     `      window.removeEventListener("dryos:tiledrop", onDrop);`,
+    `      window.removeEventListener("dryos:tileremove", onRemove);`,
+    `      window.removeEventListener("dryos:tileconfigure", onConfigure);`,
     `      window.removeEventListener("message", onHost);`,
     `    };`,
     `  }, []);`,
@@ -617,7 +650,7 @@ export default function App() {
     `  const shown = [];`,
     `  order.forEach((i, n) => {`,
     `    if (slot === n) shown.push(<Ghost key="ghost" w={grabbed && grabbed.w} h={grabbed && grabbed.h} placing={placing} />);`,
-    `    shown.push(tiles[i]);`,
+    `    if (!hidden.has(i)) shown.push(tiles[i]);`,
     `  });`,
     `  if (slot === order.length) shown.push(<Ghost key="ghost" w={grabbed && grabbed.w} h={grabbed && grabbed.h} placing={placing} />);`,
     ``,
