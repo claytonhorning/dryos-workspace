@@ -179,7 +179,9 @@ export function BuildPanel({
                   setCarrying(c.kind);
                   onDragStateChange({
                     kind: c.kind,
-                    options: withDefaults(c),
+                    // A card dragged while its preview is open places what
+                    // the preview shows, tuned settings and all.
+                    options: previewKind === c.kind ? previewOpts : withDefaults(c),
                     refs,
                     layout: DEFAULT_LAYOUT[c.kind],
                   });
@@ -239,12 +241,30 @@ export function BuildPanel({
 
       {previewDef && (
         <div className="shrink-0 border-t border-line px-3 py-2.5">
-          <div className="flex items-center gap-2">
+          <div
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = "copy";
+              setCarrying(previewDef.kind);
+              onDragStateChange({
+                kind: previewDef.kind,
+                options: previewOpts,
+                refs,
+                layout: DEFAULT_LAYOUT[previewDef.kind],
+              });
+            }}
+            onDragEnd={() => {
+              setCarrying(null);
+              onDragStateChange(null);
+            }}
+            className="flex cursor-grab items-center gap-2 active:cursor-grabbing"
+            title="Drag onto the page to place exactly what you see"
+          >
+            <span className="rounded border border-accent-line bg-accent-dim px-1.5 py-[2px] font-mono text-[9.5px] text-accent">
+              ⠿ drag to place
+            </span>
             <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
               {previewDef.name} · preview
-            </span>
-            <span className="font-mono text-[9.5px] text-faint">
-              drag the card to place it
             </span>
             <button
               onClick={() => onOpen({ def: previewDef, refs, options: previewOpts })}

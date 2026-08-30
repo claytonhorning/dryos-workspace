@@ -12,9 +12,10 @@ import { readNdjson } from "@/lib/workspace/ndjson";
  * This is the one thing browsing cannot do — look inside a schema at the
  * actual entities and answer "which node is the Austin one?" in a sentence.
  * The agent behind it (`dataAgent.ts`) was built for exactly this and then
- * sat unreachable when the whole-page chat was removed; the data stage's
- * footer is its right home. Every result is the same `DataRef` a click in the
- * explorer produces — clicking one selects it, nothing is pasted as text.
+ * sat unreachable when the whole-page chat was removed; it lives as the AI
+ * mode of the explorer's search bar now — the same intent as searching, one
+ * level deeper. Every result is the same `DataRef` a click in the explorer
+ * produces — clicking one selects it, nothing is pasted as text.
  */
 export function AskData({
   chosen,
@@ -77,7 +78,7 @@ export function AskData({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && ask()}
-          placeholder="Ask for data — “the Austin load zone”, “hub prices near the border”…"
+          placeholder="Describe the data you want…"
           className="w-full rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
         />
         <button

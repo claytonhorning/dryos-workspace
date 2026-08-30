@@ -16,6 +16,7 @@ import {
   entityRef,
 } from "@/lib/workspace/catalog";
 import { entityNote } from "@/lib/workspace/entityNotes";
+import { AskData } from "@/components/workspace/AskData";
 
 /**
  * The data explorer: two levels, one panel, no modal.
@@ -48,6 +49,13 @@ export function DataExplorer({
   const [domain, setDomain] = useState(all[0] ?? "Energy");
   const [category, setCategory] = useState(ALL);
   const [query, setQuery] = useState("");
+  /**
+   * Two ways to look for data, one bar. Search filters what is on screen;
+   * AI hands the question to the data guide, which looks inside the schemas
+   * and answers with selectable chips. A toggle rather than two boxes,
+   * because they are the same intent at two depths.
+   */
+  const [mode, setMode] = useState<"search" | "ai">("search");
   /** The set being read at level two, or null for the catalogue. */
   const [drill, setDrill] = useState<Schema | null>(null);
 
@@ -127,12 +135,31 @@ export function DataExplorer({
       </div>
 
       <div className="flex flex-col gap-2 border-b border-line px-2.5 py-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter — load, spread, $/MWh…"
-          className="w-full rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
-        />
+        <div className="flex items-stretch gap-1.5">
+          <div className="flex shrink-0 rounded-md border border-line bg-surface-2 p-0.5">
+            {(["search", "ai"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={cx(
+                  "rounded px-2 text-[11px] transition-colors",
+                  mode === m ? "bg-surface-3 text-ink" : "text-faint hover:text-ink",
+                )}
+              >
+                {m === "search" ? "Search" : "AI"}
+              </button>
+            ))}
+          </div>
+          {mode === "search" && (
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search data…"
+              className="w-full rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
+            />
+          )}
+        </div>
+        {mode === "ai" && <AskData chosen={chosen} onPick={onToggle} />}
         <div className="dr-scroll flex gap-1 overflow-x-auto">
           {cats.map((c) => (
             <button

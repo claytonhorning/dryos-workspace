@@ -3,7 +3,6 @@
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DataExplorer } from "@/components/workspace/DataExplorer";
-import { AskData } from "@/components/workspace/AskData";
 import { AvailabilityBadge, AttachedChip } from "@/components/workspace/DataChip";
 import { Runner } from "@/components/workspace/Runner";
 import { Button, cx } from "@/components/ui";
@@ -150,8 +149,6 @@ export default function AppPage() {
    * real box rather than sent, so it is a draft you can edit or replace — and it
    * only ever overwrites itself, never something the user typed.
    */
-  const attachedKeys = new Set(attached.map((r) => `${r.snippet}::${r.label}`));
-
   const toggle = useCallback(
     (ref: DataRef) => {
       const same = (r: DataRef) =>
@@ -673,10 +670,11 @@ export default function AppPage() {
                                 : "border-accent-line bg-accent-dim text-accent hover:brightness-110",
                             )}
                           >
-                            Add a component ›
+                            {attached.length === 0
+                              ? "Select data to continue"
+                              : `Next: choose a component (${attached.length} series) ›`}
                           </button>
                         </div>
-                        <AskData chosen={attachedKeys} onPick={toggle} />
                       </div>
                     </>
                   ) : (
