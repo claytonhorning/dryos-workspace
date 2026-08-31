@@ -160,6 +160,21 @@ function unit(ref: DataRef): string {
   return schema?.variables.find((v) => v.key === key)?.unit ?? "";
 }
 
+/**
+ * The declared colour stops for a selection's measure, if it has any.
+ *
+ * Read off the first reference, because a map's point layer draws one measure —
+ * the same reference the unit and the column already come from. A selection
+ * whose variable declares nothing returns null and the map scales itself.
+ */
+function pointScale(refs: DataRef[]) {
+  const first = refs[0];
+  if (!first) return null;
+  const schema = schemaFor(first.schemaId);
+  const key = column(first);
+  return schema?.variables.find((v) => v.key === key)?.scale ?? null;
+}
+
 /** The entity a reference is about, when it names one. */
 function node(ref: DataRef): string | null {
   const m = /node: "([^"]+)"/.exec(ref.snippet);
@@ -1938,6 +1953,9 @@ const map: ComponentDef = {
   const UNIT = ${JSON.stringify(s[0]?.unit ?? "")};
   const STYLE = ${JSON.stringify(o.style)};
   const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label, invented, dense }) : "null"};
+  // Absolute colour stops for the point layer's measure, when its variable
+  // declares them. Null falls back to percentiles of whatever is on screen.
+  const SCALE = ${JSON.stringify(pointScale(pointRefs.length ? pointRefs : refs))};
 ${locatedRef && invented ? MOCK_POINT_SOURCE : ""}
   const FIELD = ${showField ? JSON.stringify({ dataset: fieldDataset, column: fieldColumn, unit: fieldUnit, mode: fieldMode, label: fieldRef!.label, entity: fieldEntity, direction: vector?.direction ?? null }) : "null"};
   const MOTION = ${motionRef ? JSON.stringify({ dataset: motionDataset, trails, label: motionRef.label }) : "null"};
@@ -2440,6 +2458,27 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   */
   const placedRef = React.useRef(placed);
   React.useEffect(() => { placedRef.current = placed; }, [placed]);
+
+  /*
+    The layer the pointer is reading: the topmost one that is switched on.
+
+    Only that layer answers, and it answers or it does not — a hover never
+    falls through to what is underneath. That matters because a readout is a
+    number without a label on it: if hovering between two nodes quietly
+    returned the wind below them, you would read a value and attribute it to
+    the layer you can see. Answering nothing is unambiguous.
+
+    It also gives reordering a second job. Dragging a layer to the top is not
+    only about what is drawn over what, it decides what the map tells you when
+    you point at it — which is usually the reason you wanted it on top.
+
+    In a ref for the same reason the rows are: the handler binds once, and
+    reading this out of the closure would leave it fixed at whatever the order
+    was on first render.
+  */
+  const topId = ordered.find((L) => shown(L.id))?.id ?? null;
+  const topRef = React.useRef(topId);
+  React.useEffect(() => { topRef.current = topId; }, [topId]);
   React.useEffect(() => {
     const m = map.current;
     if (!m || !ready || ready === "no-token") return;
@@ -2456,7 +2495,11 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         is about. Nodes are therefore hit-tested against what is actually
         rendered, and the readout stays away unless the pointer is on one.
       */
-      if (LOCATED) {
+      // Nothing switched on is nothing to read.
+      const top = topRef.current;
+      if (!top) return setProbe(null);
+
+      if (top === "points" && LOCATED) {
         /*
           Nearest placed node, within a few pixels of the cursor.
 
@@ -2495,8 +2538,14 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           });
           return;
         }
+        // The top layer is the nodes and the pointer is not on one. It does not
+        // fall through to whatever is beneath: between two nodes there is no
+        // price, and borrowing a number from another layer would put a value on
+        // screen that belongs to something you are not pointing at.
+        return setProbe(null);
       }
-      if (!flow) return setProbe(null);
+
+      if (top !== "field" || !flow) return setProbe(null);
       const f = flow.at(e.lngLat.lng, e.lngLat.lat);
       if (!f) return setProbe(null);
       setProbe({
@@ -2874,8 +2923,49 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     const ids = Object.keys(placed);
     const values = ids.map((n) => placed[n].value).filter((v) => typeof v === "number");
     if (!values.length) return;
-    const lo = Math.min(...values);
-    const hi = Math.max(...values);
+    /*
+      The colour ramp, and why it is not min-to-max.
+
+      Min and max are set by two readings out of a thousand, and price data is
+      heavy-tailed: across one ERCOT interval p1 is about $17 and p99 about $50
+      while the extremes span $136, so a linear ramp puts 98% of nodes inside a
+      quarter of the colour range and paints them all the same. The congestion
+      you opened the map to find is the part that gets squeezed out.
+
+      A declared scale (SCALE) fixes values to colours absolutely, so a colour
+      survives a refresh and $100 looks like $100 whatever else is on screen.
+      Without one, percentiles are the fallback — still relative, but no longer
+      collapsible by a single outlier.
+    */
+    const sorted = [...values].sort((x, y) => x - y);
+    const pct = (f) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(f * (sorted.length - 1))))];
+    const lo = SCALE ? SCALE[0].at : pct(0.05);
+    const hi = SCALE ? SCALE[SCALE.length - 1].at : pct(0.95);
+    const ramp = SCALE
+      ? SCALE.flatMap((s) => [s.at, s.color])
+      : [pct(0.05), "#2b6cb0", pct(0.5), "#7dd3fc", pct(0.8), "#e8ff3d", pct(0.95), "#fb8b5c", pct(1), "#f4666b"];
+
+    /*
+      Size and opacity on the *stops*, not across the range.
+
+      Both ride the same breakpoints the colour does, so they compress where
+      the readings are dense and open up where the exceptions are. Spread
+      linearly instead, a scale reaching $1000 leaves everything below $150
+      indistinguishable — which is the flattening this change exists to undo,
+      reintroduced in a second channel.
+    */
+    const stops = SCALE ? SCALE.map((s) => s.at) : [pct(0.05), pct(0.5), pct(0.8), pct(0.95), pct(1)];
+    // Eased rather than even: squaring holds the low stops close together and
+    // spends the growth at the top. Spread evenly, the band holding 97% of
+    // nodes already sat at half the maximum radius, so the map got heavier
+    // everywhere and the exception gained nothing on its neighbours.
+    const spread = (from, to, ease) =>
+      stops.flatMap((at, i) => {
+        const t = i / Math.max(1, stops.length - 1);
+        return [at, from + (to - from) * (ease ? t * t : t)];
+      });
+    const sizeRamp = (mult) => spread(1.8 * mult, 9 * mult, true);
+    const opacityRamp = spread(0.45, 0.95, true);
 
     // A large set draws as one GL layer rather than as a thousand elements.
     if (LOCATED && LOCATED.dense) {
@@ -2896,12 +2986,25 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           type: "circle",
           source: "dryos-pts",
           paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2.5, 6, 5, 9, 9],
-            "circle-color": [
-              "interpolate", ["linear"], ["get", "v"],
-              lo, "#7dd3fc", (lo + hi) / 2, "#d9a441", hi, "#c4703a",
+            // Size carries the exception too, not only colour — a congested
+            // node is redder *and* bigger, so it survives a projector, a
+            // photograph of a wall, or eyes that do not separate red from
+            // amber.
+            //
+            // Sized on the same stops as the colour, not linearly across the
+            // range. Linear was the first attempt and it defeated the whole
+            // change: with a scale running to $1000, a $112 node sits 15% along
+            // and draws barely larger than a $30 one, so the exception the
+            // colour had just made visible went back to looking ordinary.
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              3, ["interpolate", ["linear"], ["get", "v"], ...sizeRamp(1)],
+              6, ["interpolate", ["linear"], ["get", "v"], ...sizeRamp(1.9)],
+              9, ["interpolate", ["linear"], ["get", "v"], ...sizeRamp(3.2)],
             ],
-            "circle-opacity": 0.85,
+            "circle-color": ["interpolate", ["linear"], ["get", "v"], ...ramp],
+            // The quiet majority sits back; the exceptions come forward.
+            "circle-opacity": ["interpolate", ["linear"], ["get", "v"], ...opacityRamp],
             "circle-stroke-width": 0.5,
             "circle-stroke-color": "rgba(0,0,0,.5)",
           },
@@ -2994,7 +3097,9 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
              mean, which is what a reader needs and what a launched screen is
              allowed to carry. Turning things on and off is a different job and
              has its own panel. ───────────────────────────────────────────── */}
-      {LAYERS.length > 0 ? (
+      {/* Gone entirely when nothing is on, rather than an empty bordered box
+          keying nothing. The layer panel is where you turn things back on. */}
+      {ordered.some((L) => shown(L.id)) ? (
         <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 3, left: 4, padding: "5px 7px", position: "absolute", top: 4, zIndex: 3 }}>
           {ordered.filter((L) => shown(L.id)).map((L) => (
             <div key={L.id} style={{ alignItems: "center", display: "flex", gap: 6 }}>
@@ -3004,6 +3109,28 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
               {L.note ? <span style={{ color: "var(--faint)", fontSize: 9, fontStyle: "italic" }}>{L.note}</span> : null}
             </div>
           ))}
+          {/*
+            The ramp itself, because "a hundred dollars stands out" only helps
+            somebody who can tell that this red is a hundred dollars. A
+            continuous scale with no key is decoration.
+
+            Drawn with the stops spaced evenly rather than by value: the values
+            are deliberately non-linear ($0, $25, $50, $100, $250, $1000), and
+            spacing them to scale would compress everything below $250 into a
+            sliver — which is the failure this whole change is undoing.
+          */}
+          {SCALE && shown("points") ? (
+            <div style={{ marginTop: 2 }}>
+              <div style={{ background: "linear-gradient(to right, " + SCALE.map((s) => s.color).join(", ") + ")", borderRadius: 2, height: 5, width: "100%" }} />
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                {SCALE.map((s) => (
+                  <span key={s.at} style={{ color: "var(--faint)", fontSize: 8 }}>
+                    {s.label === "negative" ? "−" : s.at >= 1000 ? "1k+" : s.at}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

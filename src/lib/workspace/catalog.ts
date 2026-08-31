@@ -28,6 +28,24 @@ export interface Variable {
   description: string;
   /** Shape of the synthetic series. Absent on live variables — those are read. */
   mock?: { base: number; swing: number; noise: number; floor?: number };
+  /**
+   * Absolute colour breakpoints, so a colour means a value rather than a rank.
+   *
+   * A map coloured from the min and max of whatever it just fetched restretches
+   * on every refresh: the same red marks $103 on a calm afternoon and $40 an
+   * hour later, which makes the colour uninterpretable and hides the thing you
+   * opened the map for. Declared stops fix a price to a colour for good.
+   *
+   * Linear ramps also fail this data in a second way. Across one interval of
+   * ERCOT prices, p1 is $16.68 and p99 is $50.33 while min and max span $136 —
+   * so 98% of nodes land inside a quarter of a linear ramp, all one shade,
+   * while the congested handful that matter sit alone at the top. Stops let the
+   * scale be dense where the readings are and open where the exceptions are.
+   *
+   * Absent, the map falls back to a percentile-based ramp over what it has,
+   * which is still relative but no longer flattened by a single outlier.
+   */
+  scale?: { at: number; color: string; label?: string }[];
 }
 
 export interface Schema {
@@ -192,6 +210,21 @@ export const SCHEMAS: Schema[] = [
         unit: "$/MWh",
         availability: "live",
         description: "The settled price. The only price field ERCOT populates.",
+        // Set from the distribution, not by eye — see the Variable.scale note.
+        // p50 sits near $28 and p90 near $68 over a fortnight, >$100 is 4% of
+        // readings and >$500 is half a percent. So the ramp is dense through
+        // the ordinary range and keeps its loudest colours for the exceptions,
+        // which is the whole point: a node at $100 has to be visible at a
+        // glance, and it cannot be if $40 is already orange.
+        scale: [
+          { at: -50, color: "#a78bfa", label: "negative" },
+          { at: 0, color: "#2b6cb0" },
+          { at: 25, color: "#7dd3fc" },
+          { at: 50, color: "#e8ff3d" },
+          { at: 100, color: "#fbbf24" },
+          { at: 250, color: "#fb8b5c" },
+          { at: 1000, color: "#f4666b", label: "cap" },
+        ],
         // Preview-only. The data route never generates this schema — it is
         // collected — but a thumbnail has no host to answer its queries, so the
         // preview shim needs a shape to draw. See `runtime.ts`.
@@ -230,6 +263,21 @@ export const SCHEMAS: Schema[] = [
         unit: "$/MWh",
         availability: "live",
         description: "Hourly day-ahead clearing price for the bus.",
+        // Set from the distribution, not by eye — see the Variable.scale note.
+        // p50 sits near $28 and p90 near $68 over a fortnight, >$100 is 4% of
+        // readings and >$500 is half a percent. So the ramp is dense through
+        // the ordinary range and keeps its loudest colours for the exceptions,
+        // which is the whole point: a node at $100 has to be visible at a
+        // glance, and it cannot be if $40 is already orange.
+        scale: [
+          { at: -50, color: "#a78bfa", label: "negative" },
+          { at: 0, color: "#2b6cb0" },
+          { at: 25, color: "#7dd3fc" },
+          { at: 50, color: "#e8ff3d" },
+          { at: 100, color: "#fbbf24" },
+          { at: 250, color: "#fb8b5c" },
+          { at: 1000, color: "#f4666b", label: "cap" },
+        ],
         // Preview-only — see the note on the real-time schema.
         mock: { base: 34, swing: 16, noise: 4 },
       },
