@@ -16,6 +16,8 @@
  * `ercot-dam-lmp`, and one report should be one stream.
  */
 
+import { ERCOT_POINTS } from "./geo";
+
 export type Availability = "live" | "mock";
 
 export interface Variable {
@@ -123,6 +125,20 @@ export interface Schema {
    */
   located?: boolean;
   /**
+   * The map may place this stream's entities from `geoMock`, which invents them.
+   *
+   * Separate from `availability` on purpose, because it is a different claim:
+   * the *numbers* here are live and collected, and only the *geography* is
+   * fabricated. Conflating the two would either brand real prices as mock or
+   * let invented positions inherit a live badge, and both are worse than saying
+   * exactly which half is made up.
+   *
+   * Set only on streams ERCOT publishes no coordinates for. Every surface that
+   * draws one shows the mock badge — see `geoMock.ts` for why that marking is
+   * the whole basis on which this is allowed to exist.
+   */
+  mockLocations?: boolean;
+  /**
    * Who is accountable for this feed. Absent means nobody has claimed it yet —
    * which is the honest state of every schema that has no collector, and the
    * reason the workspace shows the roster rather than hiding the gaps.
@@ -152,6 +168,8 @@ export const SCHEMAS: Schema[] = [
       label: "settlement points",
       sample: ["HB_HOUSTON", "HB_NORTH", "LZ_WEST"],
     },
+    // ERCOT publishes no coordinates for these, so the map invents them.
+    mockLocations: true,
     blurb:
       "Locational marginal prices from the latest SCED run, every ERCOT settlement point. " +
       "Collected from ERCOT MIS, reconciled against the source file.",
@@ -186,6 +204,8 @@ export const SCHEMAS: Schema[] = [
       label: "electrical buses",
       sample: ["CADICKS_804V", "ADICKS__138C", "ADK_V_C"],
     },
+    // ERCOT publishes no coordinates for these, so the map invents them.
+    mockLocations: true,
     blurb:
       "Hourly cleared prices from the day-ahead market for every ERCOT electrical bus, " +
       "posted once for the following day. Collected from ERCOT MIS (NP4-183), " +
@@ -1595,6 +1615,64 @@ export function categoryOf(schema: Schema): string {
 
 export function domains(): string[] {
   return [...new Set(SCHEMAS.map(domainOf))];
+}
+
+/**
+ * How a map would draw a stream, and how much of it it could place.
+ *
+ * One function, asked by both the layer picker and the map's own `accepts`, so
+ * the coverage a picker promises is literally the coverage the tile draws. Two
+ * places computing it separately is two places for the promise to drift from
+ * the picture.
+ *
+ * `null` means the map cannot draw it at all, which is the right filter for a
+ * layer list — **not** the domain. The most useful map in this product is
+ * cross-domain: a wind field under price pins is the whole argument for
+ * collecting weather beside ERCOT, and filtering by domain would forbid exactly
+ * that. Domain is a heading in the list, never a gate on it.
+ */
+export type MapTreatment =
+  | { how: "surface"; vector: boolean; placed: number; total: number; invented: false }
+  | { how: "motion"; placed: number; total: number; invented: false }
+  | { how: "pins"; placed: number; total: number; invented: boolean };
+
+export function mapTreatment(schema: Schema): MapTreatment | null {
+  const total = schema.entities.count;
+  if (schema.field) return { how: "surface", vector: Boolean(schema.vector), placed: total, total, invented: false };
+  if (schema.motion) return { how: "motion", placed: total, total, invented: false };
+  // Rows carry their own coordinates, or we invent one per entity — either way
+  // every entity lands somewhere.
+  if (schema.located) return { how: "pins", placed: total, total, invented: false };
+  if (schema.mockLocations) return { how: "pins", placed: total, total, invented: true };
+  const placed = placeableNodes(schema).length;
+  return placed ? { how: "pins", placed, total, invented: false } : null;
+}
+
+/**
+ * Which of a stream's entities `geo.ts` can actually place.
+ *
+ * The prefix rule is the one the map's generator already used, lifted here so
+ * the two cannot disagree. It is a heuristic over a lookup table of three dozen
+ * published aggregates, which is why the number it returns is worth *showing* —
+ * "3 of 9 have known locations" is a fact somebody can act on, and a layer that
+ * silently drew three ninths of itself is not.
+ */
+export function placeableNodes(schema: Schema): string[] {
+  const sample = schema.entities.sample ?? [];
+  if (!sample.length) return [];
+  const stem = sample[0].slice(0, 3);
+  return Object.keys(ERCOT_POINTS).filter(
+    (k) => sample.includes(k) || (stem.length === 3 && k.startsWith(stem)),
+  );
+}
+
+/** "1,118 placed · invented" — what the picker says under a layer's name. */
+export function coverageLabel(t: MapTreatment): string {
+  if (t.invented) return `${t.total.toLocaleString()} entities · invented positions`;
+  if (t.how === "surface") return t.vector ? "vector field" : "scalar field";
+  if (t.how === "motion") return "tracked positions";
+  if (t.placed >= t.total) return `${t.total.toLocaleString()} placed`;
+  return `${t.placed} of ${t.total.toLocaleString()} have known locations`;
 }
 
 /** Categories inside one domain, or across all of them. */

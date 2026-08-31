@@ -1,5 +1,6 @@
 import { type DataRef, grainSeconds, schemaFor } from "./catalog";
 import { ERCOT_POINTS, ERCOT_VIEW, hasGeography } from "./geo";
+import { MOCK_POINT_SOURCE } from "./geoMock";
 import { schemaById } from "./catalog";
 import { SERIES_PALETTE } from "./palette";
 
@@ -1855,9 +1856,34 @@ const map: ComponentDef = {
       single map is not offered — two placement rules in one layer is a
       different component — so the located ref wins the layer outright.
     */
-    const locatedRef = pointRefs.find((r) => schemaById(r.schemaId)?.located);
+    const locatedRef = pointRefs.find(
+      (r) => schemaById(r.schemaId)?.located || schemaById(r.schemaId)?.mockLocations,
+    );
     const locatedSchema = locatedRef ? schemaById(locatedRef.schemaId) : undefined;
-    const locatedEntity = locatedSchema?.entityKey ?? "";
+    // ERCOT's large streams name their entity `node`; the weather ones declare it.
+    const locatedEntity = locatedSchema?.entityKey ?? "node";
+    /*
+      Invented geography, carried through rather than decided once and forgotten.
+
+      This flag is the entire basis on which `geoMock` is allowed to exist: it
+      reaches the badge, the popup and the legend, so a map of positions nobody
+      published cannot be mistaken for one of positions somebody did. Note it is
+      separate from `anyMock`, which is about the numbers — here the prices are
+      real and only the places are made up, and saying which half is fabricated
+      is more useful than branding the whole tile.
+    */
+    const invented = Boolean(locatedSchema?.mockLocations);
+    /*
+      Past a few hundred entities a pin stops being a pin.
+
+      A Mapbox DOM marker is a real element, and a thousand of them is a
+      thousand nodes the browser lays out and repositions on every frame of a
+      pan — unusable long before the settlement points run out. A large set goes
+      into a GL circle layer instead: same points, same colour scale, one draw.
+      What it gives up is the label baked into each marker, which is what the
+      hover readout is for.
+    */
+    const dense = (locatedSchema?.entities.count ?? 0) > 200;
 
     const nodes = locatedRef ? [] : [
       ...new Set(
@@ -1908,7 +1934,8 @@ const map: ComponentDef = {
   const COLUMN = ${JSON.stringify(s[0]?.column ?? "")};
   const UNIT = ${JSON.stringify(s[0]?.unit ?? "")};
   const STYLE = ${JSON.stringify(o.style)};
-  const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label }) : "null"};
+  const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label, invented, dense }) : "null"};
+${locatedRef && invented ? MOCK_POINT_SOURCE : ""}
   const FIELD = ${showField ? JSON.stringify({ dataset: fieldDataset, column: fieldColumn, unit: fieldUnit, mode: fieldMode, label: fieldRef!.label, entity: fieldEntity, direction: vector?.direction ?? null }) : "null"};
   const MOTION = ${motionRef ? JSON.stringify({ dataset: motionDataset, trails, label: motionRef.label }) : "null"};
 
@@ -1978,8 +2005,18 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       pointRows.forEach((r) => {
         const id = r[LOCATED.entity];
         if (id == null || out[id]) return;
-        if (typeof r.lat !== "number" || typeof r.lon !== "number") return;
-        out[id] = { lon: r.lon, lat: r.lat, label: String(id), value: r[COLUMN], exact: true };
+        // Two sources of position, and which applies is a fact about the stream
+        // rather than about the row: coordinates the source published, or ones
+        // derived from the id because it published none.
+        let lon = r.lon, lat = r.lat;
+        if (LOCATED.invented && (typeof lat !== "number" || typeof lon !== "number")) {
+          const p = mockPoint(String(id));
+          lat = p.lat; lon = p.lon;
+        }
+        if (typeof lat !== "number" || typeof lon !== "number") return;
+        // exact drives the caveat, so an invented position is never exact
+        // however confidently it was computed.
+        out[id] = { lon, lat, label: String(id), value: r[COLUMN], exact: !LOCATED.invented };
       });
     } else {
       NODES.forEach((n) => {
@@ -1990,6 +2027,52 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     }
     return out;
   }, [rows]);
+
+  /*
+    The legend, which is also the layer switch.
+
+    A multi-layer map needs a legend whatever else is true — a colour ramp
+    nobody can read and pins whose size means something undocumented are a
+    picture, not a chart. So this is *content*, and that is what lets it sit on
+    a launched screen at all: the rule that a screen on a wall carries no chrome
+    is about the product's own furniture, and a key to the marks on a map is the
+    opposite of furniture.
+
+    Toggling then costs nothing extra, which is the argument for putting it here
+    rather than adding switches — a control that had to justify itself
+    separately would have been chrome.
+
+    The state is ephemeral on purpose: per viewer, per session, never a
+    revision. Hiding a layer to see what is beneath it is looking, not editing,
+    which is the reasoning full screen already follows.
+  */
+  const LAYERS = ${JSON.stringify(
+    [
+      ...(locatedRef || nodes.length
+        ? [{
+            id: "points",
+            label: s[0]?.label ?? "Points",
+            unit: s[0]?.unit ?? "",
+            swatch: "#d9a441",
+            note: invented ? "invented positions" : "",
+          }]
+        : []),
+      ...(showField
+        ? [{
+            id: "field",
+            label: fieldRef!.label,
+            unit: fieldUnit,
+            swatch: fieldMode === "particles" ? "#7dd3fc" : "#2b6cb0",
+            note: fieldMode === "particles" ? "particles" : "surface",
+          }]
+        : []),
+      ...(motionRef
+        ? [{ id: "motion", label: motionRef.label, unit: "", swatch: "#6f8768", note: "tracked" }]
+        : []),
+    ],
+  )};
+  const [hidden, setHidden] = React.useState({});
+  const shown = (id) => !hidden[id];
 
   /*
     A grid cell carries its own position: G_315_1005 is 31.5N 100.5W. Encoding
@@ -2106,7 +2189,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   */
   React.useEffect(() => {
     const m = map.current;
-    if (!m || !field) return;
+    if (!m || !field || !shown("field")) return;
 
     const paint =
       FIELD.mode === "cells"
@@ -2169,7 +2252,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     m.on("style.load", apply);
     m.on("load", apply);
     return () => { m.off("style.load", apply); m.off("load", apply); };
-  }, [field, ready, style]);
+  }, [field, ready, style, hidden]);
 
   /*
     Particles, on a plain 2D canvas laid over the map.
@@ -2230,7 +2313,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   const veil = React.useRef(null);
   React.useEffect(() => {
     const cv = veil.current, m = map.current;
-    if (!cv || !m || !flow || !ready || ready === "no-token") return;
+    if (!cv || !m || !flow || !ready || ready === "no-token" || !shown("field")) return;
     const g = cv.getContext("2d");
     if (!g) return;
 
@@ -2366,7 +2449,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       const r = cv.getBoundingClientRect();
       g.clearRect(0, 0, r.width, r.height);
     };
-  }, [flow, ready, style]);
+  }, [flow, ready, style, hidden]);
 
   /*
     Aircraft, drawn the way every tracker draws them.
@@ -2437,7 +2520,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
 
   React.useEffect(() => {
     const m = map.current;
-    if (!m || !flights) return;
+    if (!m || !flights || !shown("motion")) return;
 
     // One plane silhouette per altitude band, drawn once into a canvas. Nose up,
     // because icon-rotate treats zero as north.
@@ -2562,20 +2645,77 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     m.on("style.load", apply);
     m.on("load", apply);
     return () => { m.off("style.load", apply); m.off("load", apply); };
-  }, [flights, ready, style]);
+  }, [flights, ready, style, hidden]);
 
   // Redrawn rather than mutated: a handful of markers is cheaper to replace
   // than to diff, and the value changes on every poll anyway.
   React.useEffect(() => {
     if (!map.current || !window.mapboxgl) return;
+    const m = map.current;
     markers.current.forEach((mk) => mk.remove());
     markers.current = [];
+    if (m.getLayer && m.getLayer("dryos-pts")) {
+      m.removeLayer("dryos-pts");
+      m.removeSource("dryos-pts");
+    }
+    if (!shown("points")) return;
 
     const ids = Object.keys(placed);
     const values = ids.map((n) => placed[n].value).filter((v) => typeof v === "number");
     if (!values.length) return;
     const lo = Math.min(...values);
     const hi = Math.max(...values);
+
+    // A large set draws as one GL layer rather than as a thousand elements.
+    if (LOCATED && LOCATED.dense) {
+      const data = {
+        type: "FeatureCollection",
+        features: ids.map((n) => ({
+          type: "Feature",
+          properties: { v: placed[n].value, id: n },
+          geometry: { type: "Point", coordinates: [placed[n].lon, placed[n].lat] },
+        })),
+      };
+      const paint = () => {
+        const src = m.getSource("dryos-pts");
+        if (src) { src.setData(data); return; }
+        m.addSource("dryos-pts", { type: "geojson", data });
+        m.addLayer({
+          id: "dryos-pts",
+          type: "circle",
+          source: "dryos-pts",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2.5, 6, 5, 9, 9],
+            "circle-color": [
+              "interpolate", ["linear"], ["get", "v"],
+              lo, "#7dd3fc", (lo + hi) / 2, "#d9a441", hi, "#c4703a",
+            ],
+            "circle-opacity": 0.85,
+            "circle-stroke-width": 0.5,
+            "circle-stroke-color": "rgba(0,0,0,.5)",
+          },
+        });
+      };
+      // Called straight away and bound to both events, matching the field
+      // layer. Gating the first call on isStyleLoaded() looked tidier and lost
+      // the layer whenever the style had finished before this effect ran:
+      // style.load never fires again, so the paint never happened at all.
+      // A theme change calls setStyle, which throws away every source and layer
+      // the map did not come with, which is what the rebinding is for.
+      const safe = () => {
+        // addSource throws outright before the style is up, and this effect
+        // only re-runs when the rows do — five minutes away on a real-time
+        // feed. So a miss here is not a flicker, it is an empty map until the
+        // next poll. "idle" is the one map event that fires again whenever it
+        // settles, which makes waiting for it self-healing where style.load is
+        // a single shot that may already have gone.
+        if (!m.isStyleLoaded()) { m.once("idle", safe); return; }
+        paint();
+      };
+      safe();
+      m.on("style.load", safe);
+      return () => { m.off("style.load", safe); };
+    }
 
     ids.forEach((n) => {
       const v = placed[n].value;
@@ -2593,7 +2733,11 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       // a substation.
       const popup = new window.mapboxgl.Popup({ offset: 14 }).setText(
         placed[n].label + " — " + v.toFixed(2) + " " + UNIT +
-        (placed[n].exact ? "" : " (approximate location)")
+        (placed[n].exact
+          ? ""
+          : LOCATED && LOCATED.invented
+            ? " (INVENTED POSITION — not published)"
+            : " (approximate location)")
       );
       markers.current.push(
         new window.mapboxgl.Marker({ element: el })
@@ -2602,7 +2746,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           .addTo(map.current)
       );
     });
-  }, [placed, ready, style]);
+  }, [placed, ready, style, hidden]);
 
   if (ready === "no-token") {
     return (
@@ -2620,6 +2764,31 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       {/* Over the map, under the markers, and deaf to the pointer — the map
           below still pans and zooms as if nothing were on top of it. */}
       <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
+
+      {LAYERS.length > 0 && (
+        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, bottom: 4, display: "flex", flexDirection: "column", gap: 2, left: 4, padding: "5px 6px", position: "absolute", zIndex: 3 }}>
+          {LAYERS.map((L) => (
+            <button
+              key={L.id}
+              type="button"
+              onClick={() => setHidden((h) => ({ ...h, [L.id]: !h[L.id] }))}
+              title={shown(L.id) ? "Hide this layer" : "Show this layer"}
+              style={{
+                alignItems: "center", background: "none", border: "none", cursor: "pointer",
+                display: "flex", font: "inherit", gap: 6, padding: "1px 2px", textAlign: "left",
+                // Hidden reads as off, not as gone: the row stays put, so the
+                // way back is exactly where the way out was.
+                opacity: shown(L.id) ? 1 : 0.4,
+              }}
+            >
+              <span style={{ background: shown(L.id) ? L.swatch : "transparent", border: "1px solid " + L.swatch, borderRadius: 2, flexShrink: 0, height: 8, width: 8 }} />
+              <span style={{ color: "var(--ink)", fontSize: 10.5, whiteSpace: "nowrap" }}>{L.label}</span>
+              {L.unit ? <span style={{ color: "var(--faint)", fontSize: 9.5 }}>{L.unit}</span> : null}
+              {L.note ? <span style={{ color: "var(--faint)", fontSize: 9, fontStyle: "italic" }}>{L.note}</span> : null}
+            </button>
+          ))}
+        </div>
+      )}
 
       {probe ? (
         <div
@@ -2706,10 +2875,21 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           "approximate" across a map of published coordinates trains people to
           ignore the word on the maps where it matters.
         */
-        (locatedRef || !nodes.length) && !anyMock
-          ? ""
-          : `<p style={{ background: "var(--bg)", borderRadius: 4, bottom: 4, color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px", position: "absolute", right: 4, zIndex: 2 }}>
-        ${anyMock ? "Mock field · approximate positions" : "Approximate zone centroids"}
+        /*
+          Three states, three different claims. Invented positions get the loud
+          dashed-blue MOCK treatment the catalogue uses everywhere else, because
+          "these are not where this says they are" is not something a reader
+          should have to infer from the word "approximate". A centroid is
+          approximate. A published coordinate needs no caveat at all.
+        */
+        invented || anyMock
+          ? `<p style={{ background: "var(--color-info-dim)", border: "1px dashed var(--color-info-line)", borderRadius: 4, bottom: 22, color: "var(--color-info)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".08em", margin: 0, padding: "2px 6px", position: "absolute", right: 4, textTransform: "uppercase", zIndex: 2 }}>
+        ${anyMock ? "Mock data · invented positions" : "Mock positions · not published"}
+      </p>`
+          : locatedRef || !nodes.length
+            ? ""
+            : `<p style={{ background: "var(--bg)", borderRadius: 4, bottom: 4, color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px", position: "absolute", right: 4, zIndex: 2 }}>
+        Approximate zone centroids
       </p>`
       }
     </Section>
