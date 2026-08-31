@@ -280,28 +280,6 @@ body {
   animation: dr-rise 0.28s ease-out both;
 }
 
-/*
- * The shake a card does while it is being carried.
- *
- * A degree of rotation and a pixel of travel, running only on the card the
- * cursor has hold of. It used to idle on every card in the tray, to say they
- * were draggable — but a shelf that fidgets at rest is motion with nothing to
- * report, and it never stopped. During a drag it means exactly one thing: this
- * is the one you picked up.
- */
-@keyframes dr-jiggle {
-  0%,
-  100% {
-    transform: rotate(-1.1deg) translateY(-1px);
-  }
-  50% {
-    transform: rotate(1.1deg) translateY(0);
-  }
-}
-.dr-jiggle {
-  animation: dr-jiggle 0.34s ease-in-out infinite;
-}
-
 /* A drop target, while something is over the canvas. */
 @keyframes dr-seam {
   0%,
@@ -317,7 +295,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dr-jiggle,
   .dr-seam {
     animation: none;
   }

@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cx } from "@/components/ui";
-import { DataChip, MetaBadges } from "@/components/workspace/DataChip";
+import {
+  DataChip,
+  MetaBadges,
+  SelectionStrip,
+} from "@/components/workspace/DataChip";
 import {
   SCHEMAS,
   type DataRef,
@@ -16,7 +20,6 @@ import {
   entityRef,
 } from "@/lib/workspace/catalog";
 import { entityNote } from "@/lib/workspace/entityNotes";
-import { AskData } from "@/components/workspace/AskData";
 
 /**
  * The data explorer: two levels, one panel, no modal.
@@ -41,21 +44,26 @@ const ALL = "All";
 export function DataExplorer({
   selected,
   onToggle,
+  onClear,
+  onNext,
 }: {
   selected: DataRef[];
   onToggle: (ref: DataRef) => void;
+  /** Drop the whole selection. */
+  onClear?: () => void;
+  /**
+   * On to choosing a component.
+   *
+   * The panel used to carry this in a bar of its own under the explorer, which
+   * put the count in two places and the selection in two places. It is one
+   * control at the end of the line that already says what is selected.
+   */
+  onNext?: () => void;
 }) {
   const all = useMemo(() => domains(), []);
   const [domain, setDomain] = useState(all[0] ?? "Energy");
   const [category, setCategory] = useState(ALL);
   const [query, setQuery] = useState("");
-  /**
-   * Two ways to look for data, one bar. Search filters what is on screen;
-   * AI hands the question to the data guide, which looks inside the schemas
-   * and answers with selectable chips. A toggle rather than two boxes,
-   * because they are the same intent at two depths.
-   */
-  const [mode, setMode] = useState<"search" | "ai">("search");
   /** The set being read at level two, or null for the catalogue. */
   const [drill, setDrill] = useState<Schema | null>(null);
 
@@ -100,66 +108,68 @@ export function DataExplorer({
           chosen={chosen}
           onToggle={onToggle}
           onBack={() => setDrill(null)}
+          strip={
+            <SelectionStrip
+              selected={selected}
+              onRemove={onToggle}
+              onClear={onClear}
+              label="Selected"
+              className="border-b border-line px-2.5 py-1.5"
+            />
+          }
         />
-        <p className="border-t border-line px-3 py-1.5 font-mono text-[9.5px] text-faint">
-          {selected.length > 0
-            ? `${selected.length} selected · picks from other sets are kept`
-            : "Pick entities, then drag a component onto the page"}
-        </p>
+        <Footer
+          count={selected.length}
+          hint={
+            selected.length > 0
+              ? "picks from other sets are kept"
+              : "Pick entities to build with"
+          }
+          onNext={onNext}
+        />
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
-      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
-        <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
-          Data
-        </span>
-
-        <select
-          value={domain}
-          onChange={(e) => {
-            setDomain(e.target.value);
-            setCategory(ALL);
-          }}
-          aria-label="Domain"
-          className="ml-auto rounded-md border border-line bg-surface-2 px-2 py-1 text-[12px] text-ink outline-none focus:border-line-strong"
-        >
-          {all.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
-      </div>
-
+      {/*
+        No title row. It held the word "Data" and the chips, and the chips were
+        wrong there — four of them wrapped their cadence and price into a block
+        taller than the catalogue underneath. With them moved below the filters
+        the row had one word left in it, which is not worth a band of a panel
+        whose scarcest resource is height. The stage is named by the step you
+        came through and by the back button that leaves it.
+      */}
       <div className="flex flex-col gap-2 border-b border-line px-2.5 py-2">
+        {/*
+          Search and domain on one line: both narrow what is on screen, and the
+          domain is the coarser of the two — the subject you work in, chosen
+          once, so it stays a select rather than becoming another chip.
+        */}
         <div className="flex items-stretch gap-1.5">
-          <div className="flex shrink-0 rounded-md border border-line bg-surface-2 p-0.5">
-            {(["search", "ai"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={cx(
-                  "rounded px-2 text-[11px] transition-colors",
-                  mode === m ? "bg-surface-3 text-ink" : "text-faint hover:text-ink",
-                )}
-              >
-                {m === "search" ? "Search" : "AI"}
-              </button>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search data…"
+            className="w-full min-w-0 rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
+          />
+          <select
+            value={domain}
+            onChange={(e) => {
+              setDomain(e.target.value);
+              setCategory(ALL);
+            }}
+            aria-label="Domain"
+            className="shrink-0 rounded-md border border-line bg-surface-2 px-2 py-1 text-[12px] text-ink outline-none focus:border-line-strong"
+          >
+            {all.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
             ))}
-          </div>
-          {mode === "search" && (
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search data…"
-              className="w-full rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
-            />
-          )}
+          </select>
         </div>
-        {mode === "ai" && <AskData chosen={chosen} onPick={onToggle} />}
         <div className="dr-scroll flex gap-1 overflow-x-auto">
           {cats.map((c) => (
             <button
@@ -177,6 +187,15 @@ export function DataExplorer({
           ))}
         </div>
       </div>
+
+      {/* Narrow, pick, see what you have — in that order, all above the list. */}
+      <SelectionStrip
+        selected={selected}
+        onRemove={onToggle}
+        onClear={onClear}
+        label="Selected"
+        className="border-b border-line px-2.5 py-1.5"
+      />
 
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
         {shown === 0 ? (
@@ -219,11 +238,55 @@ export function DataExplorer({
         )}
       </div>
 
-      <p className="border-t border-line px-3 py-1.5 font-mono text-[9.5px] text-faint">
-        {selected.length > 0
-          ? `${selected.length} selected · click again to remove`
-          : "Click a box to select it, then drag a component onto the page"}
+      <Footer
+        count={selected.length}
+        hint={
+          selected.length > 0
+            ? "click again to remove"
+            : "Click a box to select it"
+        }
+        onNext={onNext}
+      />
+    </div>
+  );
+}
+
+/**
+ * The line at the foot of either level: what is selected, and the way on.
+ *
+ * The button lives here rather than in a bar below the panel because this line
+ * already says how many are selected, and the answer to "now what" belongs
+ * beside the thing it is counting. It is accent-filled: quiet furniture is
+ * right for the count and wrong for the only forward step on the screen.
+ */
+function Footer({
+  count,
+  hint,
+  onNext,
+}: {
+  count: number;
+  hint: string;
+  onNext?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 border-t border-line px-3 py-1.5">
+      <p className="min-w-0 truncate font-mono text-[9.5px] text-faint">
+        {count > 0 ? `${count} selected · ${hint}` : hint}
       </p>
+      {onNext && (
+        <button
+          onClick={onNext}
+          disabled={count === 0}
+          className={cx(
+            "ml-auto shrink-0 rounded-md border px-2.5 py-1 text-[12px] transition-colors",
+            count === 0
+              ? "border-line text-faint"
+              : "border-accent-line bg-accent-dim text-accent hover:brightness-110",
+          )}
+        >
+          Next ›
+        </button>
+      )}
     </div>
   );
 }
@@ -274,7 +337,7 @@ function DrillRow({
         </span>
       </span>
       <span className="truncate font-mono text-[9.5px] text-faint">
-        {entityCountLabel(schema)} · choose which
+        {entityCountLabel(schema)}
       </span>
       <MetaBadges cadence={schema.cadence.label} tokens={schema.tokens} />
     </button>
@@ -285,6 +348,30 @@ interface EntityRow {
   node: string;
   nodeType: string | null;
   observations: number;
+  /** ISO timestamps of the oldest and newest reading held for this entity. */
+  firstSeen?: string | null;
+  lastSeen?: string | null;
+}
+
+/**
+ * How long ago the last reading landed, in as few characters as it takes.
+ *
+ * The count says how much history there is; this says whether it is still
+ * arriving, which is the other half of "can I build on this" and the half a
+ * row of numbers never showed. A stream that stopped three days ago looks
+ * exactly like a healthy one until somebody says so.
+ */
+function freshness(iso?: string | null): { short: string; stale: boolean } | null {
+  if (!iso) return null;
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return null;
+  const mins = Math.round((Date.now() - at) / 60000);
+  if (mins < 2) return { short: "just now", stale: false };
+  if (mins < 60) return { short: `${mins}m ago`, stale: false };
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return { short: `${hours}h ago`, stale: hours >= 6 };
+  const days = Math.round(hours / 24);
+  return { short: `${days}d ago`, stale: true };
 }
 
 /**
@@ -302,11 +389,14 @@ function SetView({
   chosen,
   onToggle,
   onBack,
+  strip,
 }: {
   schema: Schema;
   chosen: Set<string>;
   onToggle: (ref: DataRef) => void;
   onBack: () => void;
+  /** The selection, in the same place it sits one level up. */
+  strip?: ReactNode;
 }) {
   const [q, setQ] = useState("");
   const [facet, setFacet] = useState<string | null>(null);
@@ -314,24 +404,38 @@ function SetView({
   // get a radio, because "wind actual" and "wind forecast" are different picks.
   const [varKey, setVarKey] = useState(schema.variables[0]?.key);
   const [facets, setFacets] = useState<Record<string, number> | null>(null);
+  /** The tier in view, unfiltered. Typing never refetches this. */
   const [rows, setRows] = useState<EntityRow[]>([]);
-  const [busy, setBusy] = useState(false);
   const [opened, setOpened] = useState(false);
   /** A fetch has actually delivered rows for the current view — before that,
    *  an empty list means "still looking", not "nothing matches". */
   const [settled, setSettled] = useState(false);
+  /**
+   * Matches from outside the tier in view, and the query they answer.
+   *
+   * The entity endpoint aggregates observation counts per node and takes two
+   * to three seconds on a stream of a thousand — per keystroke, when the
+   * search box drove it. So it no longer does: typing filters the rows already
+   * in hand, instantly, and the slow query only runs to find what is *not* in
+   * hand. Those arrive underneath, labelled, without disturbing what was
+   * already on screen.
+   */
+  const [far, setFar] = useState<{ q: string; rows: EntityRow[] } | null>(null);
+  const [farBusy, setFarBusy] = useState(false);
 
+  // The tier: fetched when the set opens and when a tier chip is pressed, and
+  // at no other time.
   useEffect(() => {
-    const t = setTimeout(async () => {
-      setBusy(true);
+    let live = true;
+    (async () => {
       try {
         const url = new URL("/api/workspace/entities", window.location.origin);
         url.searchParams.set("dataset", schema.dataset!);
-        if (q.trim()) url.searchParams.set("q", q.trim());
-        if (facet && !q.trim()) url.searchParams.set("node_type", facet);
+        if (facet) url.searchParams.set("node_type", facet);
         url.searchParams.set("limit", "2000");
         const res = await fetch(url);
         const json = await res.json();
+        if (!live) return;
         if (!res.ok) {
           setRows([]);
           setSettled(true);
@@ -356,14 +460,72 @@ function SetView({
         setRows(json.nodes ?? []);
         setSettled(true);
       } catch {
+        if (!live) return;
         setRows([]);
         setSettled(true);
-      } finally {
-        setBusy(false);
       }
-    }, 200);
-    return () => clearTimeout(t);
-  }, [schema.dataset, q, facet, opened]);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [schema.dataset, facet, opened]);
+
+  /*
+    The rest of the stream, for a query the tier cannot answer on its own. It
+    is deliberately not what you are shown first: it lands when it lands, and
+    nothing waits for it.
+  */
+  const beyond = Math.max(0, schema.entities.count - rows.length);
+  useEffect(() => {
+    const query = q.trim();
+    if (!query || beyond === 0) {
+      setFar(null);
+      setFarBusy(false);
+      return;
+    }
+    let live = true;
+    setFarBusy(true);
+    const t = setTimeout(async () => {
+      try {
+        const url = new URL("/api/workspace/entities", window.location.origin);
+        url.searchParams.set("dataset", schema.dataset!);
+        url.searchParams.set("q", query);
+        url.searchParams.set("limit", "2000");
+        const res = await fetch(url);
+        const json = await res.json();
+        if (!live) return;
+        setFar({ q: query, rows: res.ok ? (json.nodes ?? []) : [] });
+      } catch {
+        if (live) setFar({ q: query, rows: [] });
+      } finally {
+        if (live) setFarBusy(false);
+      }
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [schema.dataset, q, beyond]);
+
+  /*
+    The filter itself: over the rows in hand, on every keystroke, no network.
+    It reads the note as well as the name, so "austin" finds the node whose
+    one-liner says Austin even though its id does not.
+  */
+  const needle = q.trim().toLowerCase();
+  const here = needle
+    ? rows.filter(
+        (r) =>
+          r.node.toLowerCase().includes(needle) ||
+          (r.nodeType ?? "").toLowerCase().includes(needle) ||
+          (entityNote(r.node) ?? "").toLowerCase().includes(needle),
+      )
+    : rows;
+  const seen = new Set(here.map((r) => r.node));
+  const elsewhere =
+    needle && far?.q === q.trim()
+      ? far.rows.filter((r) => !seen.has(r.node))
+      : [];
 
   return (
     <>
@@ -428,53 +590,128 @@ function SetView({
         )}
       </div>
 
+      {/* Under the filters, exactly where it sits one level up. */}
+      {strip}
+
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
-        {rows.length === 0 && !settled ? (
-          <p className="px-1 py-1.5 text-[11.5px] text-faint">Searching…</p>
-        ) : rows.length === 0 ? (
-          <p className="px-1 py-1.5 text-[11.5px] text-faint">
-            Nothing matches “{q}”.
-          </p>
+        {/* Only the first load can be a wait; after it, typing never is. */}
+        {!settled && rows.length === 0 ? (
+          <p className="px-1 py-1.5 text-[11.5px] text-faint">Loading…</p>
         ) : (
-          rows.map((row) => {
-            const ref = entityRef(schema, row.node, varKey);
-            const picked = chosen.has(`${ref.snippet}::${ref.label}`);
-            const note = entityNote(row.node);
-            return (
-              <button
+          <>
+            {here.length === 0 && elsewhere.length === 0 && !farBusy && (
+              <p className="px-1 py-1.5 text-[11.5px] text-faint">
+                Nothing matches “{q}”.
+              </p>
+            )}
+
+            {here.map((row) => (
+              <EntityButton
                 key={row.node}
-                onClick={() => onToggle(ref)}
-                className={cx(
-                  "flex w-full flex-col gap-0.5 rounded px-1.5 py-1.5 text-left transition-colors",
-                  picked ? "bg-accent-dim" : "hover:bg-surface-2",
-                )}
-              >
-                <span className="flex w-full items-baseline gap-2">
-                  <span
-                    className={cx(
-                      "font-mono text-[12px]",
-                      picked ? "text-accent" : "text-ink",
-                    )}
-                  >
-                    {row.node}
-                  </span>
-                  {row.nodeType && (
-                    <span className="text-[10px] text-faint">{row.nodeType}</span>
-                  )}
-                  <span className="ml-auto font-mono text-[10px] text-faint">
-                    {row.observations.toLocaleString()} obs
-                  </span>
-                </span>
-                {note && (
-                  <span className="text-[11px] leading-snug text-muted">
-                    {note}
-                  </span>
-                )}
-              </button>
-            );
-          })
+                schema={schema}
+                row={row}
+                varKey={varKey}
+                chosen={chosen}
+                onToggle={onToggle}
+              />
+            ))}
+
+            {/*
+              What the tier in view does not hold. Below the fold rather than
+              mixed in, because these arrived a beat later and moving what
+              somebody is already reading is worse than labelling the rest.
+            */}
+            {elsewhere.length > 0 && (
+              <>
+                <p className="mt-2 px-1 pb-1 font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+                  Elsewhere in this stream
+                </p>
+                {elsewhere.map((row) => (
+                  <EntityButton
+                    key={row.node}
+                    schema={schema}
+                    row={row}
+                    varKey={varKey}
+                    chosen={chosen}
+                    onToggle={onToggle}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* Said quietly, at the end, while the slow half is still out. */}
+            {farBusy && needle && (
+              <p className="px-1 py-1.5 font-mono text-[10px] text-faint">
+                looking through the other {beyond.toLocaleString()}…
+              </p>
+            )}
+          </>
         )}
       </div>
     </>
+  );
+}
+
+/** One entity in the set view — the same row wherever it was found. */
+function EntityButton({
+  schema,
+  row,
+  varKey,
+  chosen,
+  onToggle,
+}: {
+  schema: Schema;
+  row: EntityRow;
+  varKey: string;
+  chosen: Set<string>;
+  onToggle: (ref: DataRef) => void;
+}) {
+  const ref = entityRef(schema, row.node, varKey);
+  const picked = chosen.has(`${ref.snippet}::${ref.label}`);
+  const note = entityNote(row.node);
+  const fresh = freshness(row.lastSeen);
+  return (
+    <button
+      onClick={() => onToggle(ref)}
+      className={cx(
+        "flex w-full flex-col gap-0.5 rounded px-1.5 py-1.5 text-left transition-colors",
+        picked ? "bg-accent-dim" : "hover:bg-surface-2",
+      )}
+    >
+      <span className="flex w-full items-baseline gap-2">
+        <span
+          className={cx("font-mono text-[12px]", picked ? "text-accent" : "text-ink")}
+        >
+          {row.node}
+        </span>
+        {row.nodeType && <span className="text-[10px] text-faint">{row.nodeType}</span>}
+      </span>
+      {note && <span className="text-[11px] leading-snug text-muted">{note}</span>}
+      {/*
+        What you are actually being offered: how much of it there is, and
+        whether it is still coming. "obs" said neither — it was a count with no
+        noun and no time attached to it.
+      */}
+      <span
+        title={
+          row.firstSeen
+            ? `${row.observations.toLocaleString()} readings from ${new Date(
+                row.firstSeen,
+              ).toLocaleString()} to ${new Date(row.lastSeen ?? row.firstSeen).toLocaleString()}`
+            : undefined
+        }
+        className="flex w-full items-baseline gap-1.5 font-mono text-[9.5px] text-faint"
+      >
+        <span>{row.observations.toLocaleString()} readings</span>
+        {fresh && (
+          <>
+            <span className="text-line-strong">·</span>
+            <span className={cx(fresh.stale && "text-warn")}>
+              last collected {fresh.short}
+            </span>
+          </>
+        )}
+      </span>
+    </button>
   );
 }

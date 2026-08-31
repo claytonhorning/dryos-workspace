@@ -9,6 +9,7 @@ import type { AppSummary } from "@/lib/workspace/types";
 import { cx } from "@/components/ui";
 import { useSelectOnMount } from "@/lib/useSelectOnMount";
 import { AccountButton } from "./AccountButton";
+import { UsageDock } from "@/components/workspace/UsageDock";
 
 /**
  * The navbar, once you are inside a workspace.
@@ -297,6 +298,15 @@ export function SpaceNav({
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-2.5">
+          {/*
+            What the workspace is spending, in the chrome rather than floating
+            over the screen. It used to sit bottom-left on the canvas, which put
+            an object on a surface whose whole point is that it carries nothing
+            but the dashboard — and left it competing with the sentence box for
+            the same corner. Up here it is one more number in a bar that is
+            already there in both modes.
+          */}
+          <UsageDock spaceId={spaceId} placement="nav" />
           {/*
             Edit lives in the chrome, not on the canvas.
             The bar is already here in both modes, so this costs the screen

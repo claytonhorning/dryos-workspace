@@ -1,6 +1,7 @@
 import { type DataRef, grainSeconds, schemaFor } from "./catalog";
 import { ERCOT_POINTS, ERCOT_VIEW, hasGeography } from "./geo";
 import { schemaById } from "./catalog";
+import { SERIES_PALETTE } from "./palette";
 
 /**
  * Typed components.
@@ -20,7 +21,15 @@ import { schemaById } from "./catalog";
  * needs. `compose.ts` stitches them into a file.
  */
 
-export type ComponentKind = "chart" | "bar" | "heatmap" | "ticker" | "table" | "map";
+export type ComponentKind =
+  | "chart"
+  | "scatter"
+  | "distribution"
+  | "bar"
+  | "heatmap"
+  | "ticker"
+  | "table"
+  | "map";
 
 export interface ComponentSpec {
   kind: ComponentKind;
@@ -102,12 +111,21 @@ export interface ComponentDef {
   ) => Emitted;
 }
 
-/** Chosen values on top of the defaults, so a generator can read `o.key` flatly. */
+/**
+ * Chosen values on top of the defaults, so a generator can read `o.key` flatly.
+ *
+ * Anything not declared as an `Option` is carried through rather than dropped.
+ * Per-series colour and line style live in `series` as one JSON string: they
+ * are settings, but their choices come from the selection rather than from the
+ * shape, so they are not a list this can render a select from — and a filter
+ * that only kept declared keys silently threw them away between the panel and
+ * the generator.
+ */
 export function withDefaults(
   def: ComponentDef,
   options?: Record<string, string>,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
+  const out: Record<string, string> = { ...(options ?? {}) };
   for (const o of def.options) out[o.key] = options?.[o.key] ?? o.fallback;
   return out;
 }
@@ -204,24 +222,123 @@ function series(refs: DataRef[]) {
 }
 
 /*
-  The eight series slots the frame's palette defines (`runtime.ts`), in their
-  fixed order. Fixed is the point: a colour follows the entity it was assigned
+  The eight series slots, as the variable names the frame defines them under.
+  One length, one order, written from `palette.ts` so the panel that offers a
+  colour and the generator that emits one can never disagree about how many
+  there are. Fixed is the point: a colour follows the entity it was assigned
   to at selection time, never its rank, and the sequence itself is what was
   validated for colour-vision safety. Never cycle past the end — `accepts`
   caps every shape at eight or fewer first. (This replaces the old four-slot
   list whose fourth entry was `var(--stale)`, a token no palette defined — the
   fourth series has been drawing in black since the day it shipped.)
 */
-const PALETTE = [
-  "var(--s1)",
-  "var(--s2)",
-  "var(--s3)",
-  "var(--s4)",
-  "var(--s5)",
-  "var(--s6)",
-  "var(--s7)",
-  "var(--s8)",
+const PALETTE = SERIES_PALETTE.dark.map((_, i) => `var(--s${i + 1})`);
+
+/**
+ * How a line is drawn, and the dash it means.
+ *
+ * Three, because they are the three a reader can tell apart at 1.6px on a
+ * tile. Style is not decoration here: it is the second channel after colour,
+ * so a dashed line stays a dashed line when the chart is printed, screenshotted
+ * into a deck, or read by someone who cannot separate two of the hues.
+ */
+export const SERIES_LINES = [
+  { value: "solid", label: "Solid", dash: "" },
+  { value: "dashed", label: "Dashed", dash: "7 5" },
+  { value: "dotted", label: "Dotted", dash: "1 5" },
 ];
+
+/**
+ * One series' overrides: `c` a colour, `d` a line style.
+ *
+ * A colour is either a palette slot — a number, which follows the theme, since
+ * each mode has its own stepping — or a literal `#rrggbb` somebody picked, which
+ * does not. That is the trade for arbitrary colour and it is the caller's to
+ * make; the panel says so where it is made.
+ */
+export interface SeriesStyle {
+  c?: number | string;
+  d?: string;
+}
+
+/**
+ * A literal colour, if that is what this is.
+ *
+ * Six-digit hex and nothing else. It is not a validation nicety: the value is
+ * interpolated straight into generated TSX as a string literal, so anything
+ * that reaches `paint` unchecked would be writing code. Everything that fails
+ * here falls back to a palette slot.
+ */
+export function seriesHex(c: number | string | undefined): string | null {
+  return typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) ? c : null;
+}
+
+/** The overrides in `options.series`, which is JSON and may be anything. */
+export function readSeries(
+  options?: Record<string, string>,
+): Record<string, SeriesStyle> {
+  try {
+    const v = JSON.parse(options?.series ?? "{}");
+    return v && typeof v === "object" ? (v as Record<string, SeriesStyle>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The series a shape will draw, as the panel needs to list them.
+ *
+ * `null` for a fan-out — a lone stream-level reference means *all* of it, and
+ * which entities that is comes from the rows at runtime. Nothing here can name
+ * them, so the panel says that rather than listing nothing.
+ */
+export function seriesSlots(
+  refs: DataRef[],
+): { key: string; label: string }[] | null {
+  if (refs.length === 0) return [];
+  if (refs.length === 1 && fanoutOf(refs[0])) return null;
+  return series(refs).map((x) => ({ key: x.key, label: x.label }));
+}
+
+/** Which per-series controls a shape can honour. */
+export function seriesControls(kind: ComponentKind): {
+  color: boolean;
+  line: boolean;
+} {
+  if (kind === "chart" || kind === "distribution") {
+    return { color: true, line: true };
+  }
+  // A bar is a colour and a length, and a scatter is a cloud of dots; neither
+  // has a stroke to dash.
+  if (kind === "bar" || kind === "scatter") return { color: true, line: false };
+  return { color: false, line: false };
+}
+
+/**
+ * The colour and dash one series draws with.
+ *
+ * The default is still the slot the series' position earns, so a chart nobody
+ * has touched looks exactly as it did — an override only exists where somebody
+ * made one.
+ */
+function paint(
+  styles: Record<string, SeriesStyle>,
+  key: string,
+  n: number,
+): { color: string; dash: string } {
+  const pick = styles[key] ?? {};
+  const slot = typeof pick.c === "number" ? pick.c : n;
+  const line = SERIES_LINES.find((l) => l.value === pick.d) ?? SERIES_LINES[0];
+  return {
+    color: seriesHex(pick.c) ?? PALETTE[slot % PALETTE.length],
+    dash: line.dash,
+  };
+}
+
+/** `strokeDasharray={...}` when there is a dash to draw, nothing when there is not. */
+function dashProp(dash: string): string {
+  return dash ? `strokeDasharray="${dash}" ` : "";
+}
 
 /** One unit across the selection, or null when they mix. */
 function uniformUnit(refs: DataRef[]): string | null {
@@ -357,6 +474,9 @@ const chart: ComponentDef = {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
     const name = `Chart${i}`;
+    // Whatever the panel painted. A fan-out has none of this: its series are
+    // discovered from the rows, so their colours are assigned in there.
+    const styles = readSeries(o);
     const stacked = o.shape === "stacked";
     const area = o.shape === "area";
     const Wrap = stacked || area ? "AreaChart" : "LineChart";
@@ -455,7 +575,10 @@ ${
   stacked
     ? `
   const SERIES = ${JSON.stringify(
-    s.map((x, n) => ({ key: x.key, label: x.label, color: PALETTE[n % PALETTE.length] })),
+    // A stack has no stroke of its own — the hairline between segments is the
+    // surface colour — so a stacked series takes the colour and ignores the
+    // line style rather than drawing a dash nobody asked for.
+    s.map((x, n) => ({ key: x.key, label: x.label, color: paint(styles, x.key, n).color })),
   )};`
     : ""
 }`;
@@ -486,12 +609,17 @@ ${
             <${area ? "Area" : "Line"} key={sr.key} type="monotone" dataKey={sr.key} name={sr.label} stroke={sr.color} ${area ? "fill={sr.color} fillOpacity={0.12} " : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />
           ))}`
         : spread
-          ? `<${area ? "Area" : "Line"} type="monotone" dataKey="sd" name=${JSON.stringify(title)} stroke="${PALETTE[0]}" ${area ? `fill="${PALETTE[0]}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`
+          ? // One line, drawn as the first series was told to draw: the spread
+            // is a question about A against B, and A is the one it follows.
+            (() => {
+              const p = paint(styles, "s0", 0);
+              return `<${area ? "Area" : "Line"} type="monotone" dataKey="sd" name=${JSON.stringify(title)} stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
+            })()
           : s
-            .map(
-              (x, n) =>
-                `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${PALETTE[n % PALETTE.length]}" ${area ? `fill="${PALETTE[n % PALETTE.length]}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`,
-            )
+            .map((x, n) => {
+              const p = paint(styles, x.key, n);
+              return `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
+            })
             .join("\n          ");
 
     return {
@@ -539,6 +667,391 @@ ${
     : "          "
 }${marks}
         </${Wrap}>
+      </ResponsiveContainer>
+      </div>
+    </Section>
+  );
+}`,
+    };
+  },
+};
+
+/**
+ * Two series against each other, with time as the thing that pairs them.
+ *
+ * The one question none of the other shapes can ask. Everything else here puts
+ * time on the x-axis and answers "what happened"; this answers "how do these
+ * two move together" — load against price, wind against price, day-ahead
+ * against real-time. It is the second chart any analyst reaches for and the
+ * first one they reach for when a line chart has already shown them a shape
+ * they cannot explain.
+ *
+ * The fit is the point of the tile, not decoration: a cloud of dots with no
+ * summary is an invitation to see whatever you came to see. `r` is stated in
+ * the header, so a weak relationship says so in a number rather than being
+ * argued about from the picture.
+ */
+const scatter: ComponentDef = {
+  kind: "scatter",
+  name: "Scatter",
+  blurb: "Two series against each other — how they move together.",
+  options: [
+    { key: "window", label: "Window", choices: WINDOWS, fallback: "-24h" },
+    {
+      key: "fit",
+      label: "Fit",
+      choices: [
+        { value: "linear", label: "Trend line" },
+        { value: "none", label: "None" },
+      ],
+      fallback: "linear",
+    },
+  ],
+  // Exactly two: an x and a y. A third series has no axis left to sit on, and
+  // one has nothing to be plotted against.
+  accepts: (refs) =>
+    refs.length === 2 && !fanoutOf(refs[0]) && !fanoutOf(refs[1])
+      ? { ok: true }
+      : {
+          ok: false,
+          why: "Pick exactly two series — the first is the x-axis, the second the y.",
+        },
+  // Beside anything else it is not a rejected scatter, it is the wrong question.
+  offered: (refs) => refs.length === 2,
+  emit(refs, i, o) {
+    const s = series(refs);
+    const anyMock = s.some((x) => x.mock);
+    const name = `Scatter${i}`;
+    const styles = readSeries(o);
+    const dot = paint(styles, "s1", 1).color;
+    const limit = o.window === "-7d" ? 2000 : 500;
+    const queries = s.map((x) => ({
+      dataset: x.dataset,
+      node: x.node,
+      start: o.window,
+      limit,
+    }));
+
+    return {
+      imports: [
+        "ScatterChart",
+        "Scatter",
+        "XAxis",
+        "YAxis",
+        "ZAxis",
+        "CartesianGrid",
+        "Tooltip",
+        "ResponsiveContainer",
+        ...(o.fit === "linear" ? ["ReferenceLine"] : []),
+      ],
+      code: `function ${name}({ w, h }) {
+  const { rows, error, loading } = useSeries(
+    ${JSON.stringify(queries, null, 2).replace(/\n/g, "\n    ")},
+    ${refreshMs(refs)},
+  );
+
+  /*
+    A point is one interval that both series reported. Intervals only one of
+    them covers are dropped rather than filled: a fabricated pair would be a
+    dot in the cloud that nothing measured.
+  */
+  const { points, fit, r } = React.useMemo(() => {
+    const by = new Map();
+    (rows[0] || []).forEach((row) => {
+      by.set(Date.parse(row.interval_start_utc), { x: row.${s[0].column} });
+    });
+    (rows[1] || []).forEach((row) => {
+      const at = by.get(Date.parse(row.interval_start_utc));
+      if (at) at.y = row.${s[1].column};
+    });
+    const points = [...by.entries()]
+      .map(([t, p]) => ({ t, x: p.x, y: p.y }))
+      .filter((p) => p.x != null && p.y != null);
+
+    const n = points.length;
+    if (n < 3) return { points, fit: null, r: null };
+    const sx = points.reduce((a, p) => a + p.x, 0);
+    const sy = points.reduce((a, p) => a + p.y, 0);
+    const sxx = points.reduce((a, p) => a + p.x * p.x, 0);
+    const syy = points.reduce((a, p) => a + p.y * p.y, 0);
+    const sxy = points.reduce((a, p) => a + p.x * p.y, 0);
+    const varX = n * sxx - sx * sx;
+    const varY = n * syy - sy * sy;
+    if (varX === 0 || varY === 0) return { points, fit: null, r: null };
+    const slope = (n * sxy - sx * sy) / varX;
+    const intercept = (sy - slope * sx) / n;
+    const xs = points.map((p) => p.x);
+    const lo = Math.min(...xs);
+    const hi = Math.max(...xs);
+    return {
+      points,
+      fit: [
+        { x: lo, y: slope * lo + intercept },
+        { x: hi, y: slope * hi + intercept },
+      ],
+      r: (n * sxy - sx * sy) / Math.sqrt(varX * varY),
+    };
+  }, [rows]);
+
+  function ScatterTip({ active, payload }) {
+    if (!active || !payload || !payload.length) return null;
+    const p = payload[0].payload;
+    return (
+      <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
+        <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
+          {new Date(p.t).toISOString().slice(11, 16)}Z
+        </div>
+        <div style={{ color: "var(--ink)" }}>${s[0].label.replace(/"/g, "")}: <strong>{Number(p.x).toFixed(2)}</strong> ${s[0].unit}</div>
+        <div style={{ color: "var(--ink)" }}>${s[1].label.replace(/"/g, "")}: <strong>{Number(p.y).toFixed(2)}</strong> ${s[1].unit}</div>
+      </div>
+    );
+  }
+
+  return (
+    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(`${s[1].label} vs ${s[0].label}`)} unit={r == null ? "" : "r " + r.toFixed(2)} loading={loading} error={error}>
+${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <ScatterChart margin={{ top: 8, right: 12, bottom: 4, left: -12 }}>
+          <CartesianGrid stroke="var(--line)" />
+          {/*
+            Numbers only, one decimal. A price axis at full precision reads
+            "26.355" five times across the bottom, and repeating the unit on
+            every tick spends the width the cloud needs — the tooltip carries
+            both, and the header carries the pair being compared.
+          */}
+          <XAxis
+            type="number"
+            dataKey="x"
+            name=${JSON.stringify(s[0].label)}
+            domain={["dataMin", "dataMax"]}
+            tickFormatter={axisNum}
+            tick={{ fill: "var(--faint)", fontSize: 11 }}
+            stroke="var(--line)"
+            tickLine={false}
+          />
+          <YAxis
+            type="number"
+            dataKey="y"
+            name=${JSON.stringify(s[1].label)}
+            domain={["dataMin", "dataMax"]}
+            tickFormatter={axisNum}
+            tick={{ fill: "var(--faint)", fontSize: 11 }}
+            stroke="var(--line)"
+            tickLine={false}
+            width={46}
+          />
+          <ZAxis range={[16, 16]} />
+          <Tooltip content={<ScatterTip />} cursor={{ stroke: "var(--line-strong)", strokeDasharray: "3 3" }} />
+${
+  o.fit === "linear"
+    ? `          {fit && (
+            <ReferenceLine
+              segment={fit}
+              stroke="var(--line-strong)"
+              strokeWidth={1.4}
+              strokeDasharray="5 4"
+              ifOverflow="extendDomain"
+            />
+          )}
+`
+    : ""
+}          <Scatter data={points} fill="${dot}" fillOpacity={0.62} isAnimationActive={false} />
+        </ScatterChart>
+      </ResponsiveContainer>
+      </div>
+    </Section>
+  );
+}`,
+    };
+  },
+};
+
+/**
+ * How often, not when.
+ *
+ * A line chart answers "what did the price do"; neither it nor a heatmap
+ * answers "how often is it above $100", which is the question a hedge, a
+ * battery dispatch or a budget is actually built on. Two views of the same
+ * arithmetic:
+ *
+ *   · **Duration curve** — every reading sorted highest to lowest against the
+ *     share of the window it holds. The standard artifact in power: read across
+ *     at a price to get the percentage of hours above it. Several series
+ *     overlay cleanly, because each is its own sorted line.
+ *   · **Histogram** — the same values in buckets. One series draws bars; more
+ *     than one draws frequency polygons, because overlaid bars at this size are
+ *     a wall nobody can read through.
+ */
+const distribution: ComponentDef = {
+  kind: "distribution",
+  name: "Distribution",
+  blurb: "How often a value occurs — duration curve or histogram.",
+  options: [
+    { key: "window", label: "Window", choices: WINDOWS, fallback: "-24h" },
+    {
+      key: "view",
+      label: "View",
+      choices: [
+        { value: "duration", label: "Duration curve" },
+        { value: "histogram", label: "Histogram" },
+      ],
+      fallback: "duration",
+    },
+    {
+      key: "bins",
+      label: "Buckets",
+      choices: [
+        { value: "20", label: "20" },
+        { value: "40", label: "40" },
+      ],
+      fallback: "20",
+    },
+  ],
+  // Bucketing mixes nothing: two units in one distribution is two distributions
+  // drawn on top of each other.
+  accepts: (refs) =>
+    refs.length === 0
+      ? { ok: false, why: "Pick a series." }
+      : refs.length > 4
+        ? { ok: false, why: "Four distributions is the most one axis reads." }
+        : refs.length === 1 && fanoutOf(refs[0])
+          ? {
+              ok: false,
+              why: "A whole stream fans out to more curves than this reads — pick the entities.",
+            }
+          : uniformUnit(refs) === null
+            ? { ok: false, why: "One unit at a time: these mix units." }
+            : { ok: true },
+  emit(refs, i, o) {
+    const s = series(refs);
+    const anyMock = s.some((x) => x.mock);
+    const name = `Distribution${i}`;
+    const styles = readSeries(o);
+    const duration = o.view !== "histogram";
+    // Bars only for a single series; anything more overlays as outlines.
+    const bars = !duration && s.length === 1;
+    const limit = o.window === "-7d" ? 2000 : 500;
+    const queries = s.map((x) => ({
+      dataset: x.dataset,
+      node: x.node,
+      start: o.window,
+      limit,
+    }));
+    const marks = s
+      .map((x, n) => {
+        const p = paint(styles, x.key, n);
+        return duration
+          ? `<Line type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${p.color}" ${dashProp(p.dash)}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`
+          : bars
+            ? `<Bar dataKey="${x.key}" name=${JSON.stringify(x.label)} fill="${p.color}" fillOpacity={0.8} isAnimationActive={false} />`
+            : `<Line type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${p.color}" ${dashProp(p.dash)}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
+      })
+      .join("\n          ");
+
+    const columns = JSON.stringify(s.map((x) => ({ key: x.key, column: x.column })));
+
+    return {
+      imports: [
+        duration || !bars ? "LineChart" : "BarChart",
+        duration || !bars ? "Line" : "Bar",
+        "XAxis",
+        "YAxis",
+        "CartesianGrid",
+        "Tooltip",
+        "ResponsiveContainer",
+        ...(s.length > 1 ? ["Legend"] : []),
+      ],
+      code: `function ${name}({ w, h }) {
+  const { rows, error, loading } = useSeries(
+    ${JSON.stringify(queries, null, 2).replace(/\n/g, "\n    ")},
+    ${refreshMs(refs)},
+  );
+
+  const SERIES = ${columns};
+  const DURATION = ${JSON.stringify(duration)};
+  const BINS = ${Number(o.bins) || 20};
+
+  const data = React.useMemo(() => {
+    const values = SERIES.map((sr, n) =>
+      (rows[n] || []).map((r) => r[sr.column]).filter((v) => v != null),
+    );
+    if (!values.some((v) => v.length)) return [];
+
+    if (DURATION) {
+      /*
+        One point per percentile, not per reading: a week of five-minute data
+        is two thousand dots that draw as a solid band. A hundred steps is the
+        same curve at the resolution anybody reads it at.
+      */
+      const sorted = values.map((v) => [...v].sort((a, b) => b - a));
+      const out = [];
+      for (let p = 0; p <= 100; p++) {
+        const at = { p };
+        sorted.forEach((v, n) => {
+          if (!v.length) return;
+          at[SERIES[n].key] = v[Math.min(v.length - 1, Math.round((p / 100) * (v.length - 1)))];
+        });
+        out.push(at);
+      }
+      return out;
+    }
+
+    // One set of buckets across every series, or the bars would not line up.
+    const all = values.flat();
+    const lo = Math.min(...all);
+    const hi = Math.max(...all);
+    const step = (hi - lo) / BINS || 1;
+    const out = [];
+    for (let b = 0; b < BINS; b++) {
+      const at = { bucket: lo + step * (b + 0.5) };
+      SERIES.forEach((sr) => (at[sr.key] = 0));
+      out.push(at);
+    }
+    values.forEach((v, n) => {
+      v.forEach((x) => {
+        const b = Math.min(BINS - 1, Math.max(0, Math.floor((x - lo) / step)));
+        out[b][SERIES[n].key] += 1;
+      });
+    });
+    return out;
+  }, [rows]);
+
+  function DistTip({ active, payload, label }) {
+    if (!active || !payload || !payload.length) return null;
+    return (
+      <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
+        <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
+          {DURATION ? label + "% of the window at or above" : "around " + Number(label).toFixed(1) + " ${s[0].unit}"}
+        </div>
+        {payload.map((p) => (
+          <div key={p.dataKey} style={{ color: "var(--ink)" }}>
+            <span style={{ color: p.stroke && p.stroke !== "var(--surface)" ? p.stroke : p.fill }}>■ </span>
+            {p.name}: <strong>{p.value == null ? "—" : Number(p.value).toFixed(DURATION ? 2 : 0)}</strong> {DURATION ? "${s[0].unit}" : "readings"}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(titleFor(refs, s))} unit=${JSON.stringify(duration ? s[0].unit : "readings")} loading={loading} error={error}>
+${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <${duration || !bars ? "LineChart" : "BarChart"} data={data} margin={{ top: 6, right: 10, bottom: 0, left: -12 }}>
+          <CartesianGrid stroke="var(--line)" vertical={false} />
+          <XAxis
+            dataKey=${duration ? '"p"' : '"bucket"'}
+            type="number"
+            domain={${duration ? "[0, 100]" : '["dataMin", "dataMax"]'}}
+            tickFormatter={${duration ? '(v) => v + "%"' : "(v) => Number(v).toFixed(0)"}}
+            tick={{ fill: "var(--faint)", fontSize: 11 }}
+            stroke="var(--line)"
+            tickLine={false}
+          />
+          <YAxis tickFormatter={axisNum} tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={46} />
+          <Tooltip content={<DistTip />} />
+${s.length > 1 ? '          <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />\n' : ""}          ${marks}
+        </${duration || !bars ? "LineChart" : "BarChart"}>
       </ResponsiveContainer>
       </div>
     </Section>
@@ -640,7 +1153,7 @@ const bar: ComponentDef = {
       name: x.node || x.label,
       full: x.label,
       column: x.column,
-      color: PALETTE[n % PALETTE.length],
+      color: paint(readSeries(o), x.key, n).color,
     })),
   )};
 
@@ -1799,7 +2312,16 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   },
 };
 
-export const COMPONENTS: ComponentDef[] = [chart, bar, heatmap, ticker, table, map];
+export const COMPONENTS: ComponentDef[] = [
+  chart,
+  scatter,
+  distribution,
+  bar,
+  heatmap,
+  ticker,
+  table,
+  map,
+];
 
 export function componentDef(kind: ComponentKind): ComponentDef | undefined {
   return COMPONENTS.find((c) => c.kind === kind);
@@ -1817,6 +2339,8 @@ export const DEFAULT_LAYOUT: Record<
   NonNullable<ComponentSpec["layout"]>
 > = {
   chart: { w: 6, h: 240 },
+  scatter: { w: 5, h: 260 },
+  distribution: { w: 5, h: 240 },
   bar: { w: 4, h: 220 },
   heatmap: { w: 6, h: 280 },
   ticker: { w: 3, h: 150 },

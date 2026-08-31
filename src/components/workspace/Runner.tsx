@@ -42,6 +42,9 @@ export function Runner({
   onRemove,
   onConfigure,
   flush,
+  fit,
+  editing,
+  selected,
 }: {
   appId: string;
   version: number;
@@ -83,6 +86,26 @@ export function Runner({
   onConfigure?: (index: number) => void;
   /** Edge to edge: no radius, no border. The screen is the whole view. */
   flush?: boolean;
+  /**
+   * Render the app at `w × h` and scale it to whatever room there is.
+   *
+   * Editing next to a panel leaves a narrower canvas than the screen will be
+   * launched at, and a narrower canvas is not the same dashboard: tiles are
+   * columns wide and pixels tall, so squeezing the width alone changes every
+   * proportion on the page. The frame is laid out at the launched size instead
+   * and shrunk on the way to the eye — same aspect ratio, same wrap, same
+   * everything, smaller. Absent, the frame simply fills its shell.
+   */
+  fit?: { w: number; h: number; scale: number } | null;
+  /**
+   * Whether the page is being edited, and which tile the panel currently has
+   * open. Both belong to the host — the panel is out here — and the frame needs
+   * them to know that a tile is clickable and which one is spoken for. Sent the
+   * way the theme is: a message, not a URL, so switching modes does not give the
+   * frame a new address and reload the dashboard underneath the cursor.
+   */
+  editing?: boolean;
+  selected?: number | null;
 }) {
   /** The visible frame — drops, theme pushes and drag messages address it. */
   const frame = useRef<HTMLIFrameElement | null>(null);
@@ -104,6 +127,16 @@ export function Runner({
   useEffect(() => {
     frame.current?.contentWindow?.postMessage({ __dryos: "theme", value: theme }, "*");
   }, [theme, live]);
+
+  // Same story for the mode: the frame cannot see the panel, so it is told
+  // whether one is open and which tile it is showing. `live` is in the deps
+  // because a new revision is a new document that has heard none of this.
+  useEffect(() => {
+    frame.current?.contentWindow?.postMessage(
+      { __dryos: "mode", edit: Boolean(editing), selected },
+      "*",
+    );
+  }, [editing, selected, live]);
 
   const answer = useCallback(
     async (win: Window, id: number, op: string, payload: unknown) => {
@@ -234,6 +267,12 @@ export function Runner({
                 { __dryos: "theme", value: theme },
                 "*",
               );
+              // A frame that has just booted knows neither of these, and the
+              // effects above fired before it existed.
+              e.currentTarget.contentWindow?.postMessage(
+                { __dryos: "mode", edit: Boolean(editing), selected },
+                "*",
+              );
               // The parser-blocking script has run: the new revision is
               // rendering. Now — and only now — it takes the screen. Both
               // states move together, or one render sees two frames wearing
@@ -245,9 +284,24 @@ export function Runner({
             }}
             sandbox="allow-scripts"
             className={cx(
-              "absolute inset-0 h-full w-full border-0",
+              "absolute top-0 left-0 border-0",
+              fit ? "origin-top-left" : "inset-0 h-full w-full",
               visible ? "opacity-100" : "pointer-events-none opacity-0",
             )}
+            // Laid out at the launched size, drawn at the size there is room
+            // for. Pointer events inside a transformed frame are mapped back by
+            // the browser, so dragging and resizing tiles in there is untouched
+            // — only positions this component forwards in need the scale taken
+            // out of them again.
+            style={
+              fit
+                ? {
+                    width: fit.w,
+                    height: fit.h,
+                    transform: `scale(${fit.scale})`,
+                  }
+                : undefined
+            }
             title="App preview"
           />
         );
@@ -280,11 +334,15 @@ export function Runner({
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
             const r = shell.current?.getBoundingClientRect();
+            // The frame answers in its own coordinates, and a scaled frame's
+            // are larger than the ones out here — so the scale comes back out
+            // before the position is sent in.
+            const s = fit?.scale ?? 1;
             frame.current?.contentWindow?.postMessage(
               {
                 __dryos: "dragover",
-                x: e.clientX - (r?.left ?? 0),
-                y: e.clientY - (r?.top ?? 0),
+                x: (e.clientX - (r?.left ?? 0)) / s,
+                y: (e.clientY - (r?.top ?? 0)) / s,
                 w: dropSize?.w ?? 6,
                 h: dropSize?.h ?? 240,
               },

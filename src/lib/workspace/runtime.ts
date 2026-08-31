@@ -1,5 +1,6 @@
 import * as esbuild from "esbuild";
 import { SCHEMAS } from "./catalog";
+import { seriesVars } from "./palette";
 
 /**
  * The sandbox an app runs in.
@@ -207,25 +208,20 @@ const TOKENS_DARK = `
   --bg:#0a0d12; --surface:#10141b; --surface-2:#171d26; --line:#26303d;
   --line-strong:#3d4b5c; --ink:#eef2f7; --muted:#9aa8ba; --faint:#8998ab;
   --accent:#e8ff3d; --warn:#fbbf24; --info:#7dd3fc; --fail:#f4666b;
-  --s1:#e8ff3d; --s2:#7dd3fc; --s3:#fbbf24; --s4:#9085e9;
-  --s5:#199e70; --s6:#e87ba4; --s7:#d95926; --s8:#3987e5;
+  ${seriesVars("dark")}
 `;
 
 /*
-  --s1..--s8 are the chart series slots, in fixed order. s1–s3 are the brand
-  colours charts already used; s4–s8 extend them for the stacked and bar
-  shapes. The order is the colour-vision safety mechanism, not cosmetics: each
-  mode's sequence was validated as a set (adjacent-pair CVD ΔE, chroma floor,
-  contrast against its own surface), and light is its own selected stepping,
-  not an automatic flip of dark. Reorder or restep only through the palette
-  validator.
+  --s1..--s8 are the chart series slots, written from `palette.ts` rather than
+  spelled out here: the panel has to draw the same eight to offer them, and it
+  cannot read this stylesheet — it belongs to another document. See that file
+  for why the order is load-bearing.
 */
 const TOKENS_LIGHT = `
   --bg:#ffffff; --surface:#ffffff; --surface-2:#f4f6f8; --line:#dde3ea;
   --line-strong:#aeb9c6; --ink:#0f141b; --muted:#4a5666; --faint:#586474;
   --accent:#5b6f0c; --warn:#a16207; --info:#0b6a94; --fail:#b3261e;
-  --s1:#5b6f0c; --s2:#0b6a94; --s3:#a16207; --s4:#4a3aa7;
-  --s5:#047857; --s6:#e87ba4; --s7:#2a78d6; --s8:#eb6834;
+  ${seriesVars("light")}
 `;
 
 const BASE_CSS = String.raw`
@@ -252,6 +248,35 @@ th, td { text-align:left; padding:6px 10px 6px 0; border-bottom:1px solid var(--
 th { font-family: var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); font-weight:400; }
 /* A dropped tile's gap breathes while its revision composes — see Ghost. */
 @keyframes dr-ghost { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+/*
+  An empty screen, which is the one screen with nothing to say for itself.
+
+  Two animations and no paragraph: the ground drifts so the canvas reads as a
+  live surface rather than a broken one, and a component slides into an empty
+  slot on a loop — which is the gesture, performed, in less time than the
+  sentence describing it takes to read.
+*/
+@keyframes dr-drift {
+  0%, 100% { transform: translate3d(-3%, -2%, 0) scale(1.06); }
+  50%      { transform: translate3d(3%, 2%, 0) scale(1.18); }
+}
+@keyframes dr-drop {
+  0%        { transform: translate(78px, -38px) scale(0.92); opacity: 0; }
+  16%       { opacity: 1; }
+  52%, 76%  { transform: none; opacity: 1; }
+  100%      { transform: none; opacity: 0; }
+}
+@keyframes dr-slot {
+  0%, 46%, 100% { border-color: var(--line-strong); }
+  56%, 74%      { border-color: var(--accent); }
+}
+.dr-drift { animation: dr-drift 24s ease-in-out infinite; }
+.dr-drop  { animation: dr-drop 4.4s cubic-bezier(.22,.61,.36,1) infinite; }
+.dr-slot  { animation: dr-slot 4.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .dr-drift, .dr-drop, .dr-slot { animation: none; }
+}
 `;
 
 /**

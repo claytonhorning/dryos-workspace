@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { Button, cx } from "@/components/ui";
+import {
+  useEffect,
+  useState,
+  type DragEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import { cx } from "@/components/ui";
 import {
   COMPONENTS,
   DEFAULT_LAYOUT,
@@ -13,28 +19,29 @@ import {
 import { type DataRef } from "@/lib/workspace/catalog";
 import type { PublishedComponent } from "@/lib/workspace/community";
 import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
+import { SeriesStyles } from "@/components/workspace/SeriesStyles";
 
 /**
- * Two ways to make something, split by whether a model is needed.
+ * The shelf of things a screen can be built from, and the preview of one.
  *
- * The top half is a shelf in three sections — the base shapes, the components
- * you saved, and the ones somebody published. They are listed apart because
- * they answer different questions: a shape is a starting point, a saved
- * component is something you already decided, and a published one is somebody
- * else's decision you are borrowing.
+ * The shelf is in three sections — the base shapes, the components you saved,
+ * and the ones somebody published. They are listed apart because they answer
+ * different questions: a shape is a starting point, a saved component is
+ * something you already decided, and a published one is somebody else's
+ * decision you are borrowing.
  *
  * **A card is not draggable, and only the preview is.** One gesture used to
  * mean two things: dragging a card placed the shape sight-unseen at its
- * defaults, while clicking it opened the real thing underneath. Judging a
- * component from its name is the guess the inline preview exists to remove, so
- * the shelf now does one job — click a card and the component runs, on live
- * data, right under it — and the thing you drag onto the page is the thing you
- * are looking at. What lands is what you saw, settings and all, which is not
- * something a card could ever promise.
+ * defaults, while clicking it opened the real thing. Judging a component from
+ * its name is the guess the inline preview exists to remove, so the shelf does
+ * one job — click a card and the component runs on live data in the shelf's own
+ * place, the pane taking one state or the other — and the thing you drag onto
+ * the page is the thing you are looking at. What lands is what you saw,
+ * settings and all, which is not something a card could ever promise.
  *
- * The bottom half is for the thing that starts from no shape at all: a
- * sentence, which picks a base for you and opens the component editor already
- * running it.
+ * The sentence for the thing no shape covers is not here: `CustomComponent`
+ * lives under the screen, because it is a request about the dashboard rather
+ * than one more choice about a component.
  *
  * Every path reads the same selection from the explorer, so the data is chosen
  * once and the only remaining question is what to do with it.
@@ -92,7 +99,7 @@ export interface EditorStart {
 type Shelf = "base" | "saved" | "community";
 
 /**
- * The component running under the shelf.
+ * The component running in the shelf's place.
  *
  * It carries its own references rather than reading the explorer's, because a
  * saved or published component brings its own data — what was selected in the
@@ -112,27 +119,18 @@ interface Preview {
 export function BuildPanel({
   refs,
   onDragStateChange,
-  onOpen,
   reloadKey,
 }: {
   refs: DataRef[];
   onDragStateChange: (payload: TrayPayload | null) => void;
-  /**
-   * Open the component editor on a starting point — the shape being previewed,
-   * a saved component to change, or a shape with a request already typed.
-   */
-  onOpen: (start: EditorStart) => void;
   reloadKey: number;
 }) {
   const [saved, setSaved] = useState<Saved[]>([]);
   const [community, setCommunity] = useState<PublishedComponent[]>([]);
-  const [ask, setAsk] = useState("");
-  /** True while the preview is in flight, so it reads as picked up. */
-  const [carrying, setCarrying] = useState(false);
   /**
-   * The component being previewed, right here under the shelf. Clicking a card
+   * The component being previewed, in the shelf's own place. Clicking a card
    * runs the real thing — the preview route composes a one-tile app on live
-   * data — with its settings beside it, so judging a component never means
+   * data — with its settings above it, so judging a component never means
    * leaving the panel, and switching cards switches the preview.
    */
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -216,17 +214,6 @@ export function BuildPanel({
     return () => clearTimeout(t);
   }, [previewLive, preview?.id, hintsOff, dragged]);
 
-  /*
-    A custom component still has to start from a shape that compiles, so it
-    starts from the one the selection fits — a single series is a ticker,
-    anything else a chart — and the agent rewrites from there.
-  */
-  const base =
-    COMPONENTS.find(
-      (c) => c.kind === (refs.length === 1 ? "ticker" : "chart"),
-    ) ?? COMPONENTS[0];
-  const canCustom = refs.length > 0 && base.accepts(refs).ok;
-
   /**
    * Which card the preview belongs to. Shelf and id together, because ids are
    * only unique within a shelf — a published component is free to be called
@@ -278,31 +265,85 @@ export function BuildPanel({
     return `/api/workspace/preview?${q.toString()}`;
   }
 
-  function submit() {
-    if (!ask.trim() || !canCustom) return;
-    onOpen({ def: base, refs, ask: ask.trim() });
-    setAsk("");
-  }
-
   /* A frozen source ignores settings, so offering selects would be a lie. */
   const tunable = preview ? !preview.custom : false;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
+      {/*
+        One pane, two states. The preview used to open as a second panel below
+        the shelf, which left both of them short: a shelf you had to scroll past
+        to reach the thing you were looking at, and a preview in the last third
+        of the column. Choosing a component and judging it are consecutive, not
+        simultaneous — so the preview takes the pane, and going back is one
+        control in the same place the heading was.
+      */}
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
-        <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
-          Build
-        </span>
-        <span className="ml-auto font-mono text-[9.5px] text-faint">
-          click a card · drag its preview onto the screen
-        </span>
+        {preview ? (
+          <>
+            <button
+              onClick={() => setPreview(null)}
+              className="-ml-1 shrink-0 rounded px-1 font-mono text-[10px] tracking-[0.14em] text-faint uppercase transition-colors hover:text-ink"
+            >
+              ‹ Components
+            </button>
+            <span className="ml-auto truncate font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+              {preview.name}
+            </span>
+          </>
+        ) : (
+          <>
+            {/*
+              The heading alone. The instruction that used to sit beside it said
+              the same thing as the note on the Components section one line
+              below, and the section is where somebody is actually looking when
+              they need it.
+            */}
+            <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
+              Build
+            </span>
+          </>
+        )}
       </div>
 
+      {preview ? (
+        <PreviewPane
+          def={preview.def}
+          refs={previewRefs}
+          live={previewLive}
+          why={verdict?.why}
+          tunable={tunable}
+          options={previewOpts}
+          onOption={(key, value) =>
+            setPreviewOpts((prev) => ({ ...prev, [key]: value }))
+          }
+          src={previewSrc(preview, previewOpts, previewRefs)}
+          frameKey={`${preview.shelf}:${preview.id}:${JSON.stringify(
+            previewOpts,
+          )}:${previewRefs.map((r) => r.schemaId + r.label).join("|")}`}
+          frameRef={previewFrame}
+          onDragStart={(e) => {
+            e.dataTransfer.setData(DRAG_TYPE, "1");
+            e.dataTransfer.effectAllowed = "copy";
+            setDragged(true);
+            setHint(false);
+            onDragStateChange({
+              kind: preview.def.kind,
+              options: previewOpts,
+              custom: preview.custom,
+              refs: previewRefs,
+              layout: preview.layout,
+            });
+          }}
+          onDragEnd={() => onDragStateChange(null)}
+        />
+      ) : (
+        <>
       {/* ── The shelf, in three sections ─────────────────────────────── */}
       <div className="dr-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-2 pb-2">
         <Section
           title="Components"
-          note="the shapes every screen is built from"
+          note="click one to see it on your data"
         >
           {offered.map((c) => {
             const v = c.accepts(refs);
@@ -426,167 +467,8 @@ export function BuildPanel({
         )}
       </div>
 
-      {preview && (
-        <div className="shrink-0 border-t border-line px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className="truncate font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-              {preview.name} · preview
-            </span>
-            <button
-              onClick={() =>
-                onOpen({
-                  def: preview.def,
-                  refs: previewRefs,
-                  name: preview.shelf === "base" ? undefined : preview.name,
-                  options: previewOpts,
-                  custom: preview.custom,
-                })
-              }
-              className="ml-auto shrink-0 text-[11px] text-accent transition-colors hover:brightness-110"
-            >
-              Refine with AI ›
-            </button>
-            <button
-              onClick={() => setPreview(null)}
-              aria-label="Close preview"
-              className="shrink-0 rounded border border-line px-1.5 py-[2px] text-[10px] text-faint hover:text-ink"
-            >
-              ✕
-            </button>
-          </div>
-
-          {tunable && preview.def.options.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {preview.def.options.map((o) => (
-                <label key={o.key} className="flex items-center gap-1 text-[10.5px] text-faint">
-                  {o.label}
-                  <select
-                    value={previewOpts[o.key] ?? o.fallback}
-                    onChange={(e) =>
-                      setPreviewOpts((prev) => ({ ...prev, [o.key]: e.target.value }))
-                    }
-                    className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-line-strong"
-                  >
-                    {o.choices.map((ch) => (
-                      <option key={ch.value} value={ch.value}>
-                        {ch.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ))}
-            </div>
-          )}
-
-          {previewLive ? (
-            <div
-              // The widget itself is the handle: what you drag is what lands,
-              // so the accent border belongs to the thing being carried rather
-              // than to a chip pointing at it. It is also the *only* handle —
-              // the cards above place nothing.
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData(DRAG_TYPE, "1");
-                e.dataTransfer.effectAllowed = "copy";
-                setCarrying(true);
-                setDragged(true);
-                setHint(false);
-                onDragStateChange({
-                  kind: preview.def.kind,
-                  options: previewOpts,
-                  custom: preview.custom,
-                  refs: previewRefs,
-                  layout: preview.layout,
-                });
-              }}
-              onDragEnd={() => {
-                setCarrying(false);
-                onDragStateChange(null);
-              }}
-              title="Drag onto the page to place exactly what you see"
-              className={cx(
-                "relative mt-2 h-80 cursor-grab overflow-hidden rounded-md border border-accent bg-code active:cursor-grabbing",
-                carrying && "dr-jiggle",
-              )}
-            >
-              <iframe
-                ref={previewFrame}
-                // Keyed by the spec so a settings change reloads the real
-                // thing rather than mutating a stale frame. `bare` strips the
-                // tile chrome, and the preview-only layout spans the grid so
-                // the component fills the box — the drag payload keeps the
-                // component's own footprint, so what lands is unchanged.
-                key={`${preview.shelf}:${preview.id}:${JSON.stringify(previewOpts)}:${previewRefs
-                  .map((r) => r.schemaId + r.label)
-                  .join("|")}`}
-                src={previewSrc(preview, previewOpts, previewRefs)}
-                sandbox="allow-scripts"
-                className="h-full w-full border-0"
-                title="Component preview"
-              />
-              {/*
-                Pointer events do not cross into an iframe, so a drag started
-                over the frame would never reach this wrapper. A transparent
-                sheet catches it — and carries the one label on the whole
-                shelf, because the shelf no longer answers a drag and something
-                has to say where the gesture moved to.
-              */}
-              <div className="absolute inset-0 flex items-start justify-start p-1.5">
-                <span className="pointer-events-none rounded border border-accent-line bg-surface/85 px-1.5 py-[2px] font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase backdrop-blur">
-                  ⠿ drag onto the screen
-                </span>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-2 text-[11.5px] text-muted">{verdict?.why}</p>
-          )}
-        </div>
+        </>
       )}
-
-      {/* ── Something no shape covers ────────────────────────────────── */}
-      <div className="border-t border-line px-3 py-2.5">
-        <div className="flex items-baseline gap-2">
-          <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-            Custom component
-          </span>
-          <span className="ml-auto font-mono text-[9.5px] text-faint">
-            preview before it lands
-          </span>
-        </div>
-
-        <textarea
-          value={ask}
-          onChange={(e) => setAsk(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          rows={2}
-          disabled={!canCustom}
-          placeholder={
-            refs.length === 0
-              ? "Select data to build against…"
-              : "A gauge that turns amber above $50…"
-          }
-          className="mt-1.5 w-full resize-none rounded-md border border-line bg-surface-2 px-2.5 py-2 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong disabled:opacity-50"
-        />
-
-        <div className="mt-2 flex items-center gap-2">
-          <Button
-            tone="primary"
-            size="sm"
-            disabled={!ask.trim() || !canCustom}
-            onClick={submit}
-          >
-            Create with AI
-          </Button>
-          <span className="font-mono text-[9.5px] text-faint">
-            ↵ to send · opens a preview
-          </span>
-        </div>
-      </div>
 
       {/*
         The corner, not the widget: a hint that lived on the preview competed
@@ -600,8 +482,8 @@ export function BuildPanel({
         >
           <div className="flex items-start gap-2">
             <p className="text-[12px] leading-snug text-ink">
-              Drag the preview onto the screen to place it. The cards above only
-              open it.
+              Drag the preview onto the screen to place it. The cards behind it
+              only open it.
             </p>
             <button
               onClick={() => setHint(false)}
@@ -625,6 +507,136 @@ export function BuildPanel({
           >
             don&rsquo;t show hints again
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The component itself, running, with the pane to itself.
+ *
+ * It is the shelf's other state rather than a box below it: what you are
+ * looking at is the only thing on screen, so it gets the height a chart needs
+ * instead of the strip left over under three sections of cards. Settings sit
+ * above it because changing one reloads what is underneath.
+ */
+function PreviewPane({
+  def,
+  refs,
+  live,
+  why,
+  tunable,
+  options,
+  onOption,
+  src,
+  frameKey,
+  frameRef,
+  onDragStart,
+  onDragEnd,
+}: {
+  def: ComponentDef;
+  /** What it is drawing, so the series can be listed and painted. */
+  refs: DataRef[];
+  live: boolean;
+  why?: string;
+  tunable: boolean;
+  options: Record<string, string>;
+  onOption: (key: string, value: string) => void;
+  src: string;
+  frameKey: string;
+  frameRef: RefObject<HTMLIFrameElement | null>;
+  onDragStart: (e: DragEvent) => void;
+  onDragEnd: () => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pt-2.5 pb-3">
+      {tunable && def.options.length > 0 && (
+        <div className="flex shrink-0 flex-wrap gap-1.5">
+          {def.options.map((o) => (
+            <label
+              key={o.key}
+              className="flex items-center gap-1 text-[10.5px] text-faint"
+            >
+              {o.label}
+              <select
+                value={options[o.key] ?? o.fallback}
+                onChange={(e) => onOption(o.key, e.target.value)}
+                className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-line-strong"
+              >
+                {o.choices.map((ch) => (
+                  <option key={ch.value} value={ch.value}>
+                    {ch.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {live ? (
+        <div
+          // The widget itself is the handle: what you drag is what lands, so
+          // the accent border belongs to the thing being carried rather than to
+          // a chip pointing at it. It is also the *only* handle — the cards
+          // behind it place nothing.
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          title="Drag onto the page to place exactly what you see"
+          // A fixed height, not the rest of the pane. It is tall enough for the
+          // worst case — a fan-out over eight fuel types spends a short tile
+          // entirely on axes and legend — and the height below it belongs to
+          // the series, which is where the reading of the chart is decided.
+          className="relative h-72 shrink-0 cursor-grab overflow-hidden rounded-md border border-accent bg-code active:cursor-grabbing"
+        >
+          <iframe
+            ref={frameRef}
+            // Keyed by the spec so a settings change reloads the real thing
+            // rather than mutating a stale frame. `bare` strips the tile
+            // chrome, and the preview-only layout spans the grid so the
+            // component fills the box — the drag payload keeps the component's
+            // own footprint, so what lands is unchanged.
+            key={frameKey}
+            src={src}
+            sandbox="allow-scripts"
+            className="h-full w-full border-0"
+            title="Component preview"
+          />
+          {/*
+            Pointer events do not cross into an iframe, so a drag started over
+            the frame would never reach this wrapper. A transparent sheet
+            catches it — and carries the one label in the panel, because the
+            shelf behind it does not answer a drag and something has to say
+            where the gesture moved to.
+          */}
+          <div className="absolute inset-0 flex items-start justify-start p-1.5">
+            <span className="pointer-events-none rounded border border-accent-line bg-surface/85 px-1.5 py-[2px] font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase backdrop-blur">
+              ⠿ drag onto the screen
+            </span>
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11.5px] text-muted">{why}</p>
+      )}
+
+      {/*
+        Under the preview, taking the height it no longer does: what the
+        component is actually drawing, and how each one is drawn. Scrolls on
+        its own — eight series and a short panel is a normal combination.
+
+        Frozen source is exempt for the same reason the selects above are: a
+        refined component ignores its settings, so offering them would be a lie.
+      */}
+      {live && tunable && (
+        <div className="dr-scroll min-h-0 flex-1 overflow-y-auto">
+          <SeriesStyles
+            refs={refs}
+            kind={def.kind}
+            options={options}
+            onChange={(series) => onOption("series", series)}
+          />
         </div>
       )}
     </div>
@@ -787,6 +799,30 @@ function Glyph({ kind, on }: { kind: ComponentKind; on: boolean }) {
           strokeWidth="1.3"
           strokeLinecap="round"
           strokeLinejoin="round"
+        />
+      )}
+      {kind === "scatter" && (
+        <>
+          {[
+            [3, 10],
+            [5.5, 7.5],
+            [7, 9],
+            [8.5, 5],
+            [10.5, 6],
+            [12, 3],
+          ].map(([x, y]) => (
+            <circle key={`${x}-${y}`} cx={x} cy={y} r="1.1" fill={stroke} />
+          ))}
+        </>
+      )}
+      {/* The duration curve's own shape: high on the left, a long tail. */}
+      {kind === "distribution" && (
+        <path
+          d="M1 3 C 4 3.4, 5 9, 13 10.5"
+          stroke={stroke}
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          fill="none"
         />
       )}
       {kind === "bar" && (

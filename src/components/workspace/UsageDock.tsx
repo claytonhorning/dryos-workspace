@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AvailabilityBadge } from "@/components/workspace/DataChip";
 import { cx } from "@/components/ui";
 import {
@@ -12,12 +12,14 @@ import {
 import type { UsageSummary, WindowUsage } from "@/lib/workspace/meter";
 
 /**
- * What this workspace is costing, down in the bottom-left corner — the right
- * corner belongs to the resize handle of whatever tile happens to end there.
+ * What this workspace is costing.
  *
- * It sits over the screen rather than in the bar because it belongs to the
- * workspace, not to the product — and because a page runs edge to edge, so
- * anything about the page has to live on it.
+ * Two placements, one component. **In the navbar** (`nav`) it is a number in
+ * the chrome, at the top right beside the account — which is where a running
+ * total belongs when the thing under it runs edge to edge: floating over the
+ * canvas, it was one more object on a screen whose whole point is that it
+ * carries nothing but the dashboard. **Floating** (`dock`) is the older
+ * bottom-left readout, still used where there is no workspace bar to sit in.
  *
  * It grows **in place** rather than opening a dialog in the middle of the
  * screen. The number you clicked stays where you left it, the detail unfolds
@@ -38,13 +40,37 @@ type WindowId = (typeof WINDOWS)[number]["id"];
 export function UsageDock({
   spaceId,
   name,
+  placement = "dock",
 }: {
   spaceId: string;
   name?: string;
+  /** `nav` sits inline in the workspace bar; `dock` floats bottom-left. */
+  placement?: "nav" | "dock";
 }) {
+  const inNav = placement === "nav";
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [open, setOpen] = useState(false);
   const [window_, setWindow] = useState<WindowId>("today");
+  const wrap = useRef<HTMLDivElement>(null);
+
+  /*
+    A menu hanging off the bar closes the way every other one there does —
+    click away, or Escape. The floating dock keeps its ✕ and nothing else: it
+    sits on the canvas, where a click outside is somebody arranging tiles.
+  */
+  useEffect(() => {
+    if (!inNav || !open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [inNav, open]);
 
   useEffect(() => {
     let live = true;
@@ -65,39 +91,108 @@ export function UsageDock({
   if (!usage) return null;
   const w: WindowUsage = usage[window_];
 
-  if (!open) {
+  const panel = (
+    <UsagePanel
+      usage={usage}
+      w={w}
+      name={name}
+      window_={window_}
+      setWindow={setWindow}
+      onClose={() => setOpen(false)}
+    />
+  );
+
+  const trigger = (
+    <button
+      onClick={() => setOpen((v) => !v)}
+      aria-expanded={open}
+      title="What this workspace is costing"
+      className={cx(
+        "inline-flex items-center gap-2 rounded-full border font-mono text-[10.5px] transition-colors hover:border-line-strong",
+        inNav
+          ? // In the bar it is chrome, not an object on the page: no shadow,
+            // no blur, the same height as everything else in the row.
+            open
+            ? "border-accent-line bg-accent-dim"
+            : "border-line"
+          : "fixed bottom-4 left-4 z-30 border-line bg-surface/90 shadow-lg shadow-black/30 backdrop-blur",
+        inNav ? "px-2.5 py-1" : "px-3 py-1.5",
+      )}
+    >
+      <span className="text-faint">
+        {usage.today.queries.toLocaleString()} call
+        {usage.today.queries === 1 ? "" : "s"}
+      </span>
+      <span className="text-line-strong">·</span>
+      {/*
+        Spelled out, not "DRY". Collapsed, this is the only number on the
+        screen and nothing beside it says what it counts — unlike a chip in
+        the explorer, where the reader is already pricing a query.
+      */}
+      <span className="text-accent">
+        {creditLabel(round(usage.today.tokens))}
+      </span>
+      <span className="text-faint">today</span>
+    </button>
+  );
+
+  /*
+    In the bar it behaves like the account menu next to it: the number stays
+    where it is and the detail hangs from it. Anchored to the button rather than
+    to the corner of the window — pinned to the corner, the panel drifted away
+    from the thing that was clicked as soon as the bar's right-hand cluster
+    changed width.
+
+    Floating, it still grows *in place*: the pill becomes the panel. Two
+    placements, two idioms, because a readout on the canvas and a control in the
+    chrome are not the same object.
+  */
+  if (inNav) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        title="What this workspace is costing"
-        className="fixed bottom-4 left-4 z-30 inline-flex items-center gap-2 rounded-full border border-line bg-surface/90 px-3 py-1.5 font-mono text-[10.5px] shadow-lg shadow-black/30 backdrop-blur transition-colors hover:border-line-strong"
-      >
-        <span className="text-faint">
-          {usage.today.queries.toLocaleString()} call
-          {usage.today.queries === 1 ? "" : "s"}
-        </span>
-        <span className="text-line-strong">·</span>
-        {/*
-          Spelled out, not "DRY". Collapsed, this is the only number on the
-          screen and nothing beside it says what it counts — unlike a chip in
-          the explorer, where the reader is already pricing a query.
-        */}
-        <span className="text-accent">
-          {creditLabel(round(usage.today.tokens))}
-        </span>
-        <span className="text-faint">today</span>
-      </button>
+      <div ref={wrap} className="relative">
+        {trigger}
+        {open && (
+          <div className="dr-rise absolute top-full right-0 z-30 mt-1.5 flex max-h-[70vh] w-[360px] flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/50">
+            {panel}
+          </div>
+        )}
+      </div>
     );
   }
 
-  return (
+  return open ? (
     <div className="dr-rise fixed bottom-4 left-4 z-30 flex max-h-[70vh] w-[360px] flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/50">
+      {panel}
+    </div>
+  ) : (
+    trigger
+  );
+}
+
+/** The panel's contents, the same wherever it is hung. */
+function UsagePanel({
+  usage,
+  w,
+  name,
+  window_,
+  setWindow,
+  onClose,
+}: {
+  usage: UsageSummary;
+  w: WindowUsage;
+  name?: string;
+  window_: WindowId;
+  setWindow: (id: WindowId) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
       <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
         <span className="truncate text-[13px] font-medium text-ink">
           {name ? `${name} · usage` : "Usage"}
         </span>
         <button
-          onClick={() => setOpen(false)}
+          onClick={onClose}
           aria-label="Collapse"
           title="Collapse"
           className="ml-auto rounded p-1 font-mono text-[12px] leading-none text-faint transition-colors hover:text-ink"
@@ -180,7 +275,7 @@ export function UsageDock({
       <p className="border-t border-line px-3 py-1.5 font-mono text-[9px] text-faint">
         {usage.ranges[window_]} · counted at the route, not estimated
       </p>
-    </div>
+    </>
   );
 }
 

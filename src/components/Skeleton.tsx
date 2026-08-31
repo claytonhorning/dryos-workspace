@@ -56,17 +56,28 @@ export function ScreenSkeleton({ withPanel = false }: { withPanel?: boolean }) {
     <div
       className={cx(
         "grid h-[calc(100vh-var(--nav-h))] gap-4",
-        withPanel ? "mx-auto max-w-[1560px] px-6 py-5 lg:grid-cols-[1fr_420px]" : "",
+        // The same gutter the page itself uses in edit mode, so the arrival is
+        // the blocks resolving rather than the whole layout stepping sideways.
+        withPanel ? "px-4 pt-2 pb-4 lg:grid-cols-[1fr_420px]" : "",
       )}
     >
-      <div className={cx("bg-code", withPanel ? "rounded-lg border border-line" : "")}>
-        {/* The twelve-column grid a page is arranged on, at rest. */}
-        <div className="grid h-full grid-cols-12 content-start gap-3 p-3">
-          <Skeleton className="col-span-8 h-[240px]" />
-          <Skeleton className="col-span-4 h-[240px]" />
-          <Skeleton className="col-span-5 h-[180px]" />
-          <Skeleton className="col-span-7 h-[180px]" />
+      <div className="flex min-h-0 flex-col gap-2">
+        <div
+          className={cx(
+            "min-h-0 flex-1 bg-code",
+            withPanel ? "rounded-lg border border-line" : "",
+          )}
+        >
+          {/* The twelve-column grid a page is arranged on, at rest. */}
+          <div className="grid h-full grid-cols-12 content-start gap-3 p-3">
+            <Skeleton className="col-span-8 h-[240px]" />
+            <Skeleton className="col-span-4 h-[240px]" />
+            <Skeleton className="col-span-5 h-[180px]" />
+            <Skeleton className="col-span-7 h-[180px]" />
+          </div>
         </div>
+        {/* The sentence box under the screen — its own band, in both states. */}
+        {withPanel && <Skeleton className="h-[92px] w-full shrink-0" />}
       </div>
 
       {withPanel && (

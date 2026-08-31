@@ -145,11 +145,51 @@ export function DataChip({
 export function AttachedChip({
   refr,
   onRemove,
+  compact,
 }: {
   refr: DataRef;
   /** Omitted where the chip is a record rather than a control. */
   onRemove?: () => void;
+  /**
+   * One line, in the accent, never wrapping.
+   *
+   * The two-line chip is a receipt — it belongs beside a request, where the
+   * cadence and the price are what somebody is about to agree to. In a strip of
+   * things in hand it is the wrong shape: four of them stacked their meta into
+   * four lines each and turned a row into a wall. Here the label is the whole
+   * fact, the accent says it is picked, and the row scrolls sideways rather
+   * than growing downwards.
+   */
+  compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <span
+        title={`${refr.path} · ${refr.cadence}`}
+        className={cx(
+          "inline-flex shrink-0 items-center gap-1 rounded-md border py-[3px] pl-2 whitespace-nowrap",
+          onRemove ? "pr-1" : "pr-2",
+          refr.availability === "live"
+            ? "border-accent-line bg-accent-dim text-accent"
+            : // A mock never wears the colour that means "this is real".
+              "border-dashed border-info-line bg-surface-2 text-info",
+        )}
+      >
+        <span className="font-mono text-[11px]">{refr.label}</span>
+        {refr.availability === "mock" && <AvailabilityBadge availability="mock" />}
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            aria-label={`Remove ${refr.label}`}
+            className="rounded px-1 font-mono text-[11px] opacity-70 transition-opacity hover:text-fail hover:opacity-100"
+          >
+            ×
+          </button>
+        )}
+      </span>
+    );
+  }
+
   return (
     <span
       title={refr.path}
@@ -183,5 +223,62 @@ export function AttachedChip({
         </button>
       )}
     </span>
+  );
+}
+
+/**
+ * What is in hand, on one line.
+ *
+ * It follows the search and the categories rather than heading the panel: the
+ * top of a panel is where you say what it is, and a pile of chips there said it
+ * badly — four of them wrapped into a block taller than the thing they were
+ * being picked from. Below the filters it reads in the order the work happens —
+ * narrow, pick, then see what you have — and it stays out of the scroll, so it
+ * is still there when the catalogue has moved on underneath it.
+ *
+ * The same strip appears on the build step, because that is the moment the
+ * selection matters most and the moment it used to disappear.
+ */
+export function SelectionStrip({
+  selected,
+  onRemove,
+  onClear,
+  label,
+  className,
+}: {
+  selected: DataRef[];
+  onRemove?: (ref: DataRef) => void;
+  onClear?: () => void;
+  /** Omitted where something else already names it. */
+  label?: string;
+  className?: string;
+}) {
+  if (selected.length === 0) return null;
+  return (
+    <div className={cx("flex items-center gap-2", className)}>
+      {label && (
+        <span className="shrink-0 font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+          {label}
+        </span>
+      )}
+      <div className="dr-scroll flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+        {selected.map((r) => (
+          <AttachedChip
+            key={`${r.snippet}::${r.label}`}
+            refr={r}
+            compact
+            onRemove={onRemove && (() => onRemove(r))}
+          />
+        ))}
+      </div>
+      {onClear && (
+        <button
+          onClick={onClear}
+          className="shrink-0 text-[11px] text-muted transition-colors hover:text-fail"
+        >
+          Clear
+        </button>
+      )}
+    </div>
   );
 }

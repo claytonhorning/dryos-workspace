@@ -3,11 +3,13 @@
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DataExplorer } from "@/components/workspace/DataExplorer";
-import { AvailabilityBadge, AttachedChip } from "@/components/workspace/DataChip";
+import {
+  AvailabilityBadge,
+  SelectionStrip,
+} from "@/components/workspace/DataChip";
 import { Runner } from "@/components/workspace/Runner";
 import { Button, cx } from "@/components/ui";
 import { ScreenSkeleton } from "@/components/Skeleton";
-import { UsageDock } from "@/components/workspace/UsageDock";
 import { type DataRef } from "@/lib/workspace/catalog";
 import {
   BuildPanel,
@@ -15,6 +17,7 @@ import {
   type TrayPayload,
 } from "@/components/workspace/BuildPanel";
 import { ComponentEditor } from "@/components/workspace/ComponentEditor";
+import { CustomComponent } from "@/components/workspace/CustomComponent";
 import { CostPanel } from "@/components/workspace/CostPanel";
 import { componentDef, type ComponentSpec } from "@/lib/workspace/components";
 import { readNdjson } from "@/lib/workspace/ndjson";
@@ -48,9 +51,89 @@ const PANELS: { id: PanelMode; label: string }[] = [
 const COLUMNS = (open: boolean) =>
   open ? "lg:grid-cols-[1fr_var(--panel-w,420px)]" : "lg:grid-cols-1";
 
+/**
+ * Whether the page-level actions — pull, fork, copy link, the identifier —
+ * are shown. Off while sharing is unfinished: they are all about moving a page
+ * between people, and there is nobody to move it to yet.
+ */
+const PAGE_ACTIONS = false;
+
+/**
+ * The height of the sentence box under the screen, and so of the band the
+ * canvas gives up to it.
+ *
+ * Fixed rather than content-sized: the canvas is measured against whatever is
+ * left, and a box that grew by a line would restate the screen's scale every
+ * time somebody typed. It used to be shared with a selection bar under the
+ * explorer, so the two columns ended on one line; that bar is gone — the
+ * explorer runs to the bottom of the panel now — so this is one column's
+ * furniture, not a pair.
+ */
+const DOCK_H = "h-[96px]";
+
 /** How wide the panel column may be dragged, px. */
 const PANEL_MIN = 320;
 const PANEL_MAX = 840;
+
+/**
+ * The screen, drawn at the width it will be launched at, filling its room.
+ *
+ * Editing puts a panel beside the canvas, and a narrower canvas is a different
+ * dashboard: a tile is columns wide and pixels tall, so taking width away
+ * changes every proportion on the page — you arrange one thing and launch
+ * another. So the frame is laid out at the launched *width* (the viewport) and
+ * scaled down by exactly that ratio: every tile has the size, wrap and relative
+ * weight it will have on the wall, and dragging the panel zooms the screen
+ * rather than reflowing it.
+ *
+ * Height then follows from the room rather than from the viewport, because the
+ * canvas fills its column — so the frame is a little taller than the launched
+ * screen and shows a strip more canvas below the fold. Letterboxing to the
+ * launched height instead left a band of dead space above and below the screen,
+ * and empty room next to a dashboard is worse than a little extra ground under
+ * one.
+ *
+ * It returns the box to measure and the fit to apply. Measured rather than
+ * declared: `aspect-ratio` takes a ratio of numbers, and this one is a ratio of
+ * two lengths that both change under a window resize or a panel drag.
+ */
+function useScreenFit(active: boolean, ready: boolean) {
+  const box = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<{
+    w: number;
+    h: number;
+    scale: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const el = box.current;
+    if (!active || !ready || !el) {
+      setFit(null);
+      return;
+    }
+    const measure = () => {
+      const w = window.innerWidth;
+      const room = el.getBoundingClientRect();
+      // A pane with no size yet says nothing about how big the screen is;
+      // measuring it would only produce a scale to correct a moment later.
+      if (w <= 0 || room.width <= 0 || room.height <= 0) return;
+      const scale = Math.min(1, room.width / w);
+      setFit({ w, h: room.height / scale, scale });
+    };
+    measure();
+    // The panel is draggable and the window is resizable, and only one of those
+    // changes the box without changing the launched size.
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [active, ready]);
+
+  return { box, fit };
+}
 
 /** One screen, running, with the tools that shaped it beside it. */
 export default function AppPage() {
@@ -73,16 +156,11 @@ export default function AppPage() {
     to someone.
   */
   const asideOpen = search.get("edit") === "1";
-  const closeEditor = useCallback(
-    () => router.replace(`/workspace/${space}/${id}`),
-    [router, space, id],
-  );
   const [panel, setPanel] = useState<PanelMode>("build");
   /**
    * Data and Build are one panel taken in two steps: choose what, then choose
    * how. Each step gets the whole column — split in half, neither had room —
-   * and each carries its own model at the bottom: the data guide on the first
-   * screen, the custom-component box on the second.
+   * and each ends in the way on: the explorer's own footer, then the shelf.
    */
   const [stage, setStage] = useState<"data" | "build">("data");
   /** When the last write landed. Arranging a screen saves constantly and
@@ -127,6 +205,8 @@ export default function AppPage() {
   const [error, setError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [pullOpen, setPullOpen] = useState(false);
+  /** The canvas keeps the launched screen's proportions while being edited. */
+  const { box: canvasBox, fit } = useScreenFit(asideOpen, Boolean(app));
 
   useEffect(() => {
     fetch(`/api/workspace/apps/${id}`)
@@ -410,25 +490,72 @@ export default function AppPage() {
         style={{ ["--panel-w" as string]: `${panelW}px` } as React.CSSProperties}
       >
         <div className="relative flex min-h-0 flex-col gap-2">
-          <Runner
-            appId={app.id}
-            version={app.updatedAt}
-            onError={onRuntimeError}
-            dropping={Boolean(dragging)}
-            dropSize={dragging?.layout}
-            onDropAt={place}
-            placing={pending}
-            onResize={resize}
-            onMove={move}
-            onRemove={remove}
-            onConfigure={configure}
-            flush={!asideOpen}
-          />
+          {/*
+            The screen takes every pixel of its column above the sentence box —
+            the scale is what makes it the launched screen, not a smaller
+            rectangle drawn inside a larger one.
+          */}
+          <div ref={canvasBox} className="relative min-h-0 flex-1">
+            {/*
+              The save mark sits on the screen itself, top right, rather than in
+              a row beside the panel. Arranging happens on the canvas, so the
+              reassurance that it was kept belongs where the gesture was — and it
+              floats over the corner rather than taking a band of height from a
+              screen that runs edge to edge. Pointer-transparent: the tile under
+              it still answers the cursor.
+            */}
+            <div className="pointer-events-none absolute top-2 right-2 z-10">
+              <SavedMark at={savedAt} />
+            </div>
+            <Runner
+              appId={app.id}
+              version={app.updatedAt}
+              onError={onRuntimeError}
+              dropping={Boolean(dragging)}
+              dropSize={dragging?.layout}
+              onDropAt={place}
+              placing={pending}
+              onResize={resize}
+              onMove={move}
+              onRemove={remove}
+              onConfigure={configure}
+              flush={!asideOpen}
+              fit={fit}
+              // A tile is clicked to configure it, so the frame has to know
+              // there is a panel to configure it in — and which tile that
+              // panel is currently about.
+              editing={asideOpen}
+              selected={replaceIndex}
+            />
+          </div>
 
           {runtimeError && (
             <p className="rounded border border-fail-line bg-fail-dim px-3 py-2 font-mono text-[11.5px] text-fail">
               {runtimeError}
             </p>
+          )}
+
+          {/*
+            The sentence for what no shape covers, under the screen it is about.
+            It was the last thing in the build panel, below three sections of
+            cards — but it is not one more choice about a component, it is a
+            request about the dashboard, and it reads as one here.
+          */}
+          {asideOpen && (
+            <div className={cx("shrink-0", DOCK_H)}>
+              <CustomComponent
+                refs={attached}
+                // The tiles it can be asked about. A model-edited page has no
+                // manifest, so it offers none rather than offering tiles it
+                // could not put a change back into.
+                manifest={app.manifest}
+                reloadKey={savedTick}
+                onOpen={(start, at) => {
+                  setReplaceIndex(at ?? null);
+                  setEditing(start);
+                }}
+              />
+            </div>
           )}
         </div>
 
@@ -458,55 +585,45 @@ export default function AppPage() {
               <div className="h-10 w-[3px] rounded-full bg-line transition-colors group-hover:bg-accent" />
             </div>
             {/*
-              Everything that acts on the page, above the panel rather than
-              above the canvas.
-
-              It used to be a row spanning both columns, which cost the screen a
-              band of height across its whole width to hold four controls that
-              all sit at the right anyway. Here it costs the canvas nothing and
-              the screen runs from the top of the page — and these belong beside
-              the panel regardless: they act on the page you are editing, which
-              is the column you are editing it from.
-
-              No name and no breadcrumb, still: the workspace navbar carries the
-              workspace beside the wordmark and the page as its own tab, which is
-              also where it is renamed.
+              Everything that acts on the whole page — pull, fork, share, the
+              identifier — is off for now (`PAGE_ACTIONS`). Sharing is still
+              unfinished, and a row of controls for it was answering questions
+              nobody is asking yet. The machinery behind them is untouched, so
+              turning the flag back on is the whole of putting them back.
             */}
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              <Button size="sm" onClick={() => setPullOpen(true)}>
-                Pull changes…
-              </Button>
-              <Button size="sm" onClick={fork}>
-                Fork
-              </Button>
-              <Button
-                size="sm"
-                onClick={() =>
-                  navigator.clipboard?.writeText(window.location.href)
-                }
-              >
-                Copy link
-              </Button>
-              <span className="ml-1 font-mono text-[10.5px] text-faint">
-                {app.id}
-              </span>
-              <SavedMark at={savedAt} />
-              <button
-                onClick={closeEditor}
-                aria-label="Done editing"
-                title="Done editing"
-                className="rounded border border-line p-1.5 text-muted transition-colors hover:border-line-strong hover:text-ink"
-              >
-                <PanelGlyph open />
-              </button>
-            </div>
+            {PAGE_ACTIONS && (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <Button size="sm" onClick={() => setPullOpen(true)}>
+                  Pull changes…
+                </Button>
+                <Button size="sm" onClick={fork}>
+                  Fork
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    navigator.clipboard?.writeText(window.location.href)
+                  }
+                >
+                  Copy link
+                </Button>
+                <span className="ml-1 font-mono text-[10.5px] text-faint">
+                  {app.id}
+                </span>
+              </div>
+            )}
 
             {editing ? (
               <div className="min-h-0 flex-1">
                 <ComponentEditor
                   // Its own data, not the explorer's — a saved component brings
                   // the references it was built against.
-                  key={editing.name ?? editing.def.kind}
+                  //
+                  // Keyed by the tile as well as the component: clicking one
+                  // chart and then another is two different tiles wearing the
+                  // same name, and without the index the editor kept the first
+                  // one's settings and refined source on screen for the second.
+                  key={`${replaceIndex ?? "new"}:${editing.name ?? editing.def.kind}`}
                   def={editing.def}
                   refs={editing.refs}
                   initialAsk={editing.ask}
@@ -519,6 +636,18 @@ export default function AppPage() {
                   }}
                   onAdd={addSpec}
                   onSave={saveSpec}
+                  // Only a tile can be deleted, and only a tile has a slot to
+                  // put a change back into — so the same fact decides both.
+                  onDelete={
+                    replaceIndex === null
+                      ? undefined
+                      : () => {
+                          const at = replaceIndex;
+                          setEditing(null);
+                          setReplaceIndex(null);
+                          void remove(at);
+                        }
+                  }
                 />
               </div>
             ) : (
@@ -634,73 +763,52 @@ export default function AppPage() {
                   )}
 
                   {stage === "data" ? (
+                    /*
+                      The explorer is the whole stage now. The bar that used to
+                      sit under it held the selection, the count and the way on
+                      — all three of which the panel was already showing one
+                      line further up, so it was furniture repeating what it
+                      framed. The chips moved to the top beside the heading and
+                      the button to the line that counts them.
+                    */
+                    <div className="min-h-0 flex-1">
+                      <DataExplorer
+                        selected={attached}
+                        onToggle={toggle}
+                        onClear={() => setAttached([])}
+                        onNext={() => setStage("build")}
+                      />
+                    </div>
+                  ) : (
                     <>
-                      <div className="min-h-0 flex-1">
-                        <DataExplorer selected={attached} onToggle={toggle} />
-                      </div>
                       {/*
-                        The selection, in hand: the same chips the picks made,
-                        removable here, clearable at once — and the door to the
-                        second step, which only opens once there is something
-                        to build with.
+                        Going forward used to take the selection off the screen:
+                        the chips lived in the explorer, and the step where you
+                        choose what to draw with them showed a count. The shapes
+                        on the shelf are offered or refused on the strength of
+                        this exact list, so it stays visible — one line, the same
+                        chips, removable, one step back at the left.
                       */}
-                      <div className="flex shrink-0 flex-col gap-2 rounded-lg border border-line bg-surface p-2">
-                        {attached.length > 0 && (
-                          <div className="dr-scroll flex gap-1.5 overflow-x-auto pb-0.5">
-                            {attached.map((r) => (
-                              <AttachedChip
-                                key={`${r.snippet}::${r.label}`}
-                                refr={r}
-                                onRemove={() => toggle(r)}
-                              />
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2.5">
+                      <div className="flex shrink-0 flex-col gap-1.5 rounded-lg border border-line bg-surface px-3 py-2">
+                        <button
+                          onClick={() => setStage("data")}
+                          className="flex items-center gap-2 text-left text-[12px] text-muted transition-colors hover:text-ink"
+                        >
+                          ‹ Data
                           <span className="font-mono text-[10px] text-faint">
                             {attached.length} selected
                           </span>
-                          {attached.length > 0 && (
-                            <button
-                              onClick={() => setAttached([])}
-                              className="text-[11px] text-muted transition-colors hover:text-fail"
-                            >
-                              Clear all
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setStage("build")}
-                            disabled={attached.length === 0}
-                            className={cx(
-                              "ml-auto rounded-md border px-3 py-1.5 text-[12px] transition-colors",
-                              attached.length === 0
-                                ? "border-line text-faint"
-                                : "border-accent-line bg-accent-dim text-accent hover:brightness-110",
-                            )}
-                          >
-                            {attached.length === 0
-                              ? "Select data to continue"
-                              : `Next: choose a component (${attached.length} series) ›`}
-                          </button>
-                        </div>
+                        </button>
+                        <SelectionStrip
+                          selected={attached}
+                          onRemove={toggle}
+                          onClear={() => setAttached([])}
+                        />
                       </div>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => setStage("data")}
-                        className="flex shrink-0 items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-left text-[12px] text-muted transition-colors hover:border-line-strong hover:text-ink"
-                      >
-                        ‹ Data
-                        <span className="font-mono text-[10px] text-faint">
-                          {attached.length} selected
-                        </span>
-                      </button>
                       <div className="min-h-0 flex-1">
                         <BuildPanel
                           refs={attached}
                           onDragStateChange={setDragging}
-                          onOpen={setEditing}
                           reloadKey={savedTick}
                         />
                       </div>
@@ -713,7 +821,10 @@ export default function AppPage() {
         )}
       </div>
 
-      <UsageDock spaceId={space} />
+      {/*
+        Clear of the sentence box while editing — the bar is 96 tall over a 16
+        gutter, and the dock steps up over it rather than sitting on it.
+      */}
 
       {pullOpen && (
         <PullDialog
@@ -997,25 +1108,5 @@ function SavedMark({ at }: { at: number | null }) {
     >
       ✓ Saved {when}
     </span>
-  );
-}
-
-/** Two panes, or one. Drawn rather than lettered — it sits in a row of numbers. */
-function PanelGlyph({ open }: { open: boolean }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
-      <rect
-        x="1"
-        y="2.5"
-        width="12"
-        height="9"
-        rx="1.5"
-        stroke="currentColor"
-        strokeWidth="1.2"
-      />
-      {open && (
-        <path d="M9 2.5 V11.5" stroke="currentColor" strokeWidth="1.2" />
-      )}
-    </svg>
   );
 }

@@ -11,6 +11,7 @@ import {
 } from "@/lib/workspace/components";
 import { refreshCost, tokenLabel, type DataRef } from "@/lib/workspace/catalog";
 import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
+import { SeriesStyles } from "@/components/workspace/SeriesStyles";
 import { readNdjson } from "@/lib/workspace/ndjson";
 import { useTheme } from "@/lib/useTheme";
 
@@ -45,6 +46,7 @@ export function ComponentEditor({
   onClose,
   onAdd,
   onSave,
+  onDelete,
 }: {
   def: ComponentDef;
   refs: DataRef[];
@@ -61,6 +63,12 @@ export function ComponentEditor({
   onClose: () => void;
   onAdd: (spec: ComponentSpec) => void;
   onSave: (spec: ComponentSpec) => void;
+  /**
+   * Take this tile off the screen. Present only when the editor was opened on
+   * a tile that is already there — which is also what turns the footer from
+   * "where should this go" into "keep it, or remove it".
+   */
+  onDelete?: () => void;
 }) {
   const [options, setOptions] = useState<Record<string, string>>(() =>
     withDefaults(def, initialOptions),
@@ -219,6 +227,22 @@ export function ComponentEditor({
             ))}
           </div>
 
+          {/*
+            ── How each series is drawn ──────────────────────────────────
+            The same control the inline preview carries, for the same reason:
+            a tile opened from the screen is the one most likely to need a
+            line repainted, and sending someone back to the shelf to change a
+            colour would mean rebuilding what they already have.
+          */}
+          <div className="mt-3">
+            <SeriesStyles
+              refs={refs}
+              kind={def.kind}
+              options={options}
+              onChange={(series) => set("series", series)}
+            />
+          </div>
+
           {/* ── Its data ─────────────────────────────────────────────── */}
           <div className="mt-3">
             <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
@@ -277,13 +301,35 @@ export function ComponentEditor({
         </div>
       </div>
 
+      {/*
+        Two footers, because there are two situations and they are not the same
+        question. Building something new asks "where does this go" — onto the
+        screen, or into your components for next time. Editing a tile that is
+        already on the screen asks neither: it is that tile, so the only things
+        to do are keep the change or take the tile off. Offering "add to
+        dashboard" there would have added a second copy of the thing being
+        edited.
+      */}
       <div className="flex items-center gap-2 border-t border-line px-3 py-2.5">
-        <Button tone="primary" size="sm" onClick={() => onAdd(spec)}>
-          Add to dashboard
-        </Button>
-        <Button size="sm" onClick={() => onSave(spec)}>
-          Save
-        </Button>
+        {onDelete ? (
+          <>
+            <Button tone="primary" size="sm" onClick={() => onAdd(spec)}>
+              Save
+            </Button>
+            <Button size="sm" onClick={onDelete}>
+              Delete
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button tone="primary" size="sm" onClick={() => onAdd(spec)}>
+              Add to dashboard
+            </Button>
+            <Button size="sm" onClick={() => onSave(spec)}>
+              Save
+            </Button>
+          </>
+        )}
         <span className={cx("ml-auto font-mono text-[9.5px] text-faint")}>
           ≈{cost.perDay.toLocaleString()} DRY/day
         </span>

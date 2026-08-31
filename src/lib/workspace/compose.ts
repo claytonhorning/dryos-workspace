@@ -147,6 +147,21 @@ function gridX(x) {
   const track = "(100% - " + (GRID_COLS - 1) * GRID_GAP + "px) / " + GRID_COLS;
   return "calc(" + track + " * " + x + " + " + x * GRID_GAP + "px)";
 }
+/**
+ * A number on an axis, at the precision an axis can carry.
+ *
+ * Thousands lose their decimals entirely, everything else keeps one. Recharts
+ * prints whatever the data has — six figures for a settlement price — and five
+ * of those across the foot of a tile is a row of digits nobody reads.
+ */
+function axisNum(v) {
+  const n = Number(v);
+  if (!isFinite(n)) return "";
+  const a = Math.abs(n);
+  if (a >= 1000) return Math.round(n).toLocaleString();
+  return (Math.round(n * 10) / 10).toString();
+}
+
 function gridW(w) {
   const track = "(100% - " + (GRID_COLS - 1) * GRID_GAP + "px) / " + GRID_COLS;
   return "calc(" + track + " * " + w + " + " + (w - 1) * GRID_GAP + "px)";
@@ -172,10 +187,37 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
   const [dragging, setDragging] = useState(false);
   const [over, setOver] = useState(null);
   const [full, setFull] = useState(false);
+  const [hover, setHover] = useState(false);
+  // Whether the page is being edited, and which tile the panel has open. Both
+  // are the host's to know — it owns the panel the settings appear in — so they
+  // arrive by message rather than being inferred in here.
+  const [edit, setEdit] = useState(false);
+  const [picked, setPicked] = useState(null);
   // Stamped by buildDocument for previews: looking, not arranging.
   const bare = typeof window !== "undefined" && window.__dryosBare;
+  /* A tile is picked by clicking it, and only while the page is being edited —
+     outside edit mode there is no panel for the settings to appear in, and a
+     click that opens nothing is worse than a click that does nothing. */
+  const selectable =
+    !bare && !full && edit && typeof window !== "undefined" && window.parent !== window;
+  /** Where the pointer went down, so a drag is never mistaken for a click. */
+  const from = useRef(null);
 
   useEffect(() => setSize({ w: w || 6, h: h || 240 }), [w, h]);
+
+  /* Every tile listens for itself rather than the App handing it down: the
+     annex wrapper renders sections too, and it has no state to thread. */
+  useEffect(() => {
+    if (window.parent === window) return;
+    const onHost = (e) => {
+      const m = e.data;
+      if (!m || typeof m !== "object" || m.__dryos !== "mode") return;
+      setEdit(Boolean(m.edit));
+      setPicked(typeof m.selected === "number" ? m.selected : null);
+    };
+    window.addEventListener("message", onHost);
+    return () => window.removeEventListener("message", onHost);
+  }, []);
 
   useEffect(() => {
     if (!full) return;
@@ -308,8 +350,20 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         // drawing the tile's own inside it reads as a frame around a frame.
         border: bare
           ? "none"
-          : "1px solid " + (dragging ? "var(--accent)" : over ? "var(--info)" : "var(--line)"),
+          : "1px solid " +
+            (dragging || picked === index
+              ? "var(--accent)"
+              : over
+                ? "var(--info)"
+                : selectable && hover
+                  ? "var(--line-strong)"
+                  : "var(--line)"),
         borderRadius: 8,
+        // The picked tile is the one the panel is talking about, so it is
+        // stated twice — a second ring, because one hairline of accent is the
+        // same weight as the hover it has to be told apart from.
+        boxShadow: picked === index ? "0 0 0 2px var(--accent-dim)" : "none",
+        cursor: selectable ? "pointer" : "default",
         display: "flex",
         flexDirection: "column",
         gridColumn: "span " + size.w,
@@ -320,7 +374,26 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       };
 
   return (
-    <section ref={box} data-tile={index} style={frame}>
+    <section
+      ref={box}
+      data-tile={index}
+      style={frame}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onPointerDown={(e) => { from.current = { x: e.clientX, y: e.clientY }; }}
+      onClick={(e) => {
+        if (!selectable) return;
+        /* Three things a click here is not: a press of the tile's own chrome,
+           a control inside the component, or the tail of a drag — a map panned
+           by six pixels ends in a click event like any other. */
+        if (e.target.closest && e.target.closest("button, a, input, select, textarea, [data-nopick]")) return;
+        const d = from.current;
+        if (d && Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 6) return;
+        window.dispatchEvent(
+          new CustomEvent("dryos:tileconfigure", { detail: { index } }),
+        );
+      }}
+    >
       <header style={{ alignItems: "center", display: "flex", gap: 8, marginBottom: 8 }}>
         {/*
           The header is the handle. Dragging a tile by its body would fight every
@@ -328,6 +401,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         */}
         {!bare && (
         <span
+          data-nopick
           draggable={!full}
           onDragStart={(e) => {
             e.dataTransfer.setData("text/dryos-tile", String(index));
@@ -384,28 +458,11 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
           {full ? "✕" : "⤢"}
         </button>
         )}
-        {!bare && !full && window.parent !== window && (
-          <button
-            onClick={() =>
-              window.dispatchEvent(
-                new CustomEvent("dryos:tileconfigure", { detail: { index } }),
-              )
-            }
-            title="Configure this component"
-            style={{
-              background: "transparent",
-              border: "1px solid var(--line)",
-              borderRadius: 4,
-              color: "var(--faint)",
-              cursor: "pointer",
-              fontSize: 10,
-              lineHeight: 1,
-              padding: "3px 5px",
-            }}
-          >
-            ⚙
-          </button>
-        )}
+        {/*
+          No ⚙. The tile is its own button while the page is being edited —
+          clicking anywhere on it opens its settings — so a control that meant
+          "this one" was a second way to say what pointing at it already says.
+        */}
         {!bare && !full && window.parent !== window && (
           <button
             onClick={() =>
@@ -460,6 +517,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       {/* Bottom-right corner, the way every resizable panel has worked forever. */}
       {!bare && !full && (
         <span
+          data-nopick
           onPointerDown={grab}
           title="Drag to resize"
           style={{
@@ -610,9 +668,18 @@ function ChartTip({ active, payload, label, unit }) {
       </div>
       {payload.map((p) => (
         <div key={p.dataKey} style={{ color: "var(--ink)" }}>
-          {/* Stacked areas wear a surface-coloured stroke as the gap between
-              segments, so identity lives in the fill there. */}
-          <span style={{ color: p.fill && p.fill !== "none" ? p.fill : p.stroke }}>■ </span>
+          {/*
+            The line's own colour, which is its stroke.
+
+            Reading the fill first drew every one of these white: a recharts
+            Line carries fill "#fff" by default and never paints it, so the
+            marker that is supposed to say which line this is said nothing at
+            all. The one case where the stroke is not the identity is a stacked
+            area — there the stroke is the surface-coloured hairline between
+            segments and the fill is the colour — so that is the exception, not
+            the rule.
+          */}
+          <span style={{ color: p.stroke && p.stroke !== "var(--surface)" ? p.stroke : p.fill }}>■ </span>
           {p.name}: <strong>{p.value == null ? "—" : Number(p.value).toFixed(2)}</strong> {unit}
         </div>
       ))}
@@ -706,15 +773,96 @@ export function composeApp(input: ComponentSpec[]): string {
   });
 
   if (manifest.length === 0) {
+    /*
+      An empty screen shows the gesture instead of describing it.
+
+      It used to carry a heading and a sentence — including "no model involved",
+      which is an argument about how the product works, aimed at somebody who
+      has not used it yet and is not asking. What is actually needed here is one
+      thing: that a component arrives by being dragged onto this surface. So the
+      canvas drifts, a component slides into an empty slot on a loop, and the
+      only words are the six that name the two steps.
+    */
     return `${PREAMBLE}
 
 export default function App() {
   return (
-    <div style={{ alignItems: "center", border: "1px dashed var(--line-strong)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6, justifyContent: "center", minHeight: 260, padding: 24, textAlign: "center" }}>
-      <p style={{ color: "var(--ink)", fontSize: 15, fontWeight: 600, margin: 0 }}>Nothing on this dashboard yet</p>
-      <p style={{ color: "var(--muted)", fontSize: 13, margin: 0, maxWidth: 420 }}>
-        Pick data in the explorer, choose a shape, and it is generated here — no model involved.
-      </p>
+    <div
+      style={{
+        alignItems: "center",
+        borderRadius: 8,
+        display: "flex",
+        justifyContent: "center",
+        minHeight: "calc(100vh - 32px)",
+        overflow: "hidden",
+        position: "relative",
+      }}
+    >
+      {/* The ground: a slow wash of the accent, well under the threshold of
+          being noticed, so the surface reads as live rather than blank. */}
+      <div
+        aria-hidden
+        className="dr-drift"
+        style={{
+          background:
+            "radial-gradient(60% 55% at 50% 42%, color-mix(in oklab, var(--accent) 14%, transparent), transparent 70%)," +
+            "radial-gradient(45% 45% at 78% 78%, color-mix(in oklab, var(--info) 10%, transparent), transparent 70%)",
+          inset: "-10%",
+          position: "absolute",
+        }}
+      />
+
+      <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 14, position: "relative" }}>
+        {/* The slot, and the component landing in it. */}
+        <div
+          className="dr-slot"
+          style={{
+            alignItems: "center",
+            border: "1px dashed var(--line-strong)",
+            borderRadius: 10,
+            display: "flex",
+            height: 104,
+            justifyContent: "center",
+            width: 168,
+          }}
+        >
+          <div
+            className="dr-drop"
+            style={{
+              alignItems: "center",
+              background: "var(--surface)",
+              border: "1px solid var(--accent)",
+              borderRadius: 8,
+              boxShadow: "0 8px 24px rgba(0,0,0,.28)",
+              display: "flex",
+              height: 76,
+              justifyContent: "center",
+              width: 140,
+            }}
+          >
+            <svg width="104" height="40" viewBox="0 0 104 40" fill="none" aria-hidden>
+              <polyline
+                points="4,30 20,22 34,26 50,10 66,18 82,6 100,14"
+                stroke="var(--s1)"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <polyline
+                points="4,36 20,33 34,34 50,27 66,31 82,24 100,29"
+                stroke="var(--s2)"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        </div>
+
+        <p style={{ color: "var(--muted)", fontSize: 12.5, margin: 0 }}>
+          Pick data, then drag a component here
+        </p>
+      </div>
     </div>
   );
 }
