@@ -1251,6 +1251,92 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  {
+    id: "weather.forecast.official",
+    path: ["Weather", "Forecast", "Official (NWS)"],
+    name: "NWS forecast by weather zone",
+    dataset: "noaa-gridpoint-forecast",
+    availability: "live",
+    cadence: { label: "reissued through the day", seconds: 3_600 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 8,
+      label: "weather zones",
+      sample: ["NORTH_C", "COAST", "WEST"],
+    },
+    entityKey: "zone",
+    located: true,
+    blurb:
+      "The National Weather Service's own forecast for the same eight zones — " +
+      "the official record, sampled at the same points as the Open-Meteo " +
+      "stream so the two are directly comparable. Carries gusts, chance of " +
+      "precipitation and expected accumulation. Each forecast office issues " +
+      "on its own schedule and every issue is kept.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 31) },
+    variables: [
+      {
+        key: "temperature_c",
+        label: "Temperature",
+        unit: "°C",
+        availability: "live",
+        description: "Forecast air temperature.",
+        mock: { base: 27, swing: 9, noise: 1 },
+      },
+      {
+        key: "wind_gust_ms",
+        label: "Gust",
+        unit: "m/s",
+        availability: "live",
+        description: "Forecast peak gust — the column the Open-Meteo stream does not carry.",
+        mock: { base: 8, swing: 5, noise: 1.2, floor: 0 },
+      },
+      {
+        key: "precip_probability_pct",
+        label: "Chance of precipitation",
+        unit: "%",
+        availability: "live",
+        description:
+          "Chance of measurable precipitation. Published over runs of six to " +
+          "thirty-five hours, so it is coarser than the hour it sits on.",
+        mock: { base: 25, swing: 25, noise: 6, floor: 0 },
+      },
+      {
+        key: "precip_amount_mm",
+        label: "Expected rainfall",
+        unit: "mm",
+        availability: "live",
+        description:
+          "Accumulation over the run it was published for, repeated on each " +
+          "hour of that run — so summing it over a day counts each figure six times.",
+        mock: { base: 0.4, swing: 0.8, noise: 0.2, floor: 0 },
+      },
+      {
+        key: "sky_cover_pct",
+        label: "Cloud cover",
+        unit: "%",
+        availability: "live",
+        description: "Forecast cloud cover.",
+        mock: { base: 45, swing: 35, noise: 8, floor: 0 },
+      },
+      {
+        key: "wind_speed_ms",
+        label: "Wind at surface",
+        unit: "m/s",
+        availability: "live",
+        description: "Forecast sustained wind at 10 m.",
+        mock: { base: 4, swing: 2.5, noise: 0.7, floor: 0 },
+      },
+      {
+        key: "relative_humidity_pct",
+        label: "Relative humidity",
+        unit: "%",
+        availability: "live",
+        description: "Forecast relative humidity.",
+        mock: { base: 58, swing: 25, noise: 5, floor: 0 },
+      },
+    ],
+  },
 ];
 
 /** The one schema with a collector behind it. */
