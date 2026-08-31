@@ -46,6 +46,20 @@ export function SpaceView({ spaceId }: { spaceId: string }) {
       .catch(() => {});
   }, [spaceId]);
 
+  /*
+    Create a page and go to it.
+    ...
+    The busy state is deliberately *not* cleared on the way out. `router.push`
+    returns the moment it is called, not when the new route has rendered — so
+    clearing it in a `finally` put the button back to "New page" while the old
+    screen was still up and the server was still working. The click read as
+    having finished and done nothing, which is worse than no indicator at all:
+    an indicator that lies about being done invites a second click, and this
+    endpoint creates a page per call.
+
+    So it stays pending until this component unmounts, which is what navigation
+    does to it. Only a failure clears it, because only a failure leaves you here.
+  */
   async function addPage() {
     if (creating) return;
     setCreating(true);
@@ -58,8 +72,9 @@ export function SpaceView({ spaceId }: { spaceId: string }) {
       const { page } = await res.json();
       // Straight into edit mode: a page that has just been created is empty,
       // and nobody makes one in order to look at nothing.
-      if (page) router.push(`/workspace/${spaceId}/${page.id}?edit=1`);
-    } finally {
+      if (page) return router.push(`/workspace/${spaceId}/${page.id}?edit=1`);
+      setCreating(false);
+    } catch {
       setCreating(false);
     }
   }
@@ -84,8 +99,11 @@ export function SpaceView({ spaceId }: { spaceId: string }) {
     setDeleting(true);
     try {
       await fetch(`/api/workspace/spaces/${spaceId}`, { method: "DELETE" });
+      // Stays pending through the navigation, same as creating: this workspace
+      // is gone, and a re-enabled Delete on a page about to disappear is an
+      // invitation to press it again.
       router.push("/workspace");
-    } finally {
+    } catch {
       setDeleting(false);
     }
   }

@@ -33,6 +33,16 @@ export async function POST(req: Request) {
     start?: string;
     end?: string;
     limit?: number;
+    /**
+     * Bucket size for a rollup — "15m", "1h", "1d" — and how each bucket is
+     * reduced. Absent means raw rows, which is what every existing caller gets.
+     *
+     * This is what a window longer than a week costs: a quarter of five-minute
+     * prices is 25,900 rows per series, past the cap below and past what a
+     * chart can draw. Bucketed at an hour it is 2,160 and reads better.
+     */
+    interval?: string;
+    agg?: "avg" | "min" | "max";
     /** Which screen asked, so a screen can be told what it costs. */
     appId?: string;
   };
@@ -81,6 +91,8 @@ export async function POST(req: Request) {
         if (node) url.searchParams.set("node", node);
         if (start) url.searchParams.set("start", start);
         if (end) url.searchParams.set("end", end);
+        if (body.interval) url.searchParams.set("interval", body.interval);
+        if (body.agg) url.searchParams.set("agg", body.agg);
         url.searchParams.set("limit", String(limit));
 
         const res = await fetch(url, { cache: "no-store", headers: auth });

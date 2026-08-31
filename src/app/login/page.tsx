@@ -35,6 +35,7 @@ function LoginCard() {
     setBusy(true);
     setError(null);
     setNotice(null);
+    let leaving = false;
 
     const supabase = supabaseBrowser();
     try {
@@ -63,10 +64,17 @@ function LoginCard() {
           );
         }
       }
+      // Still pending on the way out: `router.push` returns before the next
+      // route renders, and a Sign in button that re-enables mid-navigation
+      // reads as a failed attempt worth repeating.
+      leaving = true;
       router.push(next);
       router.refresh();
     } finally {
-      setBusy(false);
+      // Every other exit — a bad password, a confirmation notice, a thrown
+      // request — stays on this page, and a button left spinning there is
+      // stuck rather than busy.
+      if (!leaving) setBusy(false);
     }
   }
 

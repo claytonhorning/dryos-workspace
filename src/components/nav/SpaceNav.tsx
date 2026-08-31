@@ -73,8 +73,15 @@ export function SpaceNav({
       const { page } = await res.json();
       // Straight into edit mode: a page that has just been created is empty,
       // and nobody makes one in order to look at nothing.
-      if (page) router.push(`/workspace/${spaceId}/${page.id}?edit=1`);
-    } finally {
+      //
+      // Left pending through the navigation on purpose — `router.push` returns
+      // before the new route renders, so clearing it here put the `+` back
+      // while the old screen was still up. A control that says it has finished
+      // when it has not is an invitation to press it again, and each press
+      // creates a page.
+      if (page) return router.push(`/workspace/${spaceId}/${page.id}?edit=1`);
+      setCreating(false);
+    } catch {
       setCreating(false);
     }
   }
