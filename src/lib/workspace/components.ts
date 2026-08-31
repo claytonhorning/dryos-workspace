@@ -1805,18 +1805,20 @@ const map: ComponentDef = {
   ],
   accepts(refs) {
     /*
-      Three ways to be mappable, and only one of them needs a lookup table.
+      Four ways to be mappable, and only one of them needs a lookup table.
 
-      A gridded field and a moving fleet both carry their own position — the
-      grid in its cell id, the fleet in every row — so neither is asked whether
-      we happen to know where its entities are. Only named places are, and for
-      those the answer really is no when we do not.
+      A gridded field, a moving fleet and a located stream all carry their own
+      position — the grid in its cell id, the fleet and the located stream in
+      every row — so none of them is asked whether we happen to know where its
+      entities are. Only named places are, and for those the answer really is
+      no when we do not.
     */
     const hasField = refs.some((r) => schemaById(r.schemaId)?.field);
     const hasMotion = refs.some((r) => schemaById(r.schemaId)?.motion);
+    const hasLocated = refs.some((r) => schemaById(r.schemaId)?.located);
 
     if (refs.length === 0) return { ok: false, why: "Pick a series." };
-    if (hasField || hasMotion) return { ok: true };
+    if (hasField || hasMotion || hasLocated) return { ok: true };
 
     const nodes = refs.flatMap((r) => {
       const n = node(r);
@@ -1839,7 +1841,19 @@ const map: ComponentDef = {
     );
     const s = series(pointRefs.length ? pointRefs : refs);
 
-    const nodes = [
+    /*
+      A located stream places its own pins, so none of the lookup below applies
+      to it: the coordinates arrive on the rows and the entities are whatever
+      the query returns, which means a station the source adds tomorrow appears
+      without anyone editing a table. Mixing one with an ERCOT stream in a
+      single map is not offered — two placement rules in one layer is a
+      different component — so the located ref wins the layer outright.
+    */
+    const locatedRef = pointRefs.find((r) => schemaById(r.schemaId)?.located);
+    const locatedSchema = locatedRef ? schemaById(locatedRef.schemaId) : undefined;
+    const locatedEntity = locatedSchema?.entityKey ?? "";
+
+    const nodes = locatedRef ? [] : [
       ...new Set(
         pointRefs.flatMap((r) => {
           const n = node(r);
@@ -1877,21 +1891,36 @@ const map: ComponentDef = {
   const COLUMN = ${JSON.stringify(s[0]?.column ?? "")};
   const UNIT = ${JSON.stringify(s[0]?.unit ?? "")};
   const STYLE = ${JSON.stringify(o.style)};
+  const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label }) : "null"};
   const FIELD = ${showField ? JSON.stringify({ dataset: fieldDataset, column: fieldColumn, unit: fieldUnit, mode: o.field, label: fieldRef!.label }) : "null"};
   const MOTION = ${motionRef ? JSON.stringify({ dataset: motionDataset, trails, label: motionRef.label }) : "null"};
 
   const { rows, error, loading } = useSeries(
     [
-${nodes.length ? `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 },` : ""}
+${
+  locatedRef
+    ? /*
+         No node filter: a located stream fans out, so the query asks for the
+         whole stream and the pins are whatever came back. `end` is the
+         load-bearing half — a forecast's newest row is seven days out, and a
+         map of "now" that drew next Sunday would be wrong in a way nobody
+         would catch by looking at it. Bounded at now, the newest row is the
+         current one for observations and forecasts alike.
+      */
+      `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, end: "-0m", limit: ${Math.min(2000, Math.max(60, (locatedSchema?.entities.count ?? 50) * 24))} },`
+    : nodes.length
+      ? `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 },`
+      : ""
+}
 ${showField ? `      { dataset: ${JSON.stringify(fieldDataset)}, start: "-1h", limit: 1 },` : ""}
 ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m", limit: ${motionLimit} },` : ""}
     ],
     ${refreshMs(refs)},
   );
 
-  const pointRows = ${nodes.length ? "rows[0] || []" : "[]"};
-  const fieldRows = ${showField ? `rows[${nodes.length ? 1 : 0}] || []` : "[]"};
-  const flightRows = ${motionRef ? `rows[${(nodes.length ? 1 : 0) + (showField ? 1 : 0)}] || []` : "[]"};
+  const pointRows = ${locatedRef || nodes.length ? "rows[0] || []" : "[]"};
+  const fieldRows = ${showField ? `rows[${locatedRef || nodes.length ? 1 : 0}] || []` : "[]"};
+  const flightRows = ${motionRef ? `rows[${(locatedRef || nodes.length ? 1 : 0) + (showField ? 1 : 0)}] || []` : "[]"};
 
   const ready = useMapbox();
   const theme = useFrameTheme();
@@ -1901,9 +1930,34 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   const map = React.useRef(null);
   const markers = React.useRef([]);
 
-  const latest = React.useMemo(() => {
+  /*
+    Where each pin goes, and what it reads.
+
+    Two sources for the same shape. A lookup stream is placed from the table
+    compiled in above and its rows carry one value per node. A located stream
+    brings both: the newest row per entity carries the coordinate and the
+    value together, so a place appears the moment the source publishes one.
+
+    Rows arrive newest-first, so the first row seen for an entity is its
+    current one and later rows are history — hence the guard rather than an
+    assignment that would leave the oldest reading winning.
+  */
+  const placed = React.useMemo(() => {
     const out = {};
-    pointRows.forEach((r) => { out[r.node] = r[COLUMN]; });
+    if (LOCATED) {
+      pointRows.forEach((r) => {
+        const id = r[LOCATED.entity];
+        if (id == null || out[id]) return;
+        if (typeof r.lat !== "number" || typeof r.lon !== "number") return;
+        out[id] = { lon: r.lon, lat: r.lat, label: String(id), value: r[COLUMN], exact: true };
+      });
+    } else {
+      NODES.forEach((n) => {
+        const row = pointRows.find((r) => r.node === n);
+        if (!row) return;
+        out[n] = { ...POINTS[n], value: row[COLUMN], exact: false };
+      });
+    }
     return out;
   }, [rows]);
 
@@ -2233,13 +2287,14 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     markers.current.forEach((mk) => mk.remove());
     markers.current = [];
 
-    const values = NODES.map((n) => latest[n]).filter((v) => typeof v === "number");
+    const ids = Object.keys(placed);
+    const values = ids.map((n) => placed[n].value).filter((v) => typeof v === "number");
     if (!values.length) return;
     const lo = Math.min(...values);
     const hi = Math.max(...values);
 
-    NODES.forEach((n) => {
-      const v = latest[n];
+    ids.forEach((n) => {
+      const v = placed[n].value;
       if (typeof v !== "number") return;
       const t = hi === lo ? 0.5 : (v - lo) / (hi - lo);
       const el = document.createElement("div");
@@ -2248,17 +2303,22 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         ";border:1px solid rgba(0,0,0,.45);border-radius:999px;color:#0d1206;display:flex;font:600 10px/1 ui-sans-serif,system-ui;" +
         "height:" + (22 + t * 16) + "px;justify-content:center;width:" + (22 + t * 16) + "px;";
       el.textContent = v.toFixed(0);
+      // The caveat is only true of a lookup. A located stream publishes where
+      // it measured, so claiming that is approximate would be a lie about a
+      // runway — and the caveat's whole job is to stop a centroid reading as
+      // a substation.
       const popup = new window.mapboxgl.Popup({ offset: 14 }).setText(
-        POINTS[n].label + " — " + v.toFixed(2) + " " + UNIT + " (approximate location)"
+        placed[n].label + " — " + v.toFixed(2) + " " + UNIT +
+        (placed[n].exact ? "" : " (approximate location)")
       );
       markers.current.push(
         new window.mapboxgl.Marker({ element: el })
-          .setLngLat([POINTS[n].lon, POINTS[n].lat])
+          .setLngLat([placed[n].lon, placed[n].lat])
           .setPopup(popup)
           .addTo(map.current)
       );
     });
-  }, [latest, ready, style]);
+  }, [placed, ready, style]);
 
   if (ready === "no-token") {
     return (
@@ -2302,9 +2362,19 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         </div>
       )}
 
-      <p style={{ background: "var(--bg)", borderRadius: 4, bottom: 4, color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px", position: "absolute", right: 4, zIndex: 2 }}>
+      ${
+        /*
+          The caveat is a caveat, not a caption — so it appears only when it is
+          true. A located stream publishes where it measured, and stamping
+          "approximate" across a map of published coordinates trains people to
+          ignore the word on the maps where it matters.
+        */
+        locatedRef && !anyMock
+          ? ""
+          : `<p style={{ background: "var(--bg)", borderRadius: 4, bottom: 4, color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px", position: "absolute", right: 4, zIndex: 2 }}>
         ${anyMock ? "Mock field · approximate positions" : "Approximate zone centroids"}
-      </p>
+      </p>`
+      }
     </Section>
   );
 }`,

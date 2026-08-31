@@ -92,6 +92,22 @@ export interface Schema {
    */
   motion?: boolean;
   /**
+   * The rows carry their own `lat`/`lon`, so no lookup table is needed.
+   *
+   * `geo.ts` exists because the ERCOT feeds publish a price against a *name* and
+   * there is no honest way to derive a coordinate from the data — so it supplies
+   * approximate centroids, and every popup drawn from it says so. A weather
+   * source is the opposite case: NWS puts the station's published coordinates on
+   * every observation and a model sample is defined by the point sampled. The
+   * position is the source's own answer.
+   *
+   * So a located schema is exempt from the `hasGeography` check the way `field`
+   * and `motion` already are — it cannot fail it, because it brings the answer —
+   * and its pins are placed from the rows and drop the "approximate" caveat,
+   * which would be a lie about a runway.
+   */
+  located?: boolean;
+  /**
    * Who is accountable for this feed. Absent means nobody has claimed it yet —
    * which is the honest state of every schema that has no collector, and the
    * reason the workspace shows the roster rather than hiding the gaps.
@@ -1085,6 +1101,153 @@ export const SCHEMAS: Schema[] = [
         description: "Forecast temperature for the zone.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 78, swing: 16, noise: 2 },
+      },
+    ],
+  },
+
+  // ── Weather ──────────────────────────────────────────────────────────
+  // The second domain, and the first data in the catalogue that is not
+  // ERCOT's. Both streams carry their own coordinates, so both are `located`.
+  {
+    id: "weather.observations.surface",
+    path: ["Weather", "Observations", "Surface"],
+    name: "Surface observations",
+    dataset: "noaa-station-observations",
+    availability: "live",
+    cadence: { label: "hourly, plus specials", seconds: 3_600 },
+    tokens: 0.5,
+    entities: {
+      count: 25,
+      label: "stations",
+      sample: ["KAUS", "KDFW", "KIAH"],
+    },
+    entityKey: "station",
+    located: true,
+    blurb:
+      "What the weather actually did: temperature, dew point, wind, pressure " +
+      "and visibility from 25 airport stations across the eight ERCOT weather " +
+      "zones. Filed hourly and again whenever conditions change. Collected " +
+      "from the NWS API, reconciled against live responses.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 31) },
+    variables: [
+      {
+        key: "temperature_c",
+        label: "Temperature",
+        unit: "°C",
+        availability: "live",
+        description: "Air temperature at the station.",
+        mock: { base: 26, swing: 8, noise: 1.2 },
+      },
+      {
+        key: "dewpoint_c",
+        label: "Dew point",
+        unit: "°C",
+        availability: "live",
+        description: "Dew point — how much moisture the air is holding.",
+        mock: { base: 19, swing: 5, noise: 1 },
+      },
+      {
+        key: "relative_humidity_pct",
+        label: "Relative humidity",
+        unit: "%",
+        availability: "live",
+        description: "Relative humidity, derived from temperature and dew point.",
+        mock: { base: 62, swing: 25, noise: 4, floor: 0 },
+      },
+      {
+        key: "wind_speed_ms",
+        label: "Wind speed",
+        unit: "m/s",
+        availability: "live",
+        description: "Wind speed at the standard 10 m observing height.",
+        mock: { base: 4, swing: 3, noise: 0.8, floor: 0 },
+      },
+      {
+        key: "pressure_hpa",
+        label: "Pressure",
+        unit: "hPa",
+        availability: "live",
+        description: "Barometric pressure at station level.",
+        mock: { base: 1013, swing: 8, noise: 1 },
+      },
+    ],
+  },
+  {
+    id: "weather.forecast.zone",
+    path: ["Weather", "Forecast", "By ERCOT zone"],
+    name: "Hourly forecast by weather zone",
+    dataset: "openmeteo-zone-forecast",
+    availability: "live",
+    cadence: { label: "hourly, 7 days ahead", seconds: 3_600 },
+    tokens: 0.5,
+    entities: {
+      count: 8,
+      label: "weather zones",
+      sample: ["NORTH_C", "COAST", "WEST"],
+    },
+    entityKey: "zone",
+    located: true,
+    blurb:
+      "Seven days of hourly forecast sampled at each ERCOT weather zone — " +
+      "including wind at 100 m and surface irradiance, the two variables that " +
+      "predict wind and solar output and that no NOAA endpoint publishes. " +
+      "Served as the newest view of each hour; every issue is kept. " +
+      "Data by Open-Meteo, CC-BY-4.0.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 31) },
+    variables: [
+      {
+        key: "temperature_c",
+        label: "Temperature",
+        unit: "°C",
+        availability: "live",
+        description: "Forecast air temperature at 2 m.",
+        mock: { base: 27, swing: 9, noise: 1 },
+      },
+      {
+        key: "wind_speed_100m_ms",
+        label: "Wind at hub height",
+        unit: "m/s",
+        availability: "live",
+        description:
+          "Forecast wind speed at 100 m — turbine hub height, so this is the " +
+          "column that predicts wind generation.",
+        mock: { base: 7, swing: 4, noise: 1, floor: 0 },
+      },
+      {
+        key: "shortwave_radiation_wm2",
+        label: "Irradiance",
+        unit: "W/m²",
+        availability: "live",
+        description:
+          "Forecast global horizontal irradiance — what predicts solar output. " +
+          "Zero overnight, by definition.",
+        mock: { base: 380, swing: 380, noise: 30, floor: 0 },
+      },
+      {
+        key: "cloud_cover_pct",
+        label: "Cloud cover",
+        unit: "%",
+        availability: "live",
+        description: "Forecast total cloud cover.",
+        mock: { base: 45, swing: 35, noise: 8, floor: 0 },
+      },
+      {
+        key: "relative_humidity_pct",
+        label: "Relative humidity",
+        unit: "%",
+        availability: "live",
+        description: "Forecast relative humidity at 2 m.",
+        mock: { base: 58, swing: 25, noise: 5, floor: 0 },
+      },
+      {
+        key: "wind_speed_10m_ms",
+        label: "Wind at surface",
+        unit: "m/s",
+        availability: "live",
+        description:
+          "Forecast wind speed at 10 m — the height observations report, so " +
+          "this is the column that compares to them.",
+        mock: { base: 4, swing: 2.5, noise: 0.7, floor: 0 },
       },
     ],
   },
