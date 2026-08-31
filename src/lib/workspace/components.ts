@@ -1900,6 +1900,9 @@ const map: ComponentDef = {
     return {
       imports: [],
       code: `function ${name}({ w, h }) {
+  // Sixteen points, because a wind direction read as "SSE" is the one a
+  // forecaster would say out loud and "157.5 degrees" is not.
+  const CARDINALS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
   const POINTS = ${JSON.stringify(points, null, 2).replace(/\n/g, "\n  ")};
   const NODES = Object.keys(POINTS);
   const COLUMN = ${JSON.stringify(s[0]?.column ?? "")};
@@ -2187,6 +2190,43 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     outside it. Drifting them onward through absent data would be inventing
     wind, which is the one thing this whole stream exists to avoid.
   */
+  /*
+    What the wind is doing where the pointer is.
+
+    Read straight out of flow.at(), which is the same bilinear interpolation the
+    particles are advected through — so the number in the readout is the number
+    that moved the streak under the cursor, rather than the nearest cell's value
+    rounded to a different answer.
+
+    Off the grid it reads nothing at all. There is no wind here to report at the
+    edge of the data, and a readout that kept showing the last value it saw
+    would be the same invention the whole stream exists to avoid.
+  */
+  const [probe, setProbe] = React.useState(null);
+  React.useEffect(() => {
+    const m = map.current;
+    if (!m || !flow || !ready || ready === "no-token") return;
+    const move = (e) => {
+      const f = flow.at(e.lngLat.lng, e.lngLat.lat);
+      if (!f) return setProbe(null);
+      const oe = e.originalEvent;
+      setProbe({
+        spd: f.spd,
+        // Back to the published convention: the bearing the wind comes FROM,
+        // which is the negation of the velocity we advect along.
+        dir: (Math.atan2(-f.u, -f.v) * 180) / Math.PI,
+        lat: e.lngLat.lat,
+        lon: e.lngLat.lng,
+        x: oe.clientX,
+        y: oe.clientY,
+      });
+    };
+    const off = () => setProbe(null);
+    m.on("mousemove", move);
+    m.on("mouseout", off);
+    return () => { m.off("mousemove", move); m.off("mouseout", off); setProbe(null); };
+  }, [flow, ready]);
+
   const veil = React.useRef(null);
   React.useEffect(() => {
     const cv = veil.current, m = map.current;
@@ -2257,21 +2297,42 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       g.fillStyle = "rgba(0,0,0,0.035)";
       g.fillRect(0, 0, r.width, r.height);
       g.globalCompositeOperation = "source-over";
-      g.lineWidth = 1.5;
       for (const p of parts) {
         const f = flow.at(p.lon, p.lat);
         if (!f || ++p.age > MAX_AGE) { spawn(p); continue; }
         const a = m.project([p.lon, p.lat]);
-        p.lon += f.u * PACE;
-        p.lat += f.v * PACE;
+        /*
+          A degree of longitude is shorter than a degree of latitude, by the
+          cosine of the latitude — 0.86 at the middle of this grid. Stepping
+          both by the same number of degrees therefore moves a particle about
+          16% too far east or west for the distance it moves north or south,
+          which is not a speed error but a *direction* error: every vector is
+          rotated toward the horizontal, by up to 7 degrees on a diagonal. The
+          particles looked plausible and disagreed with the bearing the source
+          published.
+
+          Distance per frame stays proportional to speed, because u and v carry
+          the magnitude — a 10 m/s cell steps ten times as far as a 1 m/s one,
+          and draws ten times the streak in the same fade window.
+        */
+        const dLat = f.v * PACE;
+        const dLon = (f.u * PACE) / Math.max(0.2, Math.cos((p.lat * Math.PI) / 180));
+        p.lat += dLat;
+        p.lon += dLon;
         const b = m.project([p.lon, p.lat]);
         if (a.x < -40 || a.x > r.width + 40 || a.y < -40 || a.y > r.height + 40) continue;
+        // Speed reads three ways at once — length, weight and brightness —
+        // because length alone is easy to miss against a moving field.
+        const t = flow.hi === flow.lo ? 0.5 : (f.spd - flow.lo) / (flow.hi - flow.lo);
+        g.globalAlpha = 0.55 + 0.45 * t;
+        g.lineWidth = 1.0 + 1.5 * t;
         g.strokeStyle = colour(f.spd);
         g.beginPath();
         g.moveTo(a.x, a.y);
         g.lineTo(b.x, b.y);
         g.stroke();
       }
+      g.globalAlpha = 1;
       raf = requestAnimationFrame(frame);
     };
 
@@ -2550,6 +2611,56 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       {/* Over the map, under the markers, and deaf to the pointer — the map
           below still pans and zooms as if nothing were on top of it. */}
       <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
+
+      {probe ? (
+        <div
+          style={{
+            /*
+              Placed by transform from the frame's top-left, never by left/top.
+              A fixed box given a left/top near the right edge is shrink-wrapped
+              into whatever room is left over there and every line of it wraps
+              into a column — at the one moment somebody is reading it, and only
+              ever at the right-hand edge. Laid out at the origin it takes its
+              natural width first and is moved afterwards, and the capped width
+              is what makes clamping it arithmetic rather than a guess.
+            */
+            position: "fixed",
+            left: 0,
+            top: 0,
+            transform:
+              "translate(" +
+              Math.min(Math.max(probe.x, 92), Math.max(92, window.innerWidth - 92)) +
+              "px, " +
+              (probe.y > 96 ? probe.y - 14 : probe.y + 14) +
+              "px) translate(-50%, " +
+              (probe.y > 96 ? "-100%" : "0") +
+              ")",
+            background: "var(--surface-2)",
+            border: "1px solid var(--line-strong)",
+            borderRadius: 6,
+            boxShadow: "0 6px 20px rgba(0,0,0,.45)",
+            maxWidth: 180,
+            padding: "7px 10px",
+            pointerEvents: "none",
+            zIndex: 60,
+          }}
+        >
+          <div style={{ alignItems: "baseline", display: "flex", gap: 5 }}>
+            <span style={{ color: "var(--ink)", fontSize: 19, fontWeight: 600, lineHeight: 1.15 }}>
+              {probe.spd.toFixed(1)}
+            </span>
+            <span style={{ color: "var(--faint)", fontSize: 11 }}>{UNIT}</span>
+          </div>
+          <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
+            from {CARDINALS[Math.round(((probe.dir + 360) % 360) / 22.5) % 16]}{" "}
+            {Math.round((probe.dir + 360) % 360)}°
+          </div>
+          <div style={{ color: "var(--faint)", fontSize: 10, marginTop: 2, whiteSpace: "nowrap" }}>
+            {Math.abs(probe.lat).toFixed(2)}°{probe.lat < 0 ? "S" : "N"}{" "}
+            {Math.abs(probe.lon).toFixed(2)}°{probe.lon < 0 ? "W" : "E"}
+          </div>
+        </div>
+      ) : null}
 
       {field && (
         <div style={{ alignItems: "center", background: "var(--bg)", borderRadius: 4, bottom: 4, display: "flex", gap: 6, left: 4, padding: "3px 6px", position: "absolute", zIndex: 2 }}>
