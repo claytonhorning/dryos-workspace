@@ -2078,6 +2078,68 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   const shown = (id) => !hidden[id];
 
   /*
+    Draw order, rearranged by dragging, top of the list on top of the map.
+
+    Ephemeral like the visibility toggles, and for the same reason: deciding
+    what sits above what while reading a map is looking, not editing. The
+    editor's layer list is where an order is *kept*.
+
+    It reaches the map through moveLayer, which only governs layers inside the
+    GL stack. The particle field is a canvas composited over the whole map and
+    cannot go beneath an opaque basemap, so it is pinned to the top and the
+    panel says so rather than offering a handle that would do nothing.
+  */
+  const [order, setOrder] = React.useState(() => LAYERS.map((L) => L.id));
+  // A ref for what is being dragged, state only for showing it. The handler
+  // that reorders runs inside dragover, which can fire in the same tick as
+  // dragstart — and a state read there sees the render before the drag began.
+  // The canvas drag already keeps its grab in a ref for exactly this reason.
+  const dragRef = React.useRef(null);
+  const [dragId, setDragId] = React.useState(null);
+  const ordered = order
+    .map((id) => LAYERS.find((L) => L.id === id))
+    .filter(Boolean);
+  const movable = (L) => !(L.id === "field" && FIELD && FIELD.mode === "particles");
+
+  const reorder = (from, to) => {
+    if (from === to) return;
+    setOrder((prev) => {
+      const fromI = prev.indexOf(from), toI = prev.indexOf(to);
+      if (fromI < 0 || toI < 0) return prev;
+      const next = prev.filter((x) => x !== from);
+      /*
+        Which side of the target to land on, and it is not a detail.
+
+        Pulling the dragged item out first shifts everything after it up one,
+        so inserting *before* the target when moving down puts it back exactly
+        where it started — the list looked frozen and the code looked correct.
+        Down lands after, up lands before.
+      */
+      next.splice(next.indexOf(to) + (fromI < toI ? 1 : 0), 0, from);
+      return next;
+    });
+  };
+
+  // Bottom of the list is drawn first, so it ends up underneath.
+  React.useEffect(() => {
+    const m = map.current;
+    if (!m || !ready || ready === "no-token") return;
+    const glFor = { points: "dryos-pts", field: "dryos-field", motion: "dryos-flights" };
+    try {
+      [...order].reverse().forEach((id) => {
+        const layer = glFor[id];
+        if (layer && m.getLayer(layer)) m.moveLayer(layer);
+      });
+    } catch {
+      // A restyle can land between the check and the move; the next render
+      // reapplies it, and a half-ordered map is better than a dead tile.
+    }
+    // Not field: it is declared below this and would be read before it
+    // exists. hidden stands in for it — a layer is only ever re-added when
+    // something was toggled, and that is the moment the order needs reapplying.
+  }, [order, ready, placed, hidden]);
+
+  /*
     The time scrubber, on the map rather than only in the bar.
 
     The instant is still the page's — one answer for every tile, which is the
@@ -2130,6 +2192,30 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   const cursorLabel = cursorAt
     ? new Date(cursorMs).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : "Live";
+
+  /*
+    Marks along the scale, so the handle is a time rather than a position.
+
+    Every twelve hours across the three-day window, and each one is labelled
+    with the day when the day changes and the hour otherwise — a row of
+    identical "12 PM"s tells you nothing about which noon you are on.
+  */
+  const TICKS = React.useMemo(() => {
+    const out = [];
+    const from = cursorNow - CURSOR_BACK_H * CURSOR_STEP;
+    const to = cursorNow + CURSOR_FWD_H * CURSOR_STEP;
+    let last = null;
+    for (let t = from; t <= to; t += 12 * CURSOR_STEP) {
+      const d = new Date(t);
+      const day = d.toLocaleDateString([], { month: "short", day: "numeric" });
+      out.push({
+        at: t,
+        label: day === last ? d.toLocaleTimeString([], { hour: "numeric" }) : day,
+      });
+      last = day;
+    }
+    return out;
+  }, [cursorNow]);
 
   /*
     A grid cell carries its own position: G_315_1005 is 31.5N 100.5W. Encoding
@@ -2904,71 +2990,112 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           below still pans and zooms as if nothing were on top of it. */}
       <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
 
-      {/* Top of the map: what is drawn on the left, when it is from on the
-          right. Both out of the way of the Mapbox attribution, which owns the
-          bottom edge and cannot be moved. */}
-      <div style={{ alignItems: "flex-start", display: "flex", gap: 6, justifyContent: "space-between", left: 4, position: "absolute", right: 4, top: 4, zIndex: 3 }}>
+      {/* ── Legend, top left. A key, not a control: it says what the marks
+             mean, which is what a reader needs and what a launched screen is
+             allowed to carry. Turning things on and off is a different job and
+             has its own panel. ───────────────────────────────────────────── */}
       {LAYERS.length > 0 ? (
-        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 2, padding: "5px 6px" }}>
-          {LAYERS.map((L) => (
-            <button
-              key={L.id}
-              type="button"
-              onClick={() => setHidden((h) => ({ ...h, [L.id]: !h[L.id] }))}
-              title={shown(L.id) ? "Hide this layer" : "Show this layer"}
-              style={{
-                alignItems: "center", background: "none", border: "none", cursor: "pointer",
-                display: "flex", font: "inherit", gap: 6, padding: "1px 2px", textAlign: "left",
-                // Hidden reads as off, not as gone: the row stays put, so the
-                // way back is exactly where the way out was.
-                opacity: shown(L.id) ? 1 : 0.4,
-              }}
-            >
-              <span style={{ background: shown(L.id) ? L.swatch : "transparent", border: "1px solid " + L.swatch, borderRadius: 2, flexShrink: 0, height: 8, width: 8 }} />
+        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 3, left: 4, padding: "5px 7px", position: "absolute", top: 4, zIndex: 3 }}>
+          {ordered.filter((L) => shown(L.id)).map((L) => (
+            <div key={L.id} style={{ alignItems: "center", display: "flex", gap: 6 }}>
+              <span style={{ background: L.swatch, borderRadius: 2, flexShrink: 0, height: 8, width: 8 }} />
               <span style={{ color: "var(--ink)", fontSize: 10.5, whiteSpace: "nowrap" }}>{L.label}</span>
               {L.unit ? <span style={{ color: "var(--faint)", fontSize: 9.5 }}>{L.unit}</span> : null}
               {L.note ? <span style={{ color: "var(--faint)", fontSize: 9, fontStyle: "italic" }}>{L.note}</span> : null}
-            </button>
+            </div>
           ))}
         </div>
-      ) : <span />}
+      ) : null}
 
-      <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, maxWidth: 300, minWidth: 168, padding: "5px 8px" }}>
-        <div style={{ alignItems: "baseline", display: "flex", gap: 5, justifyContent: "space-between" }}>
-          <span style={{ color: cursorAt ? "var(--accent)" : "var(--muted)", fontSize: 10, whiteSpace: "nowrap" }}>
-            {cursorLabel}
-          </span>
-          <span style={{ color: "var(--faint)", fontSize: 8.5, letterSpacing: ".07em", textTransform: "uppercase" }}>
-            whole screen
-          </span>
-          {cursorAt ? (
-            <button
-              type="button"
-              onClick={() => dryos.setCursor(null)}
-              style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", font: "inherit", fontSize: 9, padding: 0 }}
+      {/* ── Layers, top right. Visibility and draw order — the two things you
+             change while reading rather than while building. ─────────────── */}
+      {LAYERS.length > 1 || (LAYERS.length === 1 && LAYERS[0].id !== "points") ? (
+        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, minWidth: 132, padding: "4px 5px", position: "absolute", right: 4, top: 4, zIndex: 3 }}>
+          <div style={{ color: "var(--faint)", fontSize: 8.5, letterSpacing: ".1em", padding: "0 2px 3px", textTransform: "uppercase" }}>
+            Layers
+          </div>
+          {ordered.map((L) => (
+            <div
+              key={L.id}
+              draggable={movable(L)}
+              onDragStart={() => { dragRef.current = L.id; setDragId(L.id); }}
+              onDragEnd={() => { dragRef.current = null; setDragId(null); }}
+              onDragOver={(e) => { e.preventDefault(); if (dragRef.current && movable(L)) reorder(dragRef.current, L.id); }}
+              style={{
+                alignItems: "center", background: dragId === L.id ? "var(--surface-3)" : "transparent",
+                borderRadius: 3, cursor: movable(L) ? "grab" : "default", display: "flex", gap: 5,
+                opacity: shown(L.id) ? 1 : 0.45, padding: "2px 3px",
+              }}
             >
-              live
-            </button>
+              <span style={{ color: "var(--faint)", cursor: movable(L) ? "grab" : "default", fontSize: 9, width: 7 }}>
+                {movable(L) ? "⠳" : "·"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setHidden((h) => ({ ...h, [L.id]: !h[L.id] }))}
+                title={shown(L.id) ? "Hide" : "Show"}
+                style={{ alignItems: "center", background: "none", border: "none", cursor: "pointer", display: "flex", flex: 1, font: "inherit", gap: 5, padding: 0, textAlign: "left" }}
+              >
+                <span style={{ background: shown(L.id) ? L.swatch : "transparent", border: "1px solid " + L.swatch, borderRadius: 2, flexShrink: 0, height: 8, width: 8 }} />
+                <span style={{ color: "var(--ink)", fontSize: 10, whiteSpace: "nowrap" }}>{L.label}</span>
+              </button>
+            </div>
+          ))}
+          {ordered.some((L) => !movable(L)) ? (
+            <div style={{ color: "var(--faint)", fontSize: 8.5, padding: "2px 3px 0" }}>
+              particles always draw on top
+            </div>
           ) : null}
         </div>
-        <input
-          type="range"
-          min={cursorNow - CURSOR_BACK_H * CURSOR_STEP}
-          max={cursorNow + CURSOR_FWD_H * CURSOR_STEP}
-          step={CURSOR_STEP}
-          value={cursorMs}
-          onChange={(e) => dryos.setCursor(new Date(Number(e.target.value)).toISOString())}
-          aria-label="Time shown on this screen"
-          style={{ accentColor: "var(--accent)", display: "block", height: 12, width: "100%" }}
-        />
+      ) : null}
+
+      {/* ── Time, along the bottom. Full width because a scale is easier to
+             land on the further it runs, and this one covers three days. ── */}
+      <div style={{ background: "var(--bg)", borderRadius: 5, bottom: 22, left: 4, padding: "4px 8px 2px", position: "absolute", right: 4, zIndex: 3 }}>
+        <div style={{ alignItems: "center", display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => dryos.setCursor(null)}
+            title="Back to now"
+            style={{
+              background: cursorAt ? "var(--accent-dim)" : "transparent",
+              border: "1px solid " + (cursorAt ? "var(--accent-line)" : "var(--line)"),
+              borderRadius: 3, color: cursorAt ? "var(--accent)" : "var(--muted)",
+              cursor: "pointer", flexShrink: 0, font: "inherit", fontSize: 9.5,
+              letterSpacing: ".06em", padding: "1px 6px", textTransform: "uppercase",
+            }}
+          >
+            Live
+          </button>
+          <input
+            type="range"
+            min={cursorNow - CURSOR_BACK_H * CURSOR_STEP}
+            max={cursorNow + CURSOR_FWD_H * CURSOR_STEP}
+            step={CURSOR_STEP}
+            value={cursorMs}
+            onChange={(e) => dryos.setCursor(new Date(Number(e.target.value)).toISOString())}
+            aria-label="Time shown on this screen"
+            style={{ accentColor: "var(--accent)", flex: 1, height: 12, minWidth: 0 }}
+          />
+          <span style={{ color: cursorAt ? "var(--accent)" : "var(--muted)", flexShrink: 0, fontSize: 10, minWidth: 96, textAlign: "right", whiteSpace: "nowrap" }}>
+            {cursorLabel}
+          </span>
+        </div>
+        {/* The scale's own marks. Without them the handle is a position with
+            no units — you can see that you moved, not to when. */}
+        <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: 44, paddingRight: 104 }}>
+          {TICKS.map((t) => (
+            <span key={t.at} style={{ color: "var(--faint)", fontSize: 8.5, whiteSpace: "nowrap" }}>
+              {t.label}
+            </span>
+          ))}
+        </div>
         {behind ? (
-          <div style={{ color: "var(--warn)", fontSize: 9, lineHeight: 1.3, whiteSpace: "nowrap" }}>
+          <div style={{ color: "var(--warn)", fontSize: 9, paddingLeft: 44 }}>
             newest data {new Date(dataMs).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
           </div>
         ) : null}
       </div>
-      </div>
-
       {probe ? (
         <div
           style={{
