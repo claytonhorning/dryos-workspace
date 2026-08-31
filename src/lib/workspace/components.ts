@@ -1796,11 +1796,17 @@ const map: ComponentDef = {
       key: "field",
       label: "Field",
       choices: [
+        // Particles first because it is the right answer whenever it is
+        // available: a vector field shaded by magnitude throws away the half
+        // of the data that says where the air is going. It is only offered by
+        // a schema declaring `vector`, and falls back to a heatmap on one
+        // that does not rather than drawing nothing.
+        { value: "particles", label: "Particles" },
         { value: "heatmap", label: "Heatmap" },
         { value: "cells", label: "Shaded cells" },
         { value: "off", label: "Off" },
       ],
-      fallback: "heatmap",
+      fallback: "particles",
     },
   ],
   accepts(refs) {
@@ -1870,12 +1876,20 @@ const map: ComponentDef = {
 
     const points = Object.fromEntries(nodes.map((n) => [n, ERCOT_POINTS[n]]));
     const anyMock = refs.some((r) => r.availability === "mock");
-    const showField = Boolean(fieldRef) && o.field !== "off";
 
     const fieldSchema = fieldRef ? schemaById(fieldRef.schemaId) : undefined;
     const fieldColumn = fieldRef ? column(fieldRef) : "";
     const fieldUnit = fieldRef ? unit(fieldRef) : "";
     const fieldDataset = fieldSchema?.dataset ?? fieldSchema?.id ?? "";
+    // Particles need both halves of the vector, so they are only drawn for a
+    // schema that declares which columns those are. Asked for on a scalar
+    // field, the mode degrades to a heatmap — there is nothing to advect
+    // through, and refusing outright would leave an empty tile.
+    const vector = fieldSchema?.vector;
+    const fieldMode = o.field === "particles" && !vector ? "heatmap" : o.field;
+    // Cells are named by the schema's own entity column, not by `node`.
+    const fieldEntity = fieldSchema?.entityKey ?? "cell";
+    const showField = Boolean(fieldRef) && fieldMode !== "off";
 
     const motionSchema = motionRef ? schemaById(motionRef.schemaId) : undefined;
     const motionDataset = motionSchema?.dataset ?? motionSchema?.id ?? "";
@@ -1892,7 +1906,7 @@ const map: ComponentDef = {
   const UNIT = ${JSON.stringify(s[0]?.unit ?? "")};
   const STYLE = ${JSON.stringify(o.style)};
   const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label }) : "null"};
-  const FIELD = ${showField ? JSON.stringify({ dataset: fieldDataset, column: fieldColumn, unit: fieldUnit, mode: o.field, label: fieldRef!.label }) : "null"};
+  const FIELD = ${showField ? JSON.stringify({ dataset: fieldDataset, column: fieldColumn, unit: fieldUnit, mode: fieldMode, label: fieldRef!.label, entity: fieldEntity, direction: vector?.direction ?? null }) : "null"};
   const MOTION = ${motionRef ? JSON.stringify({ dataset: motionDataset, trails, label: motionRef.label }) : "null"};
 
   const { rows, error, loading } = useSeries(
@@ -1912,7 +1926,20 @@ ${
       ? `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 },`
       : ""
 }
-${showField ? `      { dataset: ${JSON.stringify(fieldDataset)}, start: "-1h", limit: 1 },` : ""}
+${
+  showField
+    ? /*
+         The whole newest hour of the field, not one row. `limit: 1` was right
+         when a field was a handful of mock cells; a real grid needs every cell
+         of one hour, so the limit is the cell count with headroom and the
+         newest row per cell wins. `end` bounds it at now for the same reason
+         the point layer does — a forecast field's newest interval is two days
+         out, and a wind map of the day after tomorrow looks exactly like a
+         wind map of now.
+      */
+      `      { dataset: ${JSON.stringify(fieldDataset)}, end: "-0m", limit: ${Math.min(4000, (fieldSchema?.entities.count ?? 200) * 2)} },`
+    : ""
+}
 ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m", limit: ${motionLimit} },` : ""}
     ],
     ${refreshMs(refs)},
@@ -1966,13 +1993,17 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     it in the id means no lookup table has to travel with the data.
   */
   const field = React.useMemo(() => {
-    if (!FIELD) return null;
+    if (!FIELD || FIELD.mode === "particles") return null;
     const features = [];
+    const seen = {};
     let lo = Infinity, hi = -Infinity;
     fieldRows.forEach((r) => {
-      const m = /^G_(\\d+)_(\\d+)$/.exec(r.node);
+      const id = r[FIELD.entity];
+      const m = /^G_(\\d+)_(\\d+)$/.exec(id || "");
       const v = r[FIELD.column];
-      if (!m || typeof v !== "number") return;
+      // Newest first, so the first row for a cell is its current one.
+      if (!m || typeof v !== "number" || seen[id]) return;
+      seen[id] = true;
       lo = Math.min(lo, v); hi = Math.max(hi, v);
       features.push({
         type: "Feature",
@@ -1982,6 +2013,59 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     });
     if (!features.length) return null;
     return { data: { type: "FeatureCollection", features }, lo, hi };
+  }, [rows]);
+
+  /*
+    The same cells as a velocity grid, for advection.
+
+    Two conversions matter here and both are one-way doors. Direction is
+    published as the bearing the wind comes FROM, so the vector the air travels
+    along is the negation, not the value — u = -speed*sin(d), v = -speed*cos(d)
+    is the textbook form and the reason this is not written as "d + 180"
+    somewhere further down where it would be a magic number. And the grid is
+    stored as a sparse list of cells whose ids carry their positions, so it is
+    rebuilt into a dense lattice once here rather than searched per particle
+    per frame.
+  */
+  const flow = React.useMemo(() => {
+    if (!FIELD || FIELD.mode !== "particles" || !FIELD.direction) return null;
+    const cells = {};
+    const lats = new Set(), lons = new Set();
+    let lo = Infinity, hi = -Infinity;
+    fieldRows.forEach((r) => {
+      const id = r[FIELD.entity];
+      const m = /^G_(\\d+)_(\\d+)$/.exec(id || "");
+      const spd = r[FIELD.column], dir = r[FIELD.direction];
+      if (!m || typeof spd !== "number" || typeof dir !== "number") return;
+      const lat = Number(m[1]) / 10, lon = -Number(m[2]) / 10;
+      const key = lat + ":" + lon;
+      if (cells[key]) return;
+      const rad = (dir * Math.PI) / 180;
+      cells[key] = { u: -spd * Math.sin(rad), v: -spd * Math.cos(rad), spd };
+      lats.add(lat); lons.add(lon);
+      lo = Math.min(lo, spd); hi = Math.max(hi, spd);
+    });
+    const la = [...lats].sort((a, b) => a - b);
+    const lo_ = [...lons].sort((a, b) => a - b);
+    if (la.length < 2 || lo_.length < 2) return null;
+    const step = Math.min(la[1] - la[0], lo_[1] - lo_[0]);
+
+    // Bilinear between the four surrounding cells. Outside the grid returns
+    // null, which is what retires a particle — a field has edges and pretending
+    // otherwise would drift particles through invented air.
+    const at = (lon, lat) => {
+      if (lon < lo_[0] || lon > lo_[lo_.length - 1] || lat < la[0] || lat > la[la.length - 1]) return null;
+      const x0 = Math.floor((lon - lo_[0]) / step) * step + lo_[0];
+      const y0 = Math.floor((lat - la[0]) / step) * step + la[0];
+      const fx = (lon - x0) / step, fy = (lat - y0) / step;
+      const c = (x, y) => cells[Math.round(y * 10) / 10 + ":" + Math.round(x * 10) / 10];
+      const a = c(x0, y0), b = c(x0 + step, y0), d = c(x0, y0 + step), e = c(x0 + step, y0 + step);
+      if (!a || !b || !d || !e) return a || b || d || e || null;
+      const mix = (k) =>
+        a[k] * (1 - fx) * (1 - fy) + b[k] * fx * (1 - fy) + d[k] * (1 - fx) * fy + e[k] * fx * fy;
+      return { u: mix("u"), v: mix("v"), spd: mix("spd") };
+    };
+    return { at, lo, hi, bounds: [lo_[0], la[0], lo_[lo_.length - 1], la[la.length - 1]] };
   }, [rows]);
 
   React.useEffect(() => {
@@ -2083,6 +2167,136 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     m.on("load", apply);
     return () => { m.off("style.load", apply); m.off("load", apply); };
   }, [field, ready, style]);
+
+  /*
+    Particles, on a plain 2D canvas laid over the map.
+
+    Not a Mapbox custom layer and not WebGL: the whole field is 168 cells, the
+    particle count is in the low thousands, and \`map.project\` already turns a
+    coordinate into a screen point through whatever pan and zoom is current —
+    so the canvas needs no projection maths of its own and follows the map for
+    free.
+
+    The trail is made by *erasing* the previous frame a little rather than
+    painting a translucent wash over it. A wash accumulates, and ten seconds in
+    the basemap is behind a grey film; \`destination-out\` fades old strokes
+    toward transparent and leaves the map underneath alone.
+
+    Particles retire two ways: age, so the field does not end up combed into a
+    few attractors, and leaving the grid, because \`flow.at\` returns null
+    outside it. Drifting them onward through absent data would be inventing
+    wind, which is the one thing this whole stream exists to avoid.
+  */
+  const veil = React.useRef(null);
+  React.useEffect(() => {
+    const cv = veil.current, m = map.current;
+    if (!cv || !m || !flow || !ready || ready === "no-token") return;
+    const g = cv.getContext("2d");
+    if (!g) return;
+
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Pace is a display choice, not physics: real advection at 5 m/s is
+    // microscopic per frame. This is tuned so a segment is a couple of pixels
+    // at state zoom, which is what makes a streak read as a streak.
+    const N = 2200, MAX_AGE = 110, PACE = 0.006;
+    const [w0, s0, e0, n0] = flow.bounds;
+    let raf = 0, alive = true;
+
+    const fit = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const r = cv.getBoundingClientRect();
+      cv.width = Math.max(1, Math.round(r.width * dpr));
+      cv.height = Math.max(1, Math.round(r.height * dpr));
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    fit();
+
+    const colour = (spd) => {
+      const t = flow.hi === flow.lo ? 0.5 : (spd - flow.lo) / (flow.hi - flow.lo);
+      return t > 0.66 ? "#c4703a" : t > 0.33 ? "#d9a441" : "#7dd3fc";
+    };
+
+    const spawn = (p) => {
+      p.lon = w0 + Math.random() * (e0 - w0);
+      p.lat = s0 + Math.random() * (n0 - s0);
+      p.age = Math.floor(Math.random() * MAX_AGE);
+    };
+    const parts = Array.from({ length: N }, () => { const p = {}; spawn(p); return p; });
+
+    // The still version, for anyone who has asked not to be moved at. Arrows
+    // at every cell say the same thing about direction and speed; only the
+    // sense of flow is lost, and that is the trade the setting is asking for.
+    const still = () => {
+      const r = cv.getBoundingClientRect();
+      g.clearRect(0, 0, r.width, r.height);
+      g.lineWidth = 1.4;
+      for (let lat = s0; lat <= n0 + 1e-9; lat += 1) {
+        for (let lon = w0; lon <= e0 + 1e-9; lon += 1) {
+          const f = flow.at(lon, lat);
+          if (!f) continue;
+          const a = m.project([lon, lat]);
+          if (a.x < 0 || a.x > r.width || a.y < 0 || a.y > r.height) continue;
+          const t = flow.hi === flow.lo ? 0.5 : (f.spd - flow.lo) / (flow.hi - flow.lo);
+          const len = 7 + 15 * t;
+          const n = Math.hypot(f.u, f.v) || 1;
+          // Screen y grows downward, so the northward component is negated.
+          const dx = (f.u / n) * len, dy = (-f.v / n) * len;
+          g.strokeStyle = colour(f.spd);
+          g.beginPath();
+          g.moveTo(a.x - dx / 2, a.y - dy / 2);
+          g.lineTo(a.x + dx / 2, a.y + dy / 2);
+          g.stroke();
+        }
+      }
+    };
+
+    const frame = () => {
+      if (!alive) return;
+      const r = cv.getBoundingClientRect();
+      g.globalCompositeOperation = "destination-out";
+      g.fillStyle = "rgba(0,0,0,0.035)";
+      g.fillRect(0, 0, r.width, r.height);
+      g.globalCompositeOperation = "source-over";
+      g.lineWidth = 1.5;
+      for (const p of parts) {
+        const f = flow.at(p.lon, p.lat);
+        if (!f || ++p.age > MAX_AGE) { spawn(p); continue; }
+        const a = m.project([p.lon, p.lat]);
+        p.lon += f.u * PACE;
+        p.lat += f.v * PACE;
+        const b = m.project([p.lon, p.lat]);
+        if (a.x < -40 || a.x > r.width + 40 || a.y < -40 || a.y > r.height + 40) continue;
+        g.strokeStyle = colour(f.spd);
+        g.beginPath();
+        g.moveTo(a.x, a.y);
+        g.lineTo(b.x, b.y);
+        g.stroke();
+      }
+      raf = requestAnimationFrame(frame);
+    };
+
+    // Trails are drawn in screen space, so a pan would smear them across the
+    // move. Wiping on every move event costs the tail and keeps the truth.
+    const wipe = () => {
+      const r = cv.getBoundingClientRect();
+      g.clearRect(0, 0, r.width, r.height);
+      if (reduced) still();
+    };
+    const ro = new ResizeObserver(() => { fit(); wipe(); });
+    ro.observe(cv);
+    m.on("move", wipe);
+
+    if (reduced) still(); else frame();
+
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      m.off("move", wipe);
+      const r = cv.getBoundingClientRect();
+      g.clearRect(0, 0, r.width, r.height);
+    };
+  }, [flow, ready, style]);
 
   /*
     Aircraft, drawn the way every tracker draws them.
@@ -2333,6 +2547,9 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   return (
     <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(motionRef ? "Live traffic" : fieldRef ? `${fieldRef.label} field` : `${s[0]?.label ?? "Map"} by location`)} unit={FIELD ? FIELD.unit : UNIT} loading={loading && !ready} error={error}>
       <div ref={host} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, inset: 0, position: "absolute" }} />
+      {/* Over the map, under the markers, and deaf to the pointer — the map
+          below still pans and zooms as if nothing were on top of it. */}
+      <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
 
       {field && (
         <div style={{ alignItems: "center", background: "var(--bg)", borderRadius: 4, bottom: 4, display: "flex", gap: 6, left: 4, padding: "3px 6px", position: "absolute", zIndex: 2 }}>
@@ -2369,7 +2586,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           "approximate" across a map of published coordinates trains people to
           ignore the word on the maps where it matters.
         */
-        locatedRef && !anyMock
+        (locatedRef || !nodes.length) && !anyMock
           ? ""
           : `<p style={{ background: "var(--bg)", borderRadius: 4, bottom: 4, color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px", position: "absolute", right: 4, zIndex: 2 }}>
         ${anyMock ? "Mock field · approximate positions" : "Approximate zone centroids"}

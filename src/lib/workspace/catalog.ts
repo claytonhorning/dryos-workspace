@@ -84,6 +84,21 @@ export interface Schema {
    */
   field?: boolean;
   /**
+   * The field's cells carry a direction as well as a magnitude.
+   *
+   * A scalar field has one honest treatment — shade it. A vector field has the
+   * one everybody recognises: particles let go into the flow and advected
+   * through it, which is the only way to read where the air is *going* rather
+   * than how hard it is blowing. Naming the two columns here rather than
+   * guessing them keeps the declaration in the catalogue, where every other
+   * fact about a stream lives.
+   *
+   * `direction` is the compass bearing the wind blows FROM — the
+   * meteorological convention, and the flip that has to happen exactly once on
+   * the way to a velocity vector.
+   */
+  vector?: { speed: string; direction: string };
+  /**
    * Entities move, and every row carries where they were.
    *
    * A position feed is not a value per place — it is a place per reading, so the
@@ -1334,6 +1349,54 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "Forecast relative humidity.",
         mock: { base: 58, swing: 25, noise: 5, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "weather.forecast.windfield",
+    path: ["Weather", "Forecast", "Wind field"],
+    name: "Hub-height wind field",
+    dataset: "openmeteo-wind-field",
+    availability: "live",
+    cadence: { label: "every 3 hours", seconds: 10_800 },
+    intervalSeconds: 3_600,
+    tokens: 1,
+    entities: {
+      count: 168,
+      label: "grid cells",
+      sample: ["G_325_0975", "G_295_0955", "G_335_1015"],
+    },
+    // A field, and a vector one: the cells are a grid rather than named
+    // places, and each carries a direction as well as a speed.
+    field: true,
+    vector: { speed: "wind_speed_100m_ms", direction: "wind_direction_100m_deg" },
+    // Deliberately no entityKey. 168 cells is a surface, not a fan-out — one
+    // line per cell is 168 lines and answers nothing.
+    blurb:
+      "Wind speed and direction at 100 m on a one-degree grid across Texas and " +
+      "its surroundings — the field itself, to be drawn rather than charted. " +
+      "The grid runs past the state line on purpose: a particle advected to " +
+      "the edge of its data dies there, and thinning flow along a border " +
+      "reads as weather when it is not. Data by Open-Meteo, CC-BY-4.0.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 31) },
+    variables: [
+      {
+        key: "wind_speed_100m_ms",
+        label: "Wind speed",
+        unit: "m/s",
+        availability: "live",
+        description: "Forecast wind speed at 100 m — turbine hub height.",
+        mock: { base: 7, swing: 4, noise: 1, floor: 0 },
+      },
+      {
+        key: "wind_direction_100m_deg",
+        label: "Wind direction",
+        unit: "°",
+        availability: "live",
+        description:
+          "The compass bearing the wind blows from, at 100 m. The direction " +
+          "the air travels is the opposite of this.",
+        mock: { base: 180, swing: 120, noise: 15, floor: 0 },
       },
     ],
   },
