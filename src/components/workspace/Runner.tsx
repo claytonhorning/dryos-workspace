@@ -45,8 +45,11 @@ export function Runner({
   fit,
   editing,
   selected,
+  cursor,
 }: {
   appId: string;
+  /** The instant this screen is about, ISO, or null for live. */
+  cursor?: string | null;
   version: number;
   onError?: (message: string) => void;
   /** Something draggable is in flight, so the canvas should offer targets. */
@@ -137,6 +140,15 @@ export function Runner({
       "*",
     );
   }, [editing, selected, live]);
+
+  // And the time cursor, which is the same story a third time: the frame cannot
+  // see the bar the scrubber lives in, so it is told which instant the screen is
+  // about. Null is live. `live` in the deps for the usual reason — a frame that
+  // has just booted heard none of the earlier ones, and a reloaded screen
+  // silently snapping back to now would be the worst version of this.
+  useEffect(() => {
+    frame.current?.contentWindow?.postMessage({ __dryos: "cursor", at: cursor ?? null }, "*");
+  }, [cursor, live]);
 
   const answer = useCallback(
     async (win: Window, id: number, op: string, payload: unknown) => {
@@ -271,6 +283,10 @@ export function Runner({
               // effects above fired before it existed.
               e.currentTarget.contentWindow?.postMessage(
                 { __dryos: "mode", edit: Boolean(editing), selected },
+                "*",
+              );
+              e.currentTarget.contentWindow?.postMessage(
+                { __dryos: "cursor", at: cursor ?? null },
                 "*",
               );
               // The parser-blocking script has run: the new revision is

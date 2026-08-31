@@ -316,3 +316,51 @@ body {
   color: var(--color-ink);
 }
 
+
+/*
+  The time scrubber's track.
+
+  Styled by hand because a native range control inherits the platform's blue on
+  every OS and this bar has exactly one accent. The thumb is deliberately larger
+  than the track: it is dragged along a 320px panel to pick one hour out of
+  seventy-two, and a hairline handle at that density is a control you aim at
+  rather than one you use.
+*/
+.dr-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 18px;
+}
+.dr-range::-webkit-slider-runnable-track {
+  background: var(--color-surface-3);
+  border-radius: 999px;
+  height: 4px;
+}
+.dr-range::-moz-range-track {
+  background: var(--color-surface-3);
+  border-radius: 999px;
+  height: 4px;
+}
+.dr-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--color-accent);
+  border: none;
+  border-radius: 999px;
+  height: 14px;
+  margin-top: -5px;
+  width: 14px;
+}
+.dr-range::-moz-range-thumb {
+  background: var(--color-accent);
+  border: none;
+  border-radius: 999px;
+  height: 14px;
+  width: 14px;
+}
+.dr-range:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}

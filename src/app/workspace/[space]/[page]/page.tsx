@@ -8,6 +8,7 @@ import {
   SelectionStrip,
 } from "@/components/workspace/DataChip";
 import { Runner } from "@/components/workspace/Runner";
+import { CURSOR_EVENT } from "@/components/workspace/TimeDock";
 import { Button, cx } from "@/components/ui";
 import { ScreenSkeleton } from "@/components/Skeleton";
 import { type DataRef } from "@/lib/workspace/catalog";
@@ -141,6 +142,27 @@ export default function AppPage() {
   const { space, page: id } = useParams<{ space: string; page: string }>();
   const router = useRouter();
   const search = useSearchParams();
+
+  /*
+    The time cursor, read from the URL the way edit mode is — one answer, it
+    survives a reload, and it can be sent to someone.
+
+    The scrubber lives in the nav, which the layout renders and which is nowhere
+    near this component, so the URL is also what connects them. During a drag it
+    broadcasts instead: a `router.replace` per pixel would re-render the route
+    across the whole gesture, and the only position worth putting in an address
+    bar is the one somebody let go on. The local state is cleared as soon as the
+    URL catches up, so there is never a second copy of the answer for long.
+  */
+  const urlCursor = search.get("t");
+  const [scrubbing, setScrubbing] = useState<string | null>(null);
+  useEffect(() => {
+    const follow = (e: Event) => setScrubbing((e as CustomEvent<string | null>).detail);
+    window.addEventListener(CURSOR_EVENT, follow);
+    return () => window.removeEventListener(CURSOR_EVENT, follow);
+  }, []);
+  useEffect(() => setScrubbing(null), [urlCursor]);
+  const cursor = scrubbing ?? urlCursor;
 
   const [app, setApp] = useState<App | null>(null);
   const [attached, setAttached] = useState<DataRef[]>([]);
@@ -526,6 +548,7 @@ export default function AppPage() {
               // panel is currently about.
               editing={asideOpen}
               selected={replaceIndex}
+              cursor={cursor}
             />
           </div>
 

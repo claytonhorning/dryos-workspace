@@ -23,8 +23,59 @@ export const RUNTIME_SHIM = String.raw`
   var pending = {};
   var seq = 0;
 
+  /*
+    The page's time cursor: which instant every tile on this screen is about.
+
+    It is applied here rather than in generated code, and that is the whole
+    reason it works at all. Every component already asks for a window ending
+    now; rewriting the request on its way out means a chart written months ago,
+    a map, a ticker and somebody's model-edited page all scrub together without
+    one of them being recompiled or even knowing the feature exists.
+
+    Two rewrites, and the second is the one that is easy to forget. 'end'
+    becomes the cursor, so a query stops at the instant being looked at instead
+    of at now. And a *relative* 'start' — "-24h" — is resolved against the
+    cursor too, because "the last 24 hours" means the 24 hours before the
+    instant on screen, not before the wall clock. Rewriting only 'end' would
+    slide the window's far edge while pinning its near one, stretching every
+    chart as it scrubbed.
+
+    Null is live, and then nothing is rewritten at all: a screen with no cursor
+    behaves exactly as it did before there was one.
+  */
+  var cursor = null;
+  var RELATIVE = /^-(\d+)([mhd])$/;
+
+  function shift(value, at) {
+    var m = RELATIVE.exec(String(value == null ? "" : value).trim());
+    if (!m) return value;
+    var n = Number(m[1]);
+    var ms = m[2] === "m" ? n * 60000 : m[2] === "h" ? n * 3600000 : n * 86400000;
+    return new Date(at - ms).toISOString();
+  }
+
+  function atCursor(opts) {
+    var at = cursor ? Date.parse(cursor) : NaN;
+    if (!at) return opts;
+    var out = {};
+    for (var k in opts) if (Object.prototype.hasOwnProperty.call(opts, k)) out[k] = opts[k];
+    out.end = cursor;
+    if (out.start) out.start = shift(out.start, at);
+    return out;
+  }
+
   window.addEventListener("message", function (e) {
     var m = e.data;
+    if (m && m.__dryos === "cursor") {
+      var next = m.at || null;
+      if (next === cursor) return;
+      cursor = next;
+      // Every hook refetches off this rather than waiting for its own poll —
+      // a five-minute tile would otherwise sit on the old instant long after
+      // the scrub that moved it.
+      window.dispatchEvent(new Event("dryos:cursor"));
+      return;
+    }
     if (!m || m.__dryos !== "result") return;
     var p = pending[m.id];
     if (!p) return;
@@ -67,7 +118,7 @@ export const RUNTIME_SHIM = String.raw`
   }
 
   window.dryos = {
-    query: function (opts) { return call("query", opts || {}); },
+    query: function (opts) { return call("query", atCursor(opts || {})); },
     HUBS: ["HB_HOUSTON","HB_NORTH","HB_SOUTH","HB_WEST","HB_PAN","HB_BUSAVG","HB_HUBAVG"],
     ZONES: ["LZ_AEN","LZ_CPS","LZ_HOUSTON","LZ_LCRA","LZ_NORTH","LZ_RAYBN","LZ_SOUTH","LZ_WEST"]
   };

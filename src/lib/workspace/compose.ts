@@ -51,9 +51,15 @@ function useSeries(queries, refreshMs) {
     }
     load();
     const id = setInterval(load, refreshMs);
+    // The shim fires this when the page's time cursor moves. Without it a tile
+    // on a five-minute poll would keep showing the instant you scrubbed away
+    // from for another five minutes, and a screen half at one time and half at
+    // another is worse than one that is simply behind.
+    window.addEventListener("dryos:cursor", load);
     return () => {
       live = false;
       clearInterval(id);
+      window.removeEventListener("dryos:cursor", load);
     };
   }, []);
 

@@ -2236,9 +2236,18 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     // Pace is a display choice, not physics: real advection at 5 m/s is
-    // microscopic per frame. This is tuned so a segment is a couple of pixels
-    // at state zoom, which is what makes a streak read as a streak.
-    const N = 2200, MAX_AGE = 110, PACE = 0.006;
+    // microscopic per frame, so this is a scale factor, not a speed. It is
+    // the *only* thing that sets the overall tempo — every particle still
+    // steps u and v, which carry the magnitude, so a 10 m/s cell moves ten
+    // times as far per frame as a 1 m/s one at any pace.
+    //
+    // MAX_AGE is in frames, so slowing the pace without raising it would
+    // retire particles a third of the way through the journey they used to
+    // make and thin the field out. The fade has to slow with it too: a slower
+    // particle draws a shorter segment per frame — well under a pixel at the
+    // low end — and those only add up to a streak if the earlier ones are
+    // still there when the later ones land.
+    const N = 2200, MAX_AGE = 260, PACE = 0.0025;
     const [w0, s0, e0, n0] = flow.bounds;
     let raf = 0, alive = true;
 
@@ -2294,7 +2303,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       if (!alive) return;
       const r = cv.getBoundingClientRect();
       g.globalCompositeOperation = "destination-out";
-      g.fillStyle = "rgba(0,0,0,0.035)";
+      g.fillStyle = "rgba(0,0,0,0.018)";
       g.fillRect(0, 0, r.width, r.height);
       g.globalCompositeOperation = "source-over";
       for (const p of parts) {

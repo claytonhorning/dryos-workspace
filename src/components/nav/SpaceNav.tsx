@@ -10,6 +10,7 @@ import { cx } from "@/components/ui";
 import { useSelectOnMount } from "@/lib/useSelectOnMount";
 import { AccountButton } from "./AccountButton";
 import { UsageDock } from "@/components/workspace/UsageDock";
+import { TimeDock } from "@/components/workspace/TimeDock";
 
 /**
  * The navbar, once you are inside a workspace.
@@ -306,6 +307,9 @@ export function SpaceNav({
             the same corner. Up here it is one more number in a bar that is
             already there in both modes.
           */}
+          {/* Time before money: the cursor changes what every number on the
+              screen means, and the meter only says what they cost. */}
+          {pageId && <TimeDock />}
           <UsageDock spaceId={spaceId} placement="nav" />
           {/*
             Edit lives in the chrome, not on the canvas.
