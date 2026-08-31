@@ -164,6 +164,36 @@ export default function AppPage() {
   useEffect(() => setScrubbing(null), [urlCursor]);
   const cursor = scrubbing ?? urlCursor;
 
+  /*
+    A tile asked to move the cursor — the scrubber on a map.
+
+    Applied here rather than in the frame, because the instant belongs to the
+    page: a tile that set it locally would put its own map at 14:00 beside a
+    chart still at now, which is the whole thing the cursor exists to prevent.
+    So the frame posts an intent, this sets the value, and every frame including
+    the one that asked is told the answer on the way back.
+
+    Live locally, debounced to the URL. A map scrubber fires continuously and a
+    `router.replace` per pixel would re-render the route across the gesture; the
+    only position worth putting in an address bar is the one it settles on.
+  */
+  const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const moveCursor = useCallback(
+    (at: string | null) => {
+      setScrubbing(at);
+      if (urlTimer.current) clearTimeout(urlTimer.current);
+      urlTimer.current = setTimeout(() => {
+        const next = new URLSearchParams(search.toString());
+        if (at === null) next.delete("t");
+        else next.set("t", at);
+        const qs = next.toString();
+        router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false });
+      }, 350);
+    },
+    [router, search],
+  );
+  useEffect(() => () => { if (urlTimer.current) clearTimeout(urlTimer.current); }, []);
+
   const [app, setApp] = useState<App | null>(null);
   const [attached, setAttached] = useState<DataRef[]>([]);
   const [dragging, setDragging] = useState<TrayPayload | null>(null);
@@ -549,6 +579,7 @@ export default function AppPage() {
               editing={asideOpen}
               selected={replaceIndex}
               cursor={cursor}
+              onCursor={moveCursor}
             />
           </div>
 

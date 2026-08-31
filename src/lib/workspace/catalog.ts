@@ -69,6 +69,17 @@ export interface Schema {
    */
   entityKey?: string;
   /**
+   * Which row column names the entity, when the map has to read it directly.
+   *
+   * Separate from `entityKey` because that one carries a second meaning —
+   * "small enough that a stream-level reference fans out" — and the large
+   * streams deliberately do not have it. The map still needs to know the
+   * column: day-ahead rows say `bus`, real-time says `node`, and a placement
+   * path that assumed either would draw one of them and silently nothing for
+   * the other. Defaults to `entityKey`, then to `node`.
+   */
+  entityColumn?: string;
+  /**
    * Entities a fan-out must leave behind: the aggregate rows the source
    * publishes alongside the parts. Stacking TOTAL on top of the zones it sums
    * counts everything twice.
@@ -206,6 +217,7 @@ export const SCHEMAS: Schema[] = [
     },
     // ERCOT publishes no coordinates for these, so the map invents them.
     mockLocations: true,
+    entityColumn: "bus",
     blurb:
       "Hourly cleared prices from the day-ahead market for every ERCOT electrical bus, " +
       "posted once for the following day. Collected from ERCOT MIS (NP4-183), " +
@@ -1636,14 +1648,27 @@ export type MapTreatment =
   | { how: "motion"; placed: number; total: number; invented: false }
   | { how: "pins"; placed: number; total: number; invented: boolean };
 
+/**
+ * The most entities one layer can draw, which is the delivery route's own cap.
+ *
+ * A whole-stream layer asks for every entity at one instant, and
+ * `/api/workspace/data` will not return more than this many rows. Day-ahead is
+ * 19,312 buses, so a "show me all of it" layer genuinely cannot show all of it
+ * — and the number lives here, shared with the generator, so the coverage the
+ * picker states is the coverage the tile draws rather than an optimistic
+ * promise a cap quietly breaks one layer down.
+ */
+export const DRAW_CAP = 10_000;
+
 export function mapTreatment(schema: Schema): MapTreatment | null {
   const total = schema.entities.count;
   if (schema.field) return { how: "surface", vector: Boolean(schema.vector), placed: total, total, invented: false };
   if (schema.motion) return { how: "motion", placed: total, total, invented: false };
-  // Rows carry their own coordinates, or we invent one per entity — either way
-  // every entity lands somewhere.
-  if (schema.located) return { how: "pins", placed: total, total, invented: false };
-  if (schema.mockLocations) return { how: "pins", placed: total, total, invented: true };
+  // Rows carry their own coordinates, or one is invented per entity — either
+  // way every entity has a position, and the only limit left is how many rows
+  // a single query will return.
+  if (schema.located) return { how: "pins", placed: Math.min(total, DRAW_CAP), total, invented: false };
+  if (schema.mockLocations) return { how: "pins", placed: Math.min(total, DRAW_CAP), total, invented: true };
   const placed = placeableNodes(schema).length;
   return placed ? { how: "pins", placed, total, invented: false } : null;
 }
@@ -1668,9 +1693,20 @@ export function placeableNodes(schema: Schema): string[] {
 
 /** "1,118 placed · invented" — what the picker says under a layer's name. */
 export function coverageLabel(t: MapTreatment): string {
-  if (t.invented) return `${t.total.toLocaleString()} entities · invented positions`;
   if (t.how === "surface") return t.vector ? "vector field" : "scalar field";
   if (t.how === "motion") return "tracked positions";
+  const capped = t.placed < t.total && (t.invented || t.placed === DRAW_CAP);
+  // Three different shortfalls, and they are not interchangeable. Capped means
+  // the query stops early. "Known locations" means the coordinates run out.
+  // Saying "8 of 1,118" when the truth is "10,000 of 19,312, because that is
+  // all one request returns" would send somebody hunting for missing geography
+  // that is not the problem.
+  if (capped) {
+    return `${t.placed.toLocaleString()} of ${t.total.toLocaleString()} drawn${
+      t.invented ? " · invented positions" : ""
+    }`;
+  }
+  if (t.invented) return `${t.total.toLocaleString()} entities · invented positions`;
   if (t.placed >= t.total) return `${t.total.toLocaleString()} placed`;
   return `${t.placed} of ${t.total.toLocaleString()} have known locations`;
 }

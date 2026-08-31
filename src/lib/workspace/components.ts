@@ -1,4 +1,4 @@
-import { type DataRef, grainSeconds, schemaFor } from "./catalog";
+import { DRAW_CAP, type DataRef, grainSeconds, schemaFor } from "./catalog";
 import { ERCOT_POINTS, ERCOT_VIEW, hasGeography } from "./geo";
 import { MOCK_POINT_SOURCE } from "./geoMock";
 import { schemaById } from "./catalog";
@@ -1860,8 +1860,11 @@ const map: ComponentDef = {
       (r) => schemaById(r.schemaId)?.located || schemaById(r.schemaId)?.mockLocations,
     );
     const locatedSchema = locatedRef ? schemaById(locatedRef.schemaId) : undefined;
-    // ERCOT's large streams name their entity `node`; the weather ones declare it.
-    const locatedEntity = locatedSchema?.entityKey ?? "node";
+    // Declared, then the fan-out key, then `node`. Day-ahead rows say `bus`,
+    // and a placement path that assumed one column drew one stream and silently
+    // nothing for the other.
+    const locatedEntity =
+      locatedSchema?.entityColumn ?? locatedSchema?.entityKey ?? "node";
     /*
       Invented geography, carried through rather than decided once and forgotten.
 
@@ -1951,7 +1954,7 @@ ${
          would catch by looking at it. Bounded at now, the newest row is the
          current one for observations and forecasts alike.
       */
-      `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, end: "-0m", limit: ${Math.min(2000, Math.max(60, (locatedSchema?.entities.count ?? 50) * 24))} },`
+      `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, end: "-0m", limit: ${Math.min(DRAW_CAP, Math.max(60, (locatedSchema?.entities.count ?? 50) * 2))} },`
     : nodes.length
       ? `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 },`
       : ""
@@ -2073,6 +2076,38 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   )};
   const [hidden, setHidden] = React.useState({});
   const shown = (id) => !hidden[id];
+
+  /*
+    The time scrubber, on the map rather than only in the bar.
+
+    The instant is still the page's — one answer for every tile, which is the
+    point of it — but the control belongs next to the thing it changes. A map is
+    the tile you most want to scrub, and reaching for a control in the navbar
+    two thousand pixels away to move what is under your cursor is the wrong
+    distance. So this drives the page cursor through \`dryos.setCursor\`, and the
+    handle only moves when the page answers back. Every other tile moves with it,
+    which is the behaviour that teaches what the control actually does.
+
+    The label says "screen" for the same reason: a scrubber sitting on a map
+    would otherwise read as belonging to the map.
+  */
+  const CURSOR_BACK_H = 24, CURSOR_FWD_H = 48, CURSOR_STEP = 3600000;
+  const hourFloor = (ms) => Math.floor(ms / CURSOR_STEP) * CURSOR_STEP;
+  const [cursorNow, setCursorNow] = React.useState(() => hourFloor(Date.now()));
+  const [cursorAt, setCursorAt] = React.useState(
+    () => (typeof dryos !== "undefined" && dryos.cursor) || null,
+  );
+  React.useEffect(() => {
+    const on = () => setCursorAt((typeof dryos !== "undefined" && dryos.cursor) || null);
+    window.addEventListener("dryos:cursor", on);
+    // Only while live, so the scale cannot slide under a handle somebody set.
+    const id = setInterval(() => { if (!dryos.cursor) setCursorNow(hourFloor(Date.now())); }, 60000);
+    return () => { window.removeEventListener("dryos:cursor", on); clearInterval(id); };
+  }, []);
+  const cursorMs = cursorAt ? Date.parse(cursorAt) : cursorNow;
+  const cursorLabel = cursorAt
+    ? new Date(cursorMs).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : "Live";
 
   /*
     A grid cell carries its own position: G_315_1005 is 31.5N 100.5W. Encoding
@@ -2765,8 +2800,9 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           below still pans and zooms as if nothing were on top of it. */}
       <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
 
+      <div style={{ alignItems: "flex-end", bottom: 4, display: "flex", gap: 6, left: 4, position: "absolute", right: 4, zIndex: 3 }}>
       {LAYERS.length > 0 && (
-        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, bottom: 4, display: "flex", flexDirection: "column", gap: 2, left: 4, padding: "5px 6px", position: "absolute", zIndex: 3 }}>
+        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 2, padding: "5px 6px" }}>
           {LAYERS.map((L) => (
             <button
               key={L.id}
@@ -2789,6 +2825,37 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           ))}
         </div>
       )}
+
+      <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, flex: "1 1 auto", maxWidth: 340, minWidth: 150, padding: "5px 8px" }}>
+        <div style={{ alignItems: "baseline", display: "flex", gap: 5, justifyContent: "space-between" }}>
+          <span style={{ color: cursorAt ? "var(--accent)" : "var(--muted)", fontSize: 10, whiteSpace: "nowrap" }}>
+            {cursorLabel}
+          </span>
+          <span style={{ color: "var(--faint)", fontSize: 8.5, letterSpacing: ".07em", textTransform: "uppercase" }}>
+            whole screen
+          </span>
+          {cursorAt ? (
+            <button
+              type="button"
+              onClick={() => dryos.setCursor(null)}
+              style={{ background: "none", border: "none", color: "var(--faint)", cursor: "pointer", font: "inherit", fontSize: 9, padding: 0 }}
+            >
+              live
+            </button>
+          ) : null}
+        </div>
+        <input
+          type="range"
+          min={cursorNow - CURSOR_BACK_H * CURSOR_STEP}
+          max={cursorNow + CURSOR_FWD_H * CURSOR_STEP}
+          step={CURSOR_STEP}
+          value={cursorMs}
+          onChange={(e) => dryos.setCursor(new Date(Number(e.target.value)).toISOString())}
+          aria-label="Time shown on this screen"
+          style={{ accentColor: "var(--accent)", display: "block", height: 12, width: "100%" }}
+        />
+      </div>
+      </div>
 
       {probe ? (
         <div

@@ -70,6 +70,9 @@ export const RUNTIME_SHIM = String.raw`
       var next = m.at || null;
       if (next === cursor) return;
       cursor = next;
+      // Readable by components that want to *show* the instant, not just query
+      // at it — a scrubber on a tile has to know where its own handle goes.
+      if (window.dryos) window.dryos.cursor = cursor;
       // Every hook refetches off this rather than waiting for its own poll —
       // a five-minute tile would otherwise sit on the old instant long after
       // the scrub that moved it.
@@ -119,6 +122,31 @@ export const RUNTIME_SHIM = String.raw`
 
   window.dryos = {
     query: function (opts) { return call("query", atCursor(opts || {})); },
+    /** The instant the page is showing, or null for live. Read, do not assign. */
+    cursor: null,
+    /*
+      Move the page's cursor from inside a tile.
+
+      The frame does not own the instant and must not: the cursor is one answer
+      the whole screen gives, so a tile that set it locally would put its own
+      map at 14:00 beside a chart still at now — the exact thing the cursor
+      exists to prevent. So this posts an intent outward and waits to be told,
+      the same shape as resize, move and remove. The handle does not jump
+      because the tile moved it; it jumps because the page came back and said so.
+
+      Standalone there is no parent to ask, so it self-serves — which is what
+      makes a scrubber work on a shared bundle URL and in the editor preview.
+    */
+    setCursor: function (at) {
+      var next = at || null;
+      if (standalone) {
+        cursor = next;
+        window.dryos.cursor = cursor;
+        window.dispatchEvent(new Event("dryos:cursor"));
+        return;
+      }
+      parent.postMessage({ __dryos: "cursor-set", at: next }, "*");
+    },
     HUBS: ["HB_HOUSTON","HB_NORTH","HB_SOUTH","HB_WEST","HB_PAN","HB_BUSAVG","HB_HUBAVG"],
     ZONES: ["LZ_AEN","LZ_CPS","LZ_HOUSTON","LZ_LCRA","LZ_NORTH","LZ_RAYBN","LZ_SOUTH","LZ_WEST"]
   };

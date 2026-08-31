@@ -46,10 +46,13 @@ export function Runner({
   editing,
   selected,
   cursor,
+  onCursor,
 }: {
   appId: string;
   /** The instant this screen is about, ISO, or null for live. */
   cursor?: string | null;
+  /** A tile asked to move it. The page owns the answer and sends it back. */
+  onCursor?: (at: string | null) => void;
   version: number;
   onError?: (message: string) => void;
   /** Something draggable is in flight, so the canvas should offer targets. */
@@ -205,7 +208,8 @@ export function Runner({
             swap: { index: number; x: number; y: number } | null;
           }
         | { __dryos: "remove"; index: number }
-        | { __dryos: "configure"; index: number };
+        | { __dryos: "configure"; index: number }
+        | { __dryos: "cursor-set"; at: string | null };
       if (!m || typeof m !== "object") return;
       // Data calls are answered for either frame — the incoming one starts
       // querying while it is still invisible. Layout gestures only mean
@@ -230,11 +234,16 @@ export function Runner({
         });
       } else if (m.__dryos === "configure") {
         onConfigure?.(m.index);
+      } else if (m.__dryos === "cursor-set") {
+        // A tile asking the page to move its instant. The frame does not get to
+        // decide — it is told the answer on the way back, like every other
+        // gesture that crosses this boundary.
+        onCursor?.(m.at ?? null);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [answer, onError, onResize, onMove, onRemove, onConfigure]);
+  }, [answer, onError, onResize, onMove, onRemove, onConfigure, onCursor]);
 
   // Never let the two slots carry the same revision — between the swap and
   // the effect that clears `pending` there is a render where they could.
