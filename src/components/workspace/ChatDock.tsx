@@ -20,9 +20,10 @@ import type { App } from "@/lib/workspace/types";
  *
  * The two are one window because they are one posture — you are talking about
  * the dashboard in front of you — and the mode is the only thing that decides
- * whether the answer is words or a change to the screen. It fills whatever the
- * letterboxed canvas leaves below it: a conversation is the one thing here that
- * genuinely wants more height than a bar.
+ * whether the answer is words or a change to the screen. It lives as a tab of
+ * the panel column, because a conversation reads top-down: it spent a spell as
+ * a wide strip under the canvas, and two lines of transcript across a metre of
+ * width was the worst shape a chat can take.
  */
 
 type Mode = "ask" | "agent";

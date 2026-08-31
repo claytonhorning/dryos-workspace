@@ -64,20 +64,27 @@ export function ScreenSkeleton({ withPanel = false }: { withPanel?: boolean }) {
       <div className="flex min-h-0 flex-col gap-2">
         <div
           className={cx(
-            "min-h-0 flex-1 bg-code",
-            withPanel ? "rounded-lg border border-line" : "",
+            "min-h-0 bg-code",
+            // Editing, the canvas is letterboxed to the launched screen and
+            // the community strip takes what is left — roughly two to one,
+            // which is what the scale works out to at ordinary panel widths.
+            withPanel ? "flex-[2] rounded-lg border border-line" : "flex-1",
           )}
         >
-          {/* The twelve-column grid a page is arranged on, at rest. */}
-          <div className="grid h-full grid-cols-12 content-start gap-3 p-3">
-            <Skeleton className="col-span-8 h-[240px]" />
-            <Skeleton className="col-span-4 h-[240px]" />
-            <Skeleton className="col-span-5 h-[180px]" />
-            <Skeleton className="col-span-7 h-[180px]" />
+          {/*
+            The twelve-column grid a page is arranged on, at rest. The rows
+            stretch: tiles fill the dashboard, so their stand-ins fill it too —
+            blocks huddled at the top read as a page with a hole in it.
+          */}
+          <div className="grid h-full grid-cols-12 grid-rows-2 gap-3 p-3">
+            <Skeleton className="col-span-8" />
+            <Skeleton className="col-span-4" />
+            <Skeleton className="col-span-5" />
+            <Skeleton className="col-span-7" />
           </div>
         </div>
-        {/* The sentence box under the screen — its own band, in both states. */}
-        {withPanel && <Skeleton className="h-[92px] w-full shrink-0" />}
+        {/* The community strip under the screen, filling the letterbox's leavings. */}
+        {withPanel && <Skeleton className="min-h-0 w-full flex-1" />}
       </div>
 
       {withPanel && (

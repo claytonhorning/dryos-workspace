@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button, Empty } from "@/components/ui";
+import { Modal } from "@/components/Modal";
 import { CardGridSkeleton } from "@/components/Skeleton";
 import { Tabs } from "@/components/Tabs";
 import { SpaceCard, type SpaceSummary } from "@/components/workspace/SpaceCard";
@@ -33,6 +34,9 @@ export default function WorkspacePage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [creating, setCreating] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  /** The workspace the bin was pressed on, while its dialog is up. */
+  const [condemned, setCondemned] = useState<SpaceSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetch("/api/workspace/spaces")
@@ -50,6 +54,23 @@ export default function WorkspacePage() {
   /** An empty workspace with one empty page, opened straight away. */
   async function newSpace() {
     await create("compose");
+  }
+
+  /**
+   * Delete a workspace, and its pages with it — same act as the workspace's
+   * own page, but the shelf stays put, so this one clears its own busy state
+   * and takes the card out of the grid rather than navigating away.
+   */
+  async function deleteSpace() {
+    if (!condemned) return;
+    setDeleting(true);
+    try {
+      await fetch(`/api/workspace/spaces/${condemned.id}`, { method: "DELETE" });
+      setSpaces((prev) => prev.filter((sp) => sp.id !== condemned.id));
+      setCondemned(null);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   /**
@@ -82,7 +103,11 @@ export default function WorkspacePage() {
       first ??= page?.id;
     }
 
-    router.push(`/workspace/${made.space.id}/${first}`);
+    // A new workspace's one page is empty, and nobody makes one in order to
+    // look at nothing — so it opens in edit mode, the same way a new page
+    // does. A community set lands launched: those pages have something to see.
+    const blank = slugs.length === 1 && slugs[0] === "compose";
+    router.push(`/workspace/${made.space.id}/${first}${blank ? "?edit=1" : ""}`);
   }
 
   const grid = "grid gap-3 sm:grid-cols-2 lg:grid-cols-3";
@@ -166,7 +191,11 @@ export default function WorkspacePage() {
                   spaces.length > 0 ? (
                     <div className={grid}>
                       {spaces.map((sp) => (
-                        <SpaceCard key={sp.id} space={sp} />
+                        <SpaceCard
+                          key={sp.id}
+                          space={sp}
+                          onDelete={() => setCondemned(sp)}
+                        />
                       ))}
                     </div>
                   ) : (
@@ -194,6 +223,52 @@ export default function WorkspacePage() {
           />
         )}
       </div>
+
+      {/*
+        Named, counted and irreversible — the same dialog the workspace's own
+        page shows, because the same red button deserves the same sentence.
+        The count and the list are the part someone checks before pressing it.
+      */}
+      <Modal
+        open={condemned !== null}
+        onClose={() => setCondemned(null)}
+        title={`Delete “${condemned?.name ?? ""}”?`}
+        subtitle="This cannot be undone."
+        footer={
+          <>
+            <Button tone="ghost" onClick={() => setCondemned(null)}>
+              Cancel
+            </Button>
+            <Button tone="danger" disabled={deleting} onClick={deleteSpace}>
+              {deleting ? "Deleting…" : "Delete workspace"}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[13.5px] leading-relaxed text-muted">
+          {condemned?.pageList.length === 0 ? (
+            "This workspace is empty."
+          ) : (
+            <>
+              Its{" "}
+              <strong className="text-ink">
+                {condemned?.pageList.length}{" "}
+                {condemned?.pageList.length === 1 ? "page" : "pages"}
+              </strong>{" "}
+              go with it, along with every change recorded on them:
+            </>
+          )}
+        </p>
+        {condemned && condemned.pageList.length > 0 && (
+          <ul className="mt-3 flex flex-col gap-1">
+            {condemned.pageList.map((p) => (
+              <li key={p.id} className="font-mono text-[12px] text-faint">
+                · {p.name}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
     </div>
   );
 }

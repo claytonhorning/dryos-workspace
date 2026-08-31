@@ -73,15 +73,6 @@ export function Hero() {
             <Reveal delay={0.68}>
               <div className="mt-9 flex flex-wrap items-center gap-2.5">
                 <ShimmerLink href="/workspace">Open my workspace</ShimmerLink>
-                <Link
-                  href="/marketplace/energy"
-                  className="group inline-flex h-10 items-center gap-2 rounded-md border border-line-strong bg-surface-2/70 px-4 text-[13.5px] text-ink backdrop-blur transition-colors hover:bg-surface-3"
-                >
-                  See the data
-                  <span className="text-faint transition-transform duration-200 group-hover:translate-x-0.5">
-                    →
-                  </span>
-                </Link>
               </div>
             </Reveal>
 

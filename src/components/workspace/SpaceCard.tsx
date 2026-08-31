@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { TrashGlyph } from "@/components/Glyphs";
 import { Thumbnail } from "@/components/workspace/Thumbnail";
 import type { AppSummary } from "@/lib/workspace/types";
 
@@ -25,7 +26,15 @@ export interface SpaceSummary {
  * cannot answer yet — so the card just opens, and the decision to change
  * something is made from inside, where there is something to change.
  */
-export function SpaceCard({ space }: { space: SpaceSummary }) {
+export function SpaceCard({
+  space,
+  onDelete,
+}: {
+  space: SpaceSummary;
+  /** Opens the shelf's named-and-counted confirm — deleting a workspace takes
+      its pages with it, so this is never fired directly. */
+  onDelete?: () => void;
+}) {
   const [first, ...rest] = space.pageList;
   const into = first ? `/workspace/${space.id}/${first.id}` : `/workspace/${space.id}`;
 
@@ -60,12 +69,29 @@ export function SpaceCard({ space }: { space: SpaceSummary }) {
         )}
       </div>
 
-      <div className="flex items-baseline justify-between gap-2 p-3">
+      <div className="flex items-center justify-between gap-2 p-3">
         <span className="truncate text-[14.5px] font-semibold text-ink transition-colors group-hover:text-accent">
           {space.name}
         </span>
-        <span className="shrink-0 font-mono text-[10px] text-faint">
-          {space.pages.length} {space.pages.length === 1 ? "page" : "pages"}
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span className="font-mono text-[10px] text-faint">
+            {space.pages.length} {space.pages.length === 1 ? "page" : "pages"}
+          </span>
+          {onDelete && (
+            <button
+              onClick={(e) => {
+                // The whole card is a link; the bin must not also open it.
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete();
+              }}
+              aria-label={`Delete ${space.name}`}
+              title="Delete this workspace"
+              className="rounded border border-transparent p-1 text-faint transition-colors hover:border-fail-line hover:text-fail"
+            >
+              <TrashGlyph />
+            </button>
+          )}
         </span>
       </div>
     </Link>

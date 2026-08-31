@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, cx } from "@/components/ui";
+import { Select } from "@/components/Select";
 import { AttachedChip } from "@/components/workspace/DataChip";
 import {
   DEFAULT_LAYOUT,
@@ -17,7 +18,7 @@ import {
   mapTreatment,
   refreshCost,
   schemaFor,
-  tokenLabel,
+  creditChip,
   type DataRef,
 } from "@/lib/workspace/catalog";
 import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
@@ -199,7 +200,7 @@ export function ComponentEditor({
         </button>
         <span className="ml-auto font-mono text-[9.5px] text-faint">
           {busy ? "writing…" : code ? "refined" : "generated"} ·{" "}
-          {tokenLabel(cost.perRefresh)}/refresh
+          {creditChip(cost.perRefresh)}/refresh
         </span>
       </div>
 
@@ -237,17 +238,12 @@ export function ComponentEditor({
                 <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
                   {o.label}
                 </span>
-                <select
+                <Select
                   value={options[o.key]}
-                  onChange={(e) => set(o.key, e.target.value)}
-                  className="mt-1 w-full rounded-md border border-line bg-surface-2 px-2 py-1.5 text-[12.5px] text-ink outline-none focus:border-line-strong"
-                >
-                  {o.choices.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => set(o.key, v)}
+                  options={o.choices.map((c) => ({ value: c.value, label: c.label }))}
+                  className="mt-1 w-full"
+                />
               </label>
             ))}
           </div>
@@ -366,7 +362,7 @@ export function ComponentEditor({
           </>
         )}
         <span className={cx("ml-auto font-mono text-[9.5px] text-faint")}>
-          ≈{cost.perDay.toLocaleString()} DRY/day
+          ≈{cost.perDay.toLocaleString()} credits/day
         </span>
       </div>
     </div>
@@ -534,7 +530,7 @@ export function MapLayers({
                     {coverageLabel(t)}
                     {t.invented && " · demonstration only"}
                     {" · "}
-                    {tokenLabel(ref.tokens)}
+                    {creditChip(ref.tokens)}
                   </div>
                 </button>
               ))}

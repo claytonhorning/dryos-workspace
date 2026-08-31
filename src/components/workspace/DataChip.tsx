@@ -1,7 +1,7 @@
 "use client";
 
 import { cx } from "@/components/ui";
-import { tokenLabel, type Availability, type DataRef } from "@/lib/workspace/catalog";
+import { creditChip, type Availability, type DataRef } from "@/lib/workspace/catalog";
 
 /**
  * How data looks wherever it is shown.
@@ -53,29 +53,40 @@ export function AvailabilityBadge({
 export function RefMeta({ refr, className }: { refr: DataRef; className?: string }) {
   return (
     <span className={cx("font-mono text-[9.5px] text-faint", className)}>
-      {refr.cadence} · {tokenLabel(refr.tokens)}/query
+      {refr.cadence} · {creditChip(refr.tokens)}/query
     </span>
   );
 }
 
 /**
- * The same two facts as chips, for the explorer's cards.
+ * The card's facts as chips: how often the stream ticks, and how wide it fans.
  *
  * Live stopped being worth a badge the day the whole catalogue became live —
- * a label that is true of everything says nothing. What varies between
- * streams, and what someone weighs before wiring one up, is how often it
- * ticks and what a query costs; those are the chips now. Mock keeps its badge
- * unconditionally — an unlabelled mock is still the one unforgivable state.
+ * a label that is true of everything says nothing. The price came off next:
+ * at one credit almost everywhere it was another label true of everything,
+ * and the build box still totals the cost at the moment it matters. Mock
+ * keeps its badge unconditionally — an unlabelled mock is still the one
+ * unforgivable state.
  */
-export function MetaBadges({ cadence, tokens }: { cadence: string; tokens: number }) {
+export function MetaBadges({
+  cadence,
+  entities,
+}: {
+  cadence: string;
+  /** How many entities the stream fans over — a chip beside the others, so
+      the card's facts all live in one row. Omitted where there is only one. */
+  entities?: number;
+}) {
   return (
     <span className="flex flex-wrap items-center gap-1">
       <span className="inline-flex shrink-0 items-center rounded-sm border border-line bg-surface px-1.5 py-px font-mono text-[9px] text-muted">
         {cadence}
       </span>
-      <span className="inline-flex shrink-0 items-center rounded-sm border border-line-strong bg-surface px-1.5 py-px font-mono text-[9px] text-ink">
-        {tokenLabel(tokens)}
-      </span>
+      {entities !== undefined && entities > 1 && (
+        <span className="inline-flex shrink-0 items-center rounded-sm border border-line bg-surface px-1.5 py-px font-mono text-[9px] text-muted">
+          {entities.toLocaleString()} entities
+        </span>
+      )}
     </span>
   );
 }
@@ -130,7 +141,7 @@ export function DataChip({
       {refr.sublabel && (
         <span className="truncate font-mono text-[9.5px] text-faint">{refr.sublabel}</span>
       )}
-      <MetaBadges cadence={refr.cadence} tokens={refr.tokens} />
+      <MetaBadges cadence={refr.cadence} />
     </button>
   );
 }

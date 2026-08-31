@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cx } from "@/components/ui";
+import { Select } from "@/components/Select";
 import {
   readSeries,
   seriesControls,
@@ -195,18 +196,15 @@ export function SeriesStyles({
                     )}
 
                     {controls.line && (
-                      <select
+                      <Select
                         value={pick.d ?? "solid"}
-                        onChange={(e) => set(slot.key, { d: e.target.value })}
-                        title="Line style"
-                        className="shrink-0 rounded border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-line-strong"
-                      >
-                        {SERIES_LINES.map((l) => (
-                          <option key={l.value} value={l.value}>
-                            {l.label}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(v) => set(slot.key, { d: v })}
+                        options={SERIES_LINES.map((l) => ({ value: l.value, label: l.label }))}
+                        aria-label="Line style"
+                        size="sm"
+                        align="right"
+                        className="shrink-0"
+                      />
                     )}
 
                     {/*

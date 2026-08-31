@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button, Empty } from "@/components/ui";
 import { Modal } from "@/components/Modal";
+import { PencilGlyph, TrashGlyph } from "@/components/Glyphs";
 import { CardGridSkeleton } from "@/components/Skeleton";
-import { UsageDock } from "@/components/workspace/UsageDock";
 import { Thumbnail } from "@/components/workspace/Thumbnail";
 import type { AppSummary } from "@/lib/workspace/types";
 import { useSelectOnMount } from "@/lib/useSelectOnMount";
@@ -130,40 +130,49 @@ export function SpaceView({ spaceId }: { spaceId: string }) {
       </Link>
 
       <div className="mt-1 flex flex-wrap items-center gap-3">
-        {editing ? (
-          <input
-            ref={nameField}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={rename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void rename();
-              if (e.key === "Escape") setEditing(false);
-            }}
-            size={Math.max(10, draft.length)}
-            className="rounded border border-line-strong bg-surface-2 px-2 py-0.5 text-[26px] font-semibold tracking-[-0.02em] text-ink outline-none"
-          />
-        ) : space ? (
-          <button
-            onClick={() => {
-              setDraft(space.name);
-              setEditing(true);
-            }}
-            title="Click to rename this workspace"
-            className="rounded border border-transparent px-2 py-0.5 text-[26px] font-semibold tracking-[-0.02em] text-ink transition-colors hover:border-line hover:bg-surface-2"
-          >
-            {space.name}
-          </button>
-        ) : (
-          // Sized like the heading it replaces, so the row does not jump.
-          <span className="my-1 block h-8 w-64 animate-pulse rounded bg-surface-2" />
-        )}
+        <div className="flex flex-col">
+          {editing ? (
+            <input
+              ref={nameField}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={rename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void rename();
+                if (e.key === "Escape") setEditing(false);
+              }}
+              size={Math.max(10, draft.length)}
+              className="rounded border border-line-strong bg-surface-2 px-2 py-0.5 text-[26px] font-semibold tracking-[-0.02em] text-ink outline-none"
+            />
+          ) : space ? (
+            <button
+              onClick={() => {
+                setDraft(space.name);
+                setEditing(true);
+              }}
+              title="Click to rename this workspace"
+              className="group/name flex items-center gap-2 self-start rounded border border-transparent px-2 py-0.5 text-[26px] font-semibold tracking-[-0.02em] text-ink transition-colors hover:border-line hover:bg-surface-2"
+            >
+              {space.name}
+              <span className="text-faint transition-colors group-hover/name:text-ink">
+                <PencilGlyph />
+              </span>
+            </button>
+          ) : (
+            // Sized like the heading it replaces, so the row does not jump.
+            <span className="my-1 block h-8 w-64 animate-pulse rounded bg-surface-2" />
+          )}
 
-        <span className="font-mono text-[10.5px] text-faint">
-          {space
-            ? `${space.pageList.length} ${space.pageList.length === 1 ? "page" : "pages"}`
-            : ""}
-        </span>
+          <span className="px-2 font-mono text-[10.5px] text-faint">
+            {space
+              ? `${space.pageList.length} ${space.pageList.length === 1 ? "page" : "pages"}`
+              : ""}
+          </span>
+        </div>
+
+        <Button tone="primary" size="sm" disabled={creating} onClick={addPage}>
+          {creating ? "Creating…" : "New page"}
+        </Button>
 
         <div className="ml-auto flex items-center gap-2">
           <Button
@@ -172,14 +181,6 @@ export function SpaceView({ spaceId }: { spaceId: string }) {
             onClick={() => setConfirmDelete(true)}
           >
             Delete workspace
-          </Button>
-          <Button
-            tone="primary"
-            size="sm"
-            disabled={creating}
-            onClick={addPage}
-          >
-            {creating ? "Creating…" : "New page"}
           </Button>
         </div>
       </div>
@@ -207,8 +208,6 @@ export function SpaceView({ spaceId }: { spaceId: string }) {
           ))}
         </div>
       )}
-
-      <UsageDock spaceId={spaceId} name={space?.name} />
 
       {/*
         Named, counted and irreversible. A workspace's pages exist nowhere else,
@@ -334,46 +333,5 @@ function PageCard({
         )}
       </div>
     </div>
-  );
-}
-
-/** A bin, drawn rather than lettered — an × means "close" everywhere else here. */
-function TrashGlyph() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M2.5 3.5h9M5.5 3.5V2.4a.9.9 0 0 1 .9-.9h1.2a.9.9 0 0 1 .9.9v1.1M3.6 3.5l.5 7.6a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.5-7.6"
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6 6v3.5M8 6v3.5"
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-/** A pencil. Paired with the bin beside it, so both actions read as icons. */
-function PencilGlyph() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M9.4 2.1a1.3 1.3 0 0 1 1.9 0l.6.6a1.3 1.3 0 0 1 0 1.9L5.3 11.2l-3 .5.5-3z"
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8.6 3l2.4 2.4"
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }

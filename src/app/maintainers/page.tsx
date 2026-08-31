@@ -34,9 +34,6 @@ export default function MaintainersPage() {
         <ButtonLink href="mailto:hello@dryos.dev?subject=Maintainer%20interest" tone="primary">
           Talk to us
         </ButtonLink>
-        <ButtonLink href="/docs" tone="secondary">
-          Read the collector contract
-        </ButtonLink>
       </div>
 
       <div className="mt-12 space-y-6">

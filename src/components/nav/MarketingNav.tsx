@@ -9,15 +9,13 @@ import { MobileStrip, NavLink, Shell } from "./shared";
 /**
  * The nav for the pages that are still arguing.
  *
- * Two destinations and one action, because a marketing page has exactly one job
+ * One destination and one action, because a marketing page has exactly one job
  * here: get someone into the workspace. The previous "Get early access" is gone
  * — there is a running product behind this link, and asking people to queue for
- * something they can open is worse than not asking.
+ * something they can open is worse than not asking. "The data" went when the
+ * catalogue pages did: the data is browsed inside the workspace now.
  */
-const LINKS = [
-  { href: "/maintainers", label: "For maintainers" },
-  { href: "/marketplace/energy", label: "The data" },
-];
+const LINKS = [{ href: "/maintainers", label: "For maintainers" }];
 
 export function MarketingNav({ pathname }: { pathname: string }) {
   return (

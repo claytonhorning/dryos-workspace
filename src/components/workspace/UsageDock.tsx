@@ -14,12 +14,16 @@ import type { UsageSummary, WindowUsage } from "@/lib/workspace/meter";
 /**
  * What this workspace is costing.
  *
- * Two placements, one component. **In the navbar** (`nav`) it is a number in
- * the chrome, at the top right beside the account — which is where a running
- * total belongs when the thing under it runs edge to edge: floating over the
- * canvas, it was one more object on a screen whose whole point is that it
- * carries nothing but the dashboard. **Floating** (`dock`) is the older
- * bottom-left readout, still used where there is no workspace bar to sit in.
+ * Always in the navbar now: a number in the chrome, at the top right beside
+ * the account — which is where a running total belongs when the thing under it
+ * runs edge to edge. The floating bottom-left pill (`dock`) is retired;
+ * nothing mounts it any more, because a readout hovering over the canvas was
+ * one more object on a screen whose whole point is that it carries nothing but
+ * the dashboard. The idiom is kept only so the component's two shapes stay
+ * legible side by side.
+ *
+ * Unscoped (no `spaceId`), it reads everything this account has served —
+ * that is the chip the app shell wears outside any one workspace.
  *
  * It grows **in place** rather than opening a dialog in the middle of the
  * screen. The number you clicked stays where you left it, the detail unfolds
@@ -40,11 +44,12 @@ type WindowId = (typeof WINDOWS)[number]["id"];
 export function UsageDock({
   spaceId,
   name,
-  placement = "dock",
+  placement = "nav",
 }: {
-  spaceId: string;
+  /** Scope to one workspace; absent, the whole account's spending. */
+  spaceId?: string;
   name?: string;
-  /** `nav` sits inline in the workspace bar; `dock` floats bottom-left. */
+  /** `nav` sits inline in the bar; `dock` (retired) floats bottom-left. */
   placement?: "nav" | "dock";
 }) {
   const inNav = placement === "nav";
@@ -75,7 +80,11 @@ export function UsageDock({
   useEffect(() => {
     let live = true;
     const load = () =>
-      fetch(`/api/workspace/usage?space=${encodeURIComponent(spaceId)}`)
+      fetch(
+        spaceId
+          ? `/api/workspace/usage?space=${encodeURIComponent(spaceId)}`
+          : "/api/workspace/usage",
+      )
         .then((r) => r.json())
         .then((d) => live && setUsage(d))
         .catch(() => {});
@@ -106,7 +115,7 @@ export function UsageDock({
     <button
       onClick={() => setOpen((v) => !v)}
       aria-expanded={open}
-      title="What this workspace is costing"
+      title={spaceId ? "What this workspace is costing" : "What you are spending"}
       className={cx(
         "inline-flex items-center gap-2 rounded-full border font-mono text-[10.5px] transition-colors hover:border-line-strong",
         inNav

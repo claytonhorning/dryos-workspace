@@ -18,6 +18,8 @@ import {
 } from "@/components/workspace/BuildPanel";
 import { ComponentEditor } from "@/components/workspace/ComponentEditor";
 import { ChatDock } from "@/components/workspace/ChatDock";
+import { CommunityStrip } from "@/components/workspace/CommunityStrip";
+import { FeedsPanel } from "@/components/workspace/FeedsPanel";
 import { componentDef, GRID, type ComponentSpec } from "@/lib/workspace/components";
 import { readNdjson } from "@/lib/workspace/ndjson";
 import type { App, AppSummary } from "@/lib/workspace/types";
@@ -25,15 +27,19 @@ import type { App, AppSummary } from "@/lib/workspace/types";
 /**
  * What the right column is showing.
  *
- * One column, two jobs, and they are not used together: you build, or you read
- * what happened. Stacked, neither had room. Cost used to be a third turn here;
- * spending lives in the navbar's usage dock now, so the panel no longer repeats
- * it.
+ * One column, four jobs, and they are not used together: you build by hand,
+ * you build by conversation, you read what happened, or you check what the
+ * screen is reading. Stacked, none had room. The chat lives here rather than
+ * under the screen because a conversation reads top-down — a wide two-line
+ * strip was the worst shape for one. Cost used to be a turn here too; spending
+ * lives in the navbar's usage dock now, so the panel no longer repeats it.
  */
-type PanelMode = "build" | "changes";
+type PanelMode = "build" | "chat" | "changes" | "feeds";
 
 const PANELS: { id: PanelMode; label: string }[] = [
   { id: "build", label: "Build" },
+  { id: "chat", label: "Chat" },
+  { id: "feeds", label: "Feeds" },
   { id: "changes", label: "History" },
 ];
 
@@ -288,6 +294,21 @@ export default function AppPage() {
       .then((r) => r.json())
       .then((d) => setApp(d.app ?? null));
   }, [id]);
+
+  /*
+    An empty page is only ever a page being built, so the panel it is built
+    from is always open: the canvas says "pick data, then drag a component
+    here", and closed, there is nowhere to pick data from. Steered through the
+    URL rather than a state override — edit mode stays derived from one place,
+    and the navbar's pencil, the skeleton and the frame all keep agreeing.
+  */
+  useEffect(() => {
+    if (!asideOpen && app?.manifest?.length === 0) {
+      const qs = new URLSearchParams(search);
+      qs.set("edit", "1");
+      router.replace(`?${qs}`, { scroll: false });
+    }
+  }, [asideOpen, app?.manifest?.length, router, search]);
 
   const onRuntimeError = useCallback((m: string) => setRuntimeError(m), []);
 
@@ -610,21 +631,16 @@ export default function AppPage() {
           )}
 
           {/*
-            The conversation, under the screen it is about, taking every pixel
-            the letterboxed canvas leaves. Ask is just chat — the data guide,
-            words only; Agent takes the sentence and builds it on the dashboard
-            above, with the explorer's selection attached.
+            The community shelf, taking every pixel the letterboxed canvas
+            leaves. A page starts better from what somebody already decided
+            than from bare data — click a card and it runs on live data right
+            there, and the running preview is the drag handle onto the screen.
           */}
           {asideOpen && (
             <div className="min-h-0 flex-1">
-              <ChatDock
-                appId={app.id}
-                refs={attached}
-                onApp={(a) => {
-                  setApp(a);
-                  markSaved();
-                }}
-                onPick={toggle}
+              <CommunityStrip
+                onDragStateChange={beginDrag}
+                reloadKey={savedTick}
               />
             </div>
           )}
@@ -814,6 +830,35 @@ export default function AppPage() {
                   </div>
                 )}
 
+                {/*
+                  Mounted only while open, unlike the chat below it: it polls
+                  the delivery API every 20 seconds, and a pane nobody is
+                  reading should not keep asking.
+                */}
+                {panel === "feeds" && (
+                  <FeedsPanel manifest={app.manifest} history={app.history} />
+                )}
+
+                {/*
+                  Kept mounted, like the build pane below: a transcript that
+                  vanished every time somebody glanced at History would not be
+                  a conversation.
+                */}
+                <div
+                  hidden={panel !== "chat"}
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  <ChatDock
+                    appId={app.id}
+                    refs={attached}
+                    onApp={(a) => {
+                      setApp(a);
+                      markSaved();
+                    }}
+                    onPick={toggle}
+                  />
+                </div>
+
                 <div
                   hidden={panel !== "build"}
                   className="flex min-h-0 flex-1 flex-col gap-2"
@@ -878,7 +923,6 @@ export default function AppPage() {
                         <BuildPanel
                           refs={attached}
                           onDragStateChange={beginDrag}
-                          reloadKey={savedTick}
                         />
                       </div>
                     </>

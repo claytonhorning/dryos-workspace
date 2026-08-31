@@ -18,7 +18,7 @@ export function Wordmark({
 }) {
   return (
     <span className={cx("dryos-mark", className)} style={{ fontSize: size }}>
-      dryos
+      dry<span className="dryos-mark-os">os</span>
     </span>
   );
 }

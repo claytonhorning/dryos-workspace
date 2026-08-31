@@ -7,10 +7,12 @@ import {
   MetaBadges,
   SelectionStrip,
 } from "@/components/workspace/DataChip";
+import { Select } from "@/components/Select";
 import {
   SCHEMAS,
   type DataRef,
   type Schema,
+  blurbLead,
   categories,
   categoryOf,
   catalogRefs,
@@ -75,27 +77,41 @@ export function DataExplorer({
     [selected],
   );
 
-  // One card per stream. The card is the stream; what is inside it is the
-  // set view's business.
+  // One card per stream, one section per heading. Streams that share a
+  // path — the SCED LMP and the settlement point price both live at
+  // Pricing › Real-time — sit under one heading rather than repeating it,
+  // because to the reader they are two answers to the same question.
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return SCHEMAS.filter(
-      (s) =>
-        domainOf(s) === domain &&
-        (category === ALL || categoryOf(s) === category) &&
-        (!q ||
-          s.name.toLowerCase().includes(q) ||
-          s.path.join(" ").toLowerCase().includes(q) ||
-          s.variables.some(
+    const bySection = new Map<
+      string,
+      { schema: Schema; streamRef?: DataRef }[]
+    >();
+    for (const s of SCHEMAS) {
+      if (
+        domainOf(s) !== domain ||
+        (category !== ALL && categoryOf(s) !== category) ||
+        (q &&
+          !s.name.toLowerCase().includes(q) &&
+          !s.path.join(" ").toLowerCase().includes(q) &&
+          !s.variables.some(
             (v) =>
               v.label.toLowerCase().includes(q) ||
               v.key.toLowerCase().includes(q) ||
               v.unit.toLowerCase().includes(q),
-          )),
-    ).map((schema) => ({
-      schema,
-      streamRef: refs.find((r) => r.schemaId === schema.id && r.kind === "schema"),
-    }));
+          ))
+      )
+        continue;
+      const heading = s.path.slice(1).join(" › ");
+      const entry = {
+        schema: s,
+        streamRef: refs.find((r) => r.schemaId === s.id && r.kind === "schema"),
+      };
+      const list = bySection.get(heading);
+      if (list) list.push(entry);
+      else bySection.set(heading, [entry]);
+    }
+    return [...bySection.entries()].map(([heading, entries]) => ({ heading, entries }));
   }, [refs, domain, category, query]);
 
   const shown = groups.length;
@@ -154,21 +170,17 @@ export function DataExplorer({
             placeholder="Search data…"
             className="w-full min-w-0 rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
           />
-          <select
+          <Select
             value={domain}
-            onChange={(e) => {
-              setDomain(e.target.value);
+            onChange={(d) => {
+              setDomain(d);
               setCategory(ALL);
             }}
+            options={all.map((d) => ({ value: d, label: d }))}
             aria-label="Domain"
-            className="shrink-0 rounded-md border border-line bg-surface-2 px-2 py-1 text-[12px] text-ink outline-none focus:border-line-strong"
-          >
-            {all.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
+            align="right"
+            className="shrink-0"
+          />
         </div>
         <div className="dr-scroll flex gap-1 overflow-x-auto">
           {cats.map((c) => (
@@ -204,33 +216,37 @@ export function DataExplorer({
           </p>
         ) : (
           groups.map((g) => (
-            <section key={g.schema.id} className="mb-3 last:mb-0">
-              <h3 className="flex items-baseline px-0.5 pb-1.5 font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-                {g.schema.path.slice(1).join(" › ")}
-                <span className="ml-auto normal-case tracking-normal text-muted">
-                  {entityCountLabel(g.schema)}
-                </span>
+            <section key={g.heading} className="mb-3 last:mb-0">
+              {/* No count out here: it rides on each card as a chip, beside
+                  the cadence and the price, where a heading shared by two
+                  streams could not carry it anyway. */}
+              <h3 className="px-0.5 pb-1.5 font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+                {g.heading}
               </h3>
               <div className="grid gap-1.5 sm:grid-cols-2">
                 {/* A stream with entities opens; one with a single series has
                     nothing to choose, so its card selects directly. Same card,
                     same height — only the affordance differs. */}
-                {hasEntities(g.schema) ? (
-                  <DrillRow
-                    schema={g.schema}
-                    picked={countPicked(selected, g.schema)}
-                    onOpen={() => setDrill(g.schema)}
-                  />
-                ) : (
-                  g.streamRef && (
-                    <DataChip
-                      refr={g.streamRef}
-                      selected={chosen.has(
-                        `${g.streamRef.snippet}::${g.streamRef.label}`,
-                      )}
-                      onClick={() => onToggle(g.streamRef!)}
+                {g.entries.map((e) =>
+                  hasEntities(e.schema) ? (
+                    <DrillRow
+                      key={e.schema.id}
+                      schema={e.schema}
+                      picked={countPicked(selected, e.schema)}
+                      onOpen={() => setDrill(e.schema)}
                     />
-                  )
+                  ) : (
+                    e.streamRef && (
+                      <DataChip
+                        key={e.schema.id}
+                        refr={e.streamRef}
+                        selected={chosen.has(
+                          `${e.streamRef.snippet}::${e.streamRef.label}`,
+                        )}
+                        onClick={() => onToggle(e.streamRef!)}
+                      />
+                    )
+                  ),
                 )}
               </div>
             </section>
@@ -336,10 +352,15 @@ function DrillRow({
           ›
         </span>
       </span>
+      {/* One sentence of what the stream is: two cards under one heading
+          need more than their names to be told apart. */}
       <span className="truncate font-mono text-[9.5px] text-faint">
-        {entityCountLabel(schema)}
+        {blurbLead(schema)}
       </span>
-      <MetaBadges cadence={schema.cadence.label} tokens={schema.tokens} />
+      <MetaBadges
+        cadence={schema.cadence.label}
+        entities={schema.entities.count}
+      />
     </button>
   );
 }

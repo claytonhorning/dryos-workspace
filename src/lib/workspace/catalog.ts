@@ -186,7 +186,7 @@ export interface Schema {
 export const SCHEMAS: Schema[] = [
   {
     id: "energy.power.realtime",
-    path: ["Energy", "Power", "Real-time"],
+    path: ["Energy", "Pricing", "Real-time"],
     name: "ERCOT real-time LMP",
     dataset: "ercot-realtime-lmp",
     availability: "live",
@@ -234,7 +234,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.dayahead",
-    path: ["Energy", "Power", "Day-ahead"],
+    path: ["Energy", "Pricing", "Day-ahead"],
     name: "ERCOT day-ahead hourly LMP",
     dataset: "ercot-dam-lmp-bus",
     availability: "live",
@@ -386,7 +386,10 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.rtspp",
-    path: ["Energy", "Power", "RT settlement"],
+    // Shares the "Real-time" group with the SCED LMP deliberately: both are
+    // the live price at every settlement point, five minutes apart in role —
+    // the signal and the number settlement actually uses.
+    path: ["Energy", "Pricing", "Real-time"],
     name: "Real-time settlement point prices",
     dataset: "ercot-rt-spp",
     availability: "live",
@@ -414,7 +417,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.damspp",
-    path: ["Energy", "Power", "DAM settlement"],
+    path: ["Energy", "Pricing", "DAM settlement"],
     name: "DAM settlement point prices",
     dataset: "ercot-dam-spp",
     availability: "live",
@@ -443,7 +446,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.rtbus",
-    path: ["Energy", "Power", "RT bus LMP"],
+    path: ["Energy", "Pricing", "RT bus LMP"],
     name: "Real-time LMPs by electrical bus",
     dataset: "ercot-rt-lmp-bus",
     availability: "live",
@@ -471,7 +474,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.indicative",
-    path: ["Energy", "Power", "Indicative LMP"],
+    path: ["Energy", "Pricing", "Indicative LMP"],
     name: "Indicative LMPs (RTD look-ahead)",
     dataset: "ercot-indicative-lmp",
     availability: "live",
@@ -499,7 +502,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.scedlambda",
-    path: ["Energy", "Power", "System lambda"],
+    path: ["Energy", "Pricing", "System lambda"],
     name: "SCED system lambda",
     dataset: "ercot-sced-lambda",
     availability: "live",
@@ -527,7 +530,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.damlambda",
-    path: ["Energy", "Power", "DAM lambda"],
+    path: ["Energy", "Pricing", "DAM lambda"],
     name: "DAM system lambda",
     dataset: "ercot-dam-lambda",
     availability: "live",
@@ -556,7 +559,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.shadow",
-    path: ["Energy", "Power", "Shadow prices"],
+    path: ["Energy", "Pricing", "Shadow prices"],
     name: "DAM shadow prices",
     dataset: "ercot-dam-shadow-prices",
     availability: "live",
@@ -594,7 +597,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.dambought",
-    path: ["Energy", "Power", "DAM volumes bought"],
+    path: ["Energy", "Pricing", "DAM volumes bought"],
     name: "DAM energy purchased",
     dataset: "ercot-dam-energy-bought",
     availability: "live",
@@ -623,7 +626,7 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.power.damsold",
-    path: ["Energy", "Power", "DAM volumes sold"],
+    path: ["Energy", "Pricing", "DAM volumes sold"],
     name: "DAM energy sold",
     dataset: "ercot-dam-energy-sold",
     availability: "live",
@@ -1050,7 +1053,9 @@ export const SCHEMAS: Schema[] = [
   },
   {
     id: "energy.grid.adders",
-    path: ["Energy", "Grid", "Price adders"],
+    // Pricing, not Grid: the adders are a component of the real-time price,
+    // and someone reading prices should find them beside the prices they move.
+    path: ["Energy", "Pricing", "Price adders"],
     name: "Real-time price adders and reserves",
     dataset: "ercot-rt-price-adders",
     availability: "live",
@@ -1519,6 +1524,18 @@ export function tokenLabel(tokens: number): string {
 }
 
 /**
+ * The unit as a plain word, still short: "1 credit", "0.5 credits".
+ *
+ * For the explorer's cards and the build box's receipts — the surfaces a
+ * domain expert prices a query on. "1 DRY" there is a ticker symbol they have
+ * to already know; the ledgers and the marketplace keep the ticker, because
+ * there the ticker is the pricing argument itself.
+ */
+export function creditChip(tokens: number): string {
+  return `${tokenAmount(tokens)} credit${tokens === 1 ? "" : "s"}`;
+}
+
+/**
  * The same figure, with the unit in words.
  *
  * For the one place a number appears with nothing around it to say what it
@@ -1642,7 +1659,9 @@ export function catalogRefs(): DataRef[] {
     makeRef(s, {
       kind: "schema",
       label: s.name,
-      sublabel: entityCountLabel(s),
+      // The card's second line. A count was redundant there — single-entity
+      // streams said "1 entity", and fan-outs carry the count as a chip.
+      sublabel: blurbLead(s),
       snippet: querySnippet(s),
     }),
     ...s.variables.map((v) =>
@@ -1829,4 +1848,16 @@ export function entityRef(schema: Schema, node: string, varKey?: string): DataRe
 export function entityCountLabel(schema: Schema): string {
   const n = schema.entities.count;
   return `${n.toLocaleString()} ${n === 1 ? "entity" : "entities"}`;
+}
+
+/**
+ * The blurb's first sentence — what a card has room to say.
+ *
+ * The full blurb ends in provenance ("Collected from ERCOT MIS…"), which is
+ * the landing page's business; the card only needs the half that tells two
+ * streams under one heading apart.
+ */
+export function blurbLead(schema: Schema): string {
+  const dot = schema.blurb.indexOf(". ");
+  return dot === -1 ? schema.blurb : schema.blurb.slice(0, dot + 1);
 }

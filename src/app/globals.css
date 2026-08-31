@@ -316,4 +316,10 @@ body {
   color: var(--color-ink);
 }
 
+/* The "os" takes the accent — chartreuse on dark, olive on light — which the
+   token already flips, so the mark follows the theme with no rule of its own. */
+.dryos-mark .dryos-mark-os {
+  color: var(--color-accent);
+}
+
 

@@ -103,12 +103,6 @@ export default async function LandingPage() {
                 number moved.
               </p>
             </div>
-            <Link
-              href="/marketplace/energy"
-              className="text-[13.5px] text-accent underline-offset-4 hover:underline"
-            >
-              See the listing →
-            </Link>
           </Reveal>
 
           <RevealGroup className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -212,14 +206,15 @@ export default async function LandingPage() {
                   </p>
                 </>
               );
+              // Cards, not links, since the catalogue pages went: the live
+              // vertical is browsed inside the workspace now.
               return live ? (
-                <Link
+                <div
                   key={v.id}
-                  href={`/marketplace/${v.id}`}
-                  className="block h-full rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong hover:bg-surface-2"
+                  className="block h-full rounded-lg border border-line bg-surface p-5"
                 >
                   {body}
-                </Link>
+                </div>
               ) : (
                 <div
                   key={v.id}

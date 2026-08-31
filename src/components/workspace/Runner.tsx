@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cx } from "@/components/ui";
+import { GRID } from "@/lib/workspace/components";
 import { useTheme } from "@/lib/useTheme";
 
 /**
@@ -137,6 +138,20 @@ export function Runner({
   );
   /** The place on the canvas the frame says the pointer is currently over. */
   const spot = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * Where the last drop landed, kept until the revision that fills it swaps
+   * in. Composing and compiling take a second or two, and a screen that shows
+   * nothing at the drop point for that second reads as frozen — so a skeleton
+   * stands in the tile's place immediately. Columns come from the frame's own
+   * answer, so the width is exact; the vertical anchor is the pointer, because
+   * the frame may be scrolled and its document coordinates are not ours.
+   */
+  const [landing, setLanding] = useState<{
+    x: number;
+    hostY: number;
+    w: number;
+    h: number;
+  } | null>(null);
   const theme = useTheme();
 
   /** The revision on screen, and the one loading invisibly behind it. */
@@ -145,6 +160,28 @@ export function Runner({
   useEffect(() => {
     setPending(version === live ? null : version);
   }, [version, live]);
+
+  // The stand-in leaves with the swap that makes it redundant — or, when the
+  // placement failed, the moment everything has settled back to what it was.
+  useEffect(() => {
+    if (landing && !placing && pending == null && version === live)
+      setLanding(null);
+  }, [landing, placing, pending, version, live]);
+
+  // A revision loading behind the live one is reported in the workspace bar,
+  // beside the querying mark — same reasoning, same channel: the canvas
+  // carries nothing but the dashboard.
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("dryos:updating", { detail: pending != null }),
+    );
+  }, [pending]);
+  useEffect(
+    () => () => {
+      window.dispatchEvent(new CustomEvent("dryos:updating", { detail: false }));
+    },
+    [],
+  );
 
   // The frame cannot read this document, so the theme has to be handed to it —
   // on load and again whenever it changes under someone's feet.
@@ -349,12 +386,6 @@ export function Runner({
           />
         );
       })}
-      {pending != null && (
-        <span className="pointer-events-none absolute top-2 right-2 animate-pulse rounded border border-accent-line bg-surface/80 px-1.5 py-[2px] font-mono text-[10px] text-accent backdrop-blur">
-          updating…
-        </span>
-      )}
-
       {/*
         A transparent sheet, purely to catch the pointer events the iframe would
         otherwise swallow. Every position is forwarded inward, where the grid
@@ -402,12 +433,51 @@ export function Runner({
               { __dryos: "placed" },
               "*",
             );
+            // Something has to occupy the drop point *now* — the save takes a
+            // second or two, and an empty spot for that second reads as a
+            // screen that ignored the gesture.
+            if (spot.current && dropSize) {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setLanding({
+                x: spot.current.x,
+                hostY: e.clientY - rect.top,
+                w: dropSize.w,
+                h: dropSize.h,
+              });
+            }
             // The frame decided where; it told us on the last dragover.
             onDropAt?.(spot.current);
             spot.current = null;
           }}
         />
       )}
+
+      {/*
+        The dropped tile, as a skeleton, the instant the hand lets go. The real
+        one arrives with the next revision; until then this pulses in its place
+        so the gesture visibly took. Width and column are the frame's own
+        answer scaled back out; the top is anchored to the pointer, since a new
+        tile travels centred under the hand.
+      */}
+      {landing &&
+        (() => {
+          const s = fit?.scale ?? 1;
+          const w = fit?.w ?? shell.current?.clientWidth ?? 0;
+          if (!w) return null;
+          const col = (w - 32 - (GRID.cols - 1) * GRID.gap) / GRID.cols;
+          const left = (16 + landing.x * (col + GRID.gap)) * s;
+          const width = (landing.w * col + (landing.w - 1) * GRID.gap) * s;
+          const height = landing.h * s;
+          const top = Math.max(16 * s, landing.hostY - height / 2);
+          return (
+            <div
+              className="pointer-events-none absolute z-10 animate-pulse rounded-md border border-line bg-surface-2/90"
+              style={{ left, top, width, height }}
+            >
+              <div className="m-2 h-3 w-24 max-w-[60%] rounded bg-surface-3" />
+            </div>
+          );
+        })()}
     </div>
   );
 }

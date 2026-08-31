@@ -8,27 +8,25 @@ import {
   type RefObject,
 } from "react";
 import { cx } from "@/components/ui";
+import { Select } from "@/components/Select";
 import {
   COMPONENTS,
   DEFAULT_LAYOUT,
   type ComponentDef,
   type ComponentKind,
-  type ComponentSpec,
   withDefaults,
 } from "@/lib/workspace/components";
 import { type DataRef } from "@/lib/workspace/catalog";
-import type { PublishedComponent } from "@/lib/workspace/community";
 import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
 import { SeriesStyles } from "@/components/workspace/SeriesStyles";
 
 /**
  * The shelf of things a screen can be built from, and the preview of one.
  *
- * The shelf is in three sections — the base shapes, the components you saved,
- * and the ones somebody published. They are listed apart because they answer
- * different questions: a shape is a starting point, a saved component is
- * something you already decided, and a published one is somebody else's
- * decision you are borrowing.
+ * The shelf is the base shapes. It used to carry your saved components and the
+ * community's published ones too; the community moved to the strip under the
+ * canvas (`CommunityStrip`), where starting from somebody's finished decision
+ * is the first thing offered rather than the last section of a column.
  *
  * **A card is not draggable, and only the preview is.** One gesture used to
  * mean two things: dragging a card placed the shape sight-unseen at its
@@ -83,11 +81,6 @@ export interface TrayPayload {
   px?: { w: number; h: number };
 }
 
-interface Saved extends ComponentSpec {
-  id: string;
-  name: string;
-}
-
 /**
  * What the editor opens on.
  *
@@ -127,14 +120,10 @@ interface Preview {
 export function BuildPanel({
   refs,
   onDragStateChange,
-  reloadKey,
 }: {
   refs: DataRef[];
   onDragStateChange: (payload: TrayPayload | null) => void;
-  reloadKey: number;
 }) {
-  const [saved, setSaved] = useState<Saved[]>([]);
-  const [community, setCommunity] = useState<PublishedComponent[]>([]);
   /**
    * The component being previewed, in the shelf's own place. Clicking a card
    * runs the real thing — the preview route composes a one-tile app on live
@@ -158,16 +147,6 @@ export function BuildPanel({
   // The missing parent: a sandboxed frame can only reach data through whoever
   // embeds it, and outside Runner that is this hook or a 30-second timeout.
   const previewFrame = usePreviewHost();
-
-  useEffect(() => {
-    fetch("/api/workspace/components")
-      .then((r) => r.json())
-      .then((d) => {
-        setSaved(d.components ?? []);
-        setCommunity(d.community ?? []);
-      })
-      .catch(() => {});
-  }, [reloadKey]);
 
   useEffect(() => {
     try {
@@ -385,98 +364,6 @@ export function BuildPanel({
           })}
         </Section>
 
-        {/*
-          Kept even while empty. The section is the answer to "where did the
-          thing I saved go" — a heading that only exists once something is in
-          it cannot answer that, and one line saying how to fill it can.
-        */}
-        <Section title="Your components" note="saved from the editor">
-          {saved.length === 0 ? (
-            <Empty>
-              Build something, refine it, and <em>Save</em> keeps it here for
-              the next screen.
-            </Empty>
-          ) : (
-            saved.map((c) => {
-              const def = COMPONENTS.find((d) => d.kind === c.kind);
-              if (!def) return null;
-              return (
-                <Card
-                  key={c.id}
-                  kind={c.kind}
-                  title={c.name}
-                  body={`${def.name} · ${c.refs.length} series`}
-                  meta={c.custom ? "refined" : undefined}
-                  enabled
-                  accent
-                  open={isOpen("saved", c.id)}
-                  // Opens on its own data and its own source — what was saved,
-                  // not what the explorer happens to hold now.
-                  onOpen={() =>
-                    show(
-                      {
-                        id: c.id,
-                        shelf: "saved",
-                        def,
-                        name: c.name,
-                        refs: c.refs,
-                        layout: c.layout ?? DEFAULT_LAYOUT[c.kind],
-                        custom: c.custom ?? undefined,
-                      },
-                      withDefaults(def, c.options),
-                    )
-                  }
-                  onDelete={async () => {
-                    if (isOpen("saved", c.id)) setPreview(null);
-                    await fetch(
-                      `/api/workspace/components?id=${encodeURIComponent(c.id)}`,
-                      { method: "DELETE" },
-                    );
-                    const d = await fetch("/api/workspace/components").then((r) =>
-                      r.json(),
-                    );
-                    setSaved(d.components ?? []);
-                  }}
-                />
-              );
-            })
-          )}
-        </Section>
-
-        {community.length > 0 && (
-          <Section title="Community" note="published, ready to take">
-            {community.map((c) => {
-              const def = COMPONENTS.find((d) => d.kind === c.kind);
-              if (!def) return null;
-              return (
-                <Card
-                  key={c.id}
-                  kind={c.kind}
-                  title={c.name}
-                  body={c.blurb}
-                  meta={`by ${c.author}`}
-                  enabled
-                  accent
-                  open={isOpen("community", c.id)}
-                  onOpen={() =>
-                    show(
-                      {
-                        id: c.id,
-                        shelf: "community",
-                        def,
-                        name: c.name,
-                        refs: c.refs,
-                        layout: c.layout ?? DEFAULT_LAYOUT[c.kind],
-                        custom: c.custom ?? undefined,
-                      },
-                      withDefaults(def, c.options),
-                    )
-                  }
-                />
-              );
-            })}
-          </Section>
-        )}
       </div>
 
         </>
@@ -573,17 +460,12 @@ function PreviewPane({
               className="flex items-center gap-1 text-[10.5px] text-faint"
             >
               {o.label}
-              <select
+              <Select
                 value={options[o.key] ?? o.fallback}
-                onChange={(e) => onOption(o.key, e.target.value)}
-                className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-line-strong"
-              >
-                {o.choices.map((ch) => (
-                  <option key={ch.value} value={ch.value}>
-                    {ch.label}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => onOption(o.key, v)}
+                options={o.choices.map((ch) => ({ value: ch.value, label: ch.label }))}
+                size="sm"
+              />
             </label>
           ))}
         </div>
@@ -712,13 +594,7 @@ function MapLayers({ refs }: { refs: DataRef[] }) {
   );
 }
 
-/**
- * One heading and the cards under it.
- *
- * Three shelves rather than one list, because "a shape", "something I made" and
- * "something somebody published" are three different things to be looking for,
- * and a single grid makes you read every card to tell them apart.
- */
+/** One heading and the cards under it. */
 function Section({
   title,
   note,
@@ -745,15 +621,6 @@ function Section({
       */}
       <div className="mt-1.5 grid auto-rows-min grid-cols-2 gap-2">{children}</div>
     </div>
-  );
-}
-
-/** A section with nothing in it yet, saying how it fills rather than vanishing. */
-function Empty({ children }: { children: ReactNode }) {
-  return (
-    <p className="col-span-2 rounded-md border border-dashed border-line px-2.5 py-2 text-[11px] leading-snug text-faint">
-      {children}
-    </p>
   );
 }
 

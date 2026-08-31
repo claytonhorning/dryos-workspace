@@ -111,13 +111,6 @@ export function AccountButton() {
           >
             Usage &amp; billing
           </Link>
-          <Link
-            href="/docs"
-            onClick={() => setOpen(false)}
-            className="block border-b border-line px-3 py-2 text-[13px] text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-          >
-            Docs
-          </Link>
 
           <button
             onClick={signOut}
