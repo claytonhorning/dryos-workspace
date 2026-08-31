@@ -2105,6 +2105,28 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     return () => { window.removeEventListener("dryos:cursor", on); clearInterval(id); };
   }, []);
   const cursorMs = cursorAt ? Date.parse(cursorAt) : cursorNow;
+
+  /*
+    What instant the rows actually are, which is not always the one asked for.
+
+    A query bounded at the cursor returns the newest row at or before it — so
+    scrubbing a backward-looking feed into the future returns the same rows as
+    live, and the map does not change. That is correct, and it looked broken:
+    real-time prices have no tomorrow, and nothing on screen said so.
+
+    So the scrubber states the data's own instant whenever it lags the cursor by
+    more than an hour. Silence here is the actual defect; the values were never
+    wrong.
+  */
+  const dataMs = React.useMemo(() => {
+    let newest = 0;
+    pointRows.forEach((r) => {
+      const t = Date.parse(r.interval_start_utc);
+      if (t && t > newest) newest = t;
+    });
+    return newest || null;
+  }, [rows]);
+  const behind = cursorAt && dataMs && cursorMs - dataMs > 3600000;
   const cursorLabel = cursorAt
     ? new Date(cursorMs).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : "Live";
@@ -2321,14 +2343,78 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     would be the same invention the whole stream exists to avoid.
   */
   const [probe, setProbe] = React.useState(null);
+  /*
+    The placed nodes, in a ref rather than in the effect's dependencies.
+
+    Putting the data in the deps rebinds the pointer handler on every poll, and
+    the cleanup that runs with it clears the readout — so a five-minute feed
+    took the tooltip away from under somebody's cursor, and a fast one made it
+    impossible to read at all. A ref lets the handler see the newest rows while
+    staying bound from the first render to the last.
+  */
+  const placedRef = React.useRef(placed);
+  React.useEffect(() => { placedRef.current = placed; }, [placed]);
   React.useEffect(() => {
     const m = map.current;
-    if (!m || !flow || !ready || ready === "no-token") return;
+    if (!m || !ready || ready === "no-token") return;
     const move = (e) => {
+      const oe = e.originalEvent;
+      /*
+        A point answers where it is. A field answers everywhere.
+
+        That is not a preference, it is what the two kinds of data are. Wind is
+        defined at every coordinate, so interpolating between cells and
+        reporting a value under the cursor is the truth. A price exists at a
+        settlement point and nowhere else — there is no price "here", so
+        reporting one between nodes would be inventing the one number this map
+        is about. Nodes are therefore hit-tested against what is actually
+        rendered, and the readout stays away unless the pointer is on one.
+      */
+      if (LOCATED) {
+        /*
+          Nearest placed node, within a few pixels of the cursor.
+
+          Measured against the rows rather than by hit-testing the GL layer:
+          queryRenderedFeatures wants pixel-exact contact with a circle three
+          pixels across, which is a game rather than a hover, and it only knows
+          about the dense path — the marker path would need a second mechanism.
+          Comparing coordinates works for both, and a thousand subtractions per
+          mousemove costs nothing.
+
+          The threshold is converted from pixels through the map's own bounds,
+          so it stays the same *visual* distance at every zoom. A fixed
+          tolerance in degrees would be a county at one zoom and a car park at
+          another.
+        */
+        const p = placedRef.current;
+        const bounds = m.getBounds();
+        const perPx = (bounds.getEast() - bounds.getWest()) / Math.max(1, m.getCanvas().clientWidth);
+        const reach = perPx * 7;
+        let best = null, bestD = Infinity;
+        for (const id in p) {
+          const dx = (p[id].lon - e.lngLat.lng) * Math.cos((e.lngLat.lat * Math.PI) / 180);
+          const dy = p[id].lat - e.lngLat.lat;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) { bestD = d; best = id; }
+        }
+        if (best && Math.sqrt(bestD) <= reach) {
+          setProbe({
+            kind: "point",
+            id: best,
+            value: p[best].value,
+            lat: e.lngLat.lat,
+            lon: e.lngLat.lng,
+            x: oe.clientX,
+            y: oe.clientY,
+          });
+          return;
+        }
+      }
+      if (!flow) return setProbe(null);
       const f = flow.at(e.lngLat.lng, e.lngLat.lat);
       if (!f) return setProbe(null);
-      const oe = e.originalEvent;
       setProbe({
+        kind: "field",
         spd: f.spd,
         // Back to the published convention: the bearing the wind comes FROM,
         // which is the negation of the velocity we advect along.
@@ -2343,6 +2429,10 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     m.on("mousemove", move);
     m.on("mouseout", off);
     return () => { m.off("mousemove", move); m.off("mouseout", off); setProbe(null); };
+    // Not placed: the point branch hit-tests what the map has rendered rather
+    // than reading the row set, so it needs no data in scope — and adding data
+    // here would rebind the handler on every poll, with a cleanup that clears
+    // the readout somebody is in the middle of reading.
   }, [flow, ready]);
 
   const veil = React.useRef(null);
@@ -2737,19 +2827,33 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       // style.load never fires again, so the paint never happened at all.
       // A theme change calls setStyle, which throws away every source and layer
       // the map did not come with, which is what the rebinding is for.
+      /*
+        Retry on a timer, not on a map event.
+
+        addSource throws before the style is up, and this effect only re-runs
+        when the rows do — five minutes away on a real-time feed — so a single
+        miss is not a flicker, it is an empty layer until the next poll. Both
+        event-based attempts failed in their own way: style.load is a single
+        shot that may already have gone, and waiting on idle never resolved on
+        a map carrying the particle layer, which silently cost this layer
+        entirely whenever the two were on one map. A short poll depends on
+        nothing but the clock and stops as soon as it lands.
+      */
+      let tries = 0;
+      let timer = null;
       const safe = () => {
-        // addSource throws outright before the style is up, and this effect
-        // only re-runs when the rows do — five minutes away on a real-time
-        // feed. So a miss here is not a flicker, it is an empty map until the
-        // next poll. "idle" is the one map event that fires again whenever it
-        // settles, which makes waiting for it self-healing where style.load is
-        // a single shot that may already have gone.
-        if (!m.isStyleLoaded()) { m.once("idle", safe); return; }
-        paint();
+        try {
+          paint();
+        } catch {
+          if (++tries < 40) timer = setTimeout(safe, 250);
+        }
       };
       safe();
       m.on("style.load", safe);
-      return () => { m.off("style.load", safe); };
+      return () => {
+        if (timer) clearTimeout(timer);
+        m.off("style.load", safe);
+      };
     }
 
     ids.forEach((n) => {
@@ -2800,8 +2904,11 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           below still pans and zooms as if nothing were on top of it. */}
       <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
 
-      <div style={{ alignItems: "flex-end", bottom: 4, display: "flex", gap: 6, left: 4, position: "absolute", right: 4, zIndex: 3 }}>
-      {LAYERS.length > 0 && (
+      {/* Top of the map: what is drawn on the left, when it is from on the
+          right. Both out of the way of the Mapbox attribution, which owns the
+          bottom edge and cannot be moved. */}
+      <div style={{ alignItems: "flex-start", display: "flex", gap: 6, justifyContent: "space-between", left: 4, position: "absolute", right: 4, top: 4, zIndex: 3 }}>
+      {LAYERS.length > 0 ? (
         <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 2, padding: "5px 6px" }}>
           {LAYERS.map((L) => (
             <button
@@ -2824,9 +2931,9 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             </button>
           ))}
         </div>
-      )}
+      ) : <span />}
 
-      <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, flex: "1 1 auto", maxWidth: 340, minWidth: 150, padding: "5px 8px" }}>
+      <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, maxWidth: 300, minWidth: 168, padding: "5px 8px" }}>
         <div style={{ alignItems: "baseline", display: "flex", gap: 5, justifyContent: "space-between" }}>
           <span style={{ color: cursorAt ? "var(--accent)" : "var(--muted)", fontSize: 10, whiteSpace: "nowrap" }}>
             {cursorLabel}
@@ -2854,6 +2961,11 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           aria-label="Time shown on this screen"
           style={{ accentColor: "var(--accent)", display: "block", height: 12, width: "100%" }}
         />
+        {behind ? (
+          <div style={{ color: "var(--warn)", fontSize: 9, lineHeight: 1.3, whiteSpace: "nowrap" }}>
+            newest data {new Date(dataMs).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          </div>
+        ) : null}
       </div>
       </div>
 
@@ -2892,18 +3004,36 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         >
           <div style={{ alignItems: "baseline", display: "flex", gap: 5 }}>
             <span style={{ color: "var(--ink)", fontSize: 19, fontWeight: 600, lineHeight: 1.15 }}>
-              {probe.spd.toFixed(1)}
+              {probe.kind === "point"
+                ? (typeof probe.value === "number" ? probe.value.toFixed(2) : "—")
+                : probe.spd.toFixed(1)}
             </span>
-            <span style={{ color: "var(--faint)", fontSize: 11 }}>{UNIT}</span>
+            {/* Each layer's own unit. A single UNIT for both read "6.3 $/MWh"
+                over a wind field on any map that also carried prices — the
+                number was right and the label belonged to the other layer. */}
+            <span style={{ color: "var(--faint)", fontSize: 11 }}>
+              {probe.kind === "point" ? UNIT : FIELD ? FIELD.unit : UNIT}
+            </span>
           </div>
-          <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
-            from {CARDINALS[Math.round(((probe.dir + 360) % 360) / 22.5) % 16]}{" "}
-            {Math.round((probe.dir + 360) % 360)}°
-          </div>
-          <div style={{ color: "var(--faint)", fontSize: 10, marginTop: 2, whiteSpace: "nowrap" }}>
-            {Math.abs(probe.lat).toFixed(2)}°{probe.lat < 0 ? "S" : "N"}{" "}
-            {Math.abs(probe.lon).toFixed(2)}°{probe.lon < 0 ? "W" : "E"}
-          </div>
+          {probe.kind === "point" ? (
+            // The node's own name, which is the thing being asked about — the
+            // coordinate under a pin is the pin's, not a place worth stating,
+            // and here it is invented anyway.
+            <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
+              {probe.id}
+            </div>
+          ) : (
+            <>
+              <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
+                from {CARDINALS[Math.round(((probe.dir + 360) % 360) / 22.5) % 16]}{" "}
+                {Math.round((probe.dir + 360) % 360)}°
+              </div>
+              <div style={{ color: "var(--faint)", fontSize: 10, marginTop: 2, whiteSpace: "nowrap" }}>
+                {Math.abs(probe.lat).toFixed(2)}°{probe.lat < 0 ? "S" : "N"}{" "}
+                {Math.abs(probe.lon).toFixed(2)}°{probe.lon < 0 ? "W" : "E"}
+              </div>
+            </>
+          )}
         </div>
       ) : null}
 
