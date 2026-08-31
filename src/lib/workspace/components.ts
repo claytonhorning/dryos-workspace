@@ -2946,26 +2946,20 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       : [pct(0.05), "#2b6cb0", pct(0.5), "#7dd3fc", pct(0.8), "#e8ff3d", pct(0.95), "#fb8b5c", pct(1), "#f4666b"];
 
     /*
-      Size and opacity on the *stops*, not across the range.
+      One mark, one channel: every node is the same dot and colour carries the
+      value on its own.
 
-      Both ride the same breakpoints the colour does, so they compress where
-      the readings are dense and open up where the exceptions are. Spread
-      linearly instead, a scale reaching $1000 leaves everything below $150
-      indistinguishable — which is the flattening this change exists to undo,
-      reintroduced in a second channel.
+      Size varying with value made the map read as two overlapping claims —
+      a big pale dot against a small bright one is genuinely ambiguous about
+      which matters — and it distorted density, because a cluster of expensive
+      nodes covered more ground than the same cluster cheap. A uniform mark
+      leaves the geography saying only where nodes are, which is all it knows.
+
+      Opacity is constant for the same reason and one more: the legend shows
+      solid colours, so a node drawn at half opacity over a dark basemap is
+      simply not the colour in the key. Fading the ordinary majority made the
+      only thing decoding the map slightly wrong about most of it.
     */
-    const stops = SCALE ? SCALE.map((s) => s.at) : [pct(0.05), pct(0.5), pct(0.8), pct(0.95), pct(1)];
-    // Eased rather than even: squaring holds the low stops close together and
-    // spends the growth at the top. Spread evenly, the band holding 97% of
-    // nodes already sat at half the maximum radius, so the map got heavier
-    // everywhere and the exception gained nothing on its neighbours.
-    const spread = (from, to, ease) =>
-      stops.flatMap((at, i) => {
-        const t = i / Math.max(1, stops.length - 1);
-        return [at, from + (to - from) * (ease ? t * t : t)];
-      });
-    const sizeRamp = (mult) => spread(1.8 * mult, 9 * mult, true);
-    const opacityRamp = spread(0.45, 0.95, true);
 
     // A large set draws as one GL layer rather than as a thousand elements.
     if (LOCATED && LOCATED.dense) {
@@ -2986,25 +2980,12 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           type: "circle",
           source: "dryos-pts",
           paint: {
-            // Size carries the exception too, not only colour — a congested
-            // node is redder *and* bigger, so it survives a projector, a
-            // photograph of a wall, or eyes that do not separate red from
-            // amber.
-            //
-            // Sized on the same stops as the colour, not linearly across the
-            // range. Linear was the first attempt and it defeated the whole
-            // change: with a scale running to $1000, a $112 node sits 15% along
-            // and draws barely larger than a $30 one, so the exception the
-            // colour had just made visible went back to looking ordinary.
-            "circle-radius": [
-              "interpolate", ["linear"], ["zoom"],
-              3, ["interpolate", ["linear"], ["get", "v"], ...sizeRamp(1)],
-              6, ["interpolate", ["linear"], ["get", "v"], ...sizeRamp(1.9)],
-              9, ["interpolate", ["linear"], ["get", "v"], ...sizeRamp(3.2)],
-            ],
+            // One size for every node. It still grows with zoom — that is the
+            // mark keeping its apparent size as the map scales, not the value
+            // saying anything.
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2.6, 6, 5, 9, 9],
             "circle-color": ["interpolate", ["linear"], ["get", "v"], ...ramp],
-            // The quiet majority sits back; the exceptions come forward.
-            "circle-opacity": ["interpolate", ["linear"], ["get", "v"], ...opacityRamp],
+            "circle-opacity": 0.9,
             "circle-stroke-width": 0.5,
             "circle-stroke-color": "rgba(0,0,0,.5)",
           },
@@ -3048,12 +3029,15 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     ids.forEach((n) => {
       const v = placed[n].value;
       if (typeof v !== "number") return;
+      // Same size for every marker, as on the dense layer. These ones carry
+      // their number in the middle, so a varying circle also meant varying room
+      // for the text — the widest values were drawn in the smallest badges.
       const t = hi === lo ? 0.5 : (v - lo) / (hi - lo);
       const el = document.createElement("div");
       el.style.cssText =
         "align-items:center;background:" + (t > 0.66 ? "var(--warn)" : t > 0.33 ? "var(--accent)" : "var(--info)") +
         ";border:1px solid rgba(0,0,0,.45);border-radius:999px;color:#0d1206;display:flex;font:600 10px/1 ui-sans-serif,system-ui;" +
-        "height:" + (22 + t * 16) + "px;justify-content:center;width:" + (22 + t * 16) + "px;";
+        "height:28px;justify-content:center;width:28px;";
       el.textContent = v.toFixed(0);
       // The caveat is only true of a lookup. A located stream publishes where
       // it measured, so claiming that is approximate would be a lie about a
