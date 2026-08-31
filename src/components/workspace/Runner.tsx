@@ -117,6 +117,24 @@ export function Runner({
   const frame = useRef<HTMLIFrameElement | null>(null);
   const shell = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(0);
+
+  // Queries in flight are reported in the workspace bar, beside what they
+  // cost, rather than floated over the canvas's corner — a screen's whole
+  // point is that it carries nothing but the dashboard. An event for the same
+  // reason the saved mark is one: the nav and the canvas share no parent
+  // below the layout.
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("dryos:querying", { detail: busy > 0 }),
+    );
+  }, [busy]);
+  // A Runner that unmounts mid-query would otherwise leave the mark stuck on.
+  useEffect(
+    () => () => {
+      window.dispatchEvent(new CustomEvent("dryos:querying", { detail: false }));
+    },
+    [],
+  );
   /** The place on the canvas the frame says the pointer is currently over. */
   const spot = useRef<{ x: number; y: number } | null>(null);
   const theme = useTheme();
@@ -334,11 +352,6 @@ export function Runner({
       {pending != null && (
         <span className="pointer-events-none absolute top-2 right-2 animate-pulse rounded border border-accent-line bg-surface/80 px-1.5 py-[2px] font-mono text-[10px] text-accent backdrop-blur">
           updating…
-        </span>
-      )}
-      {busy > 0 && !dropping && pending == null && (
-        <span className="pointer-events-none absolute top-2 right-2 rounded border border-line bg-surface/80 px-1.5 py-[2px] font-mono text-[10px] text-faint backdrop-blur">
-          querying…
         </span>
       )}
 

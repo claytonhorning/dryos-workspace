@@ -258,15 +258,21 @@ export function ComponentEditor({
             a tile opened from the screen is the one most likely to need a
             line repainted, and sending someone back to the shelf to change a
             colour would mean rebuilding what they already have.
+
+            Not for a map: its references are layers, not series — the
+            measure's declared scale colours the points — and the layer list
+            below is the control that actually means something there.
           */}
-          <div className="mt-3">
-            <SeriesStyles
-              refs={layers}
-              kind={def.kind}
-              options={options}
-              onChange={(series) => set("series", series)}
-            />
-          </div>
+          {def.kind !== "map" && (
+            <div className="mt-3">
+              <SeriesStyles
+                refs={layers}
+                kind={def.kind}
+                options={options}
+                onChange={(series) => set("series", series)}
+              />
+            </div>
+          )}
 
           {/* ── Its data ─────────────────────────────────────────────── */}
           {def.kind === "map" ? (

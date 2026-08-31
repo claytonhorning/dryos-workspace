@@ -178,6 +178,8 @@ export function SpaceNav({
           </span>
         )}
 
+        <SavedMark pageId={pageId} />
+
         {/* ── Pages ────────────────────────────────────────────────── */}
         <div className="dr-scroll -mb-px flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto">
           {/*
@@ -304,7 +306,41 @@ export function SpaceNav({
           </button>
         </div>
 
+        {/*
+          Edit lives in the chrome, not on the canvas — the bar is already here
+          in both modes, so this costs the screen nothing and is always in the
+          same place, which is the whole difference between a control you find
+          and one you go looking for. It sits right after the tabs, beside the
+          `+`: both are actions on the pages, and parked among the right
+          cluster's indicators it read as one more number rather than as the
+          one thing in the bar you press. It is a link rather than a toggle
+          because the mode is in the URL, so it survives a reload and can be
+          sent to someone.
+        */}
+        {pageId && (
+          <Link
+            href={`/workspace/${spaceId}/${pageId}${editMode ? "" : "?edit=1"}`}
+            aria-label={editMode ? "Done editing" : "Edit this page"}
+            title={editMode ? "Done editing" : "Edit this page"}
+            className={cx(
+              "my-auto flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] transition-colors",
+              editMode
+                ? "border-accent-line bg-accent-dim text-accent"
+                : "border-line text-muted hover:border-line-strong hover:text-ink",
+            )}
+          >
+            <PencilGlyph />
+            {editMode ? "Done" : "Edit"}
+          </Link>
+        )}
+
         <div className="ml-auto flex shrink-0 items-center gap-2.5">
+          {/*
+            Whether the screen is asking right now, next to what asking costs.
+            First in the cluster so its coming and going widens the row leftward
+            and moves nothing that is already being read.
+          */}
+          <QueryingMark pageId={pageId} />
           {/*
             What the workspace is spending, in the chrome rather than floating
             over the screen. It used to sit bottom-left on the canvas, which put
@@ -314,35 +350,98 @@ export function SpaceNav({
             already there in both modes.
           */}
           <UsageDock spaceId={spaceId} placement="nav" />
-          {/*
-            Edit lives in the chrome, not on the canvas.
-            The bar is already here in both modes, so this costs the screen
-            nothing and is always in the same place — which is the whole
-            difference between a control you find and one you go looking for.
-            It is a link rather than a toggle because the mode is in the URL, so
-            it survives a reload and can be sent to someone.
-          */}
-          {pageId && (
-            <Link
-              href={`/workspace/${spaceId}/${pageId}${editMode ? "" : "?edit=1"}`}
-              aria-label={editMode ? "Done editing" : "Edit this page"}
-              title={editMode ? "Done editing" : "Edit this page"}
-              className={cx(
-                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] transition-colors",
-                editMode
-                  ? "border-accent-line bg-accent-dim text-accent"
-                  : "border-line text-muted hover:border-line-strong hover:text-ink",
-              )}
-            >
-              <PencilGlyph />
-              {editMode ? "Done" : "Edit"}
-            </Link>
-          )}
           <ThemeToggle />
           <AccountButton />
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * That everything is already saved, said quietly.
+ *
+ * Arranging a screen writes constantly — every resize, every move — and none of
+ * it announces itself. Silence about your own work is not reassuring, so the
+ * last write gets a mark, in the bar beside the workspace's name. It fades to a
+ * resting state rather than disappearing, because "saved a while ago" is still
+ * the answer to the question being asked.
+ *
+ * The page announces each save with a `dryos:saved` event — the nav and the
+ * page share no parent below the layout, and lifting one timestamp through it
+ * would be plumbing for plumbing's sake.
+ */
+function SavedMark({ pageId }: { pageId?: string }) {
+  const [at, setAt] = useState<number | null>(null);
+  const [, tick] = useState(0);
+
+  useEffect(() => {
+    const onSaved = () => setAt(Date.now());
+    window.addEventListener("dryos:saved", onSaved);
+    return () => window.removeEventListener("dryos:saved", onSaved);
+  }, []);
+
+  // The mark belongs to the page that wrote; switching tabs clears it.
+  useEffect(() => setAt(null), [pageId]);
+
+  useEffect(() => {
+    if (!at) return;
+    const t = setInterval(() => tick((n) => n + 1), 20_000);
+    return () => clearInterval(t);
+  }, [at]);
+
+  if (!at) return null;
+  const secs = Math.round((Date.now() - at) / 1000);
+  const when =
+    secs < 5
+      ? "just now"
+      : secs < 60
+        ? `${secs}s ago`
+        : `${Math.round(secs / 60)}m ago`;
+
+  return (
+    <span className="flex shrink-0 items-center">
+      <span
+        className={cx(
+          "inline-flex items-center gap-1 rounded border px-1.5 py-px font-mono text-[9.5px] whitespace-nowrap transition-colors",
+          secs < 5
+            ? "border-accent-line bg-accent-dim text-accent"
+            : "border-line text-faint",
+        )}
+      >
+        ✓ Saved {when}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * That the screen is asking for data, said beside what asking costs.
+ *
+ * It used to float over the canvas's own corner, which put chrome on the one
+ * surface meant to carry nothing but the dashboard — and kept "queries are
+ * happening" a screen's width away from the number they run up. `Runner`
+ * announces the state with a `dryos:querying` event for the same reason the
+ * saved mark is an event: the nav and the canvas share no parent below the
+ * layout.
+ */
+function QueryingMark({ pageId }: { pageId?: string }) {
+  const [on, setOn] = useState(false);
+
+  useEffect(() => {
+    const h = (e: Event) => setOn(Boolean((e as CustomEvent).detail));
+    window.addEventListener("dryos:querying", h);
+    return () => window.removeEventListener("dryos:querying", h);
+  }, []);
+
+  // The mark belongs to the page that is asking; switching tabs clears it.
+  useEffect(() => setOn(false), [pageId]);
+
+  if (!on) return null;
+  return (
+    <span className="rounded border border-line px-1.5 py-px font-mono text-[9.5px] whitespace-nowrap text-faint">
+      querying…
+    </span>
   );
 }
 

@@ -17,25 +17,24 @@ import {
   type TrayPayload,
 } from "@/components/workspace/BuildPanel";
 import { ComponentEditor } from "@/components/workspace/ComponentEditor";
-import { CustomComponent } from "@/components/workspace/CustomComponent";
-import { CostPanel } from "@/components/workspace/CostPanel";
-import { componentDef, type ComponentSpec } from "@/lib/workspace/components";
+import { ChatDock } from "@/components/workspace/ChatDock";
+import { componentDef, GRID, type ComponentSpec } from "@/lib/workspace/components";
 import { readNdjson } from "@/lib/workspace/ndjson";
 import type { App, AppSummary } from "@/lib/workspace/types";
 
 /**
  * What the right column is showing.
  *
- * One column, three jobs, and they are not used together: you build, or you
- * read what happened, or you check what it costs. Stacking all three made every
- * one of them too short to use, so they take turns.
+ * One column, two jobs, and they are not used together: you build, or you read
+ * what happened. Stacked, neither had room. Cost used to be a third turn here;
+ * spending lives in the navbar's usage dock now, so the panel no longer repeats
+ * it.
  */
-type PanelMode = "build" | "changes" | "cost";
+type PanelMode = "build" | "changes";
 
 const PANELS: { id: PanelMode; label: string }[] = [
   { id: "build", label: "Build" },
-  { id: "changes", label: "Changes" },
-  { id: "cost", label: "Cost" },
+  { id: "changes", label: "History" },
 ];
 
 /**
@@ -58,19 +57,6 @@ const COLUMNS = (open: boolean) =>
  */
 const PAGE_ACTIONS = false;
 
-/**
- * The height of the sentence box under the screen, and so of the band the
- * canvas gives up to it.
- *
- * Fixed rather than content-sized: the canvas is measured against whatever is
- * left, and a box that grew by a line would restate the screen's scale every
- * time somebody typed. It used to be shared with a selection bar under the
- * explorer, so the two columns ended on one line; that bar is gone — the
- * explorer runs to the bottom of the panel now — so this is one column's
- * furniture, not a pair.
- */
-const DOCK_H = "h-[96px]";
-
 /** How wide the panel column may be dragged, px. */
 const PANEL_MIN = 320;
 const PANEL_MAX = 840;
@@ -86,16 +72,16 @@ const PANEL_MAX = 840;
  * weight it will have on the wall, and dragging the panel zooms the screen
  * rather than reflowing it.
  *
- * Height then follows from the room rather than from the viewport, because the
- * canvas fills its column — so the frame is a little taller than the launched
- * screen and shows a strip more canvas below the fold. Letterboxing to the
- * launched height instead left a band of dead space above and below the screen,
- * and empty room next to a dashboard is worse than a little extra ground under
- * one.
+ * Height is the launched height for the same reason, so the canvas is the
+ * whole launched screen and nothing but it — letterboxed, and the room that
+ * frees below is not dead space: the chat fills all of it. Showing a strip
+ * more canvas below the fold was the better use of that room when nothing
+ * else wanted it; a conversation does, and it wants every pixel it can get.
  *
- * It returns the box to measure and the fit to apply. Measured rather than
- * declared: `aspect-ratio` takes a ratio of numbers, and this one is a ratio of
- * two lengths that both change under a window resize or a panel drag.
+ * It returns the box to measure, the fit to apply, and the box's own height
+ * (`boxH`, the launched height scaled). Measured rather than declared:
+ * `aspect-ratio` takes a ratio of numbers, and this one is a ratio of two
+ * lengths that both change under a window resize or a panel drag.
  */
 function useScreenFit(active: boolean, ready: boolean) {
   const box = useRef<HTMLDivElement>(null);
@@ -103,6 +89,7 @@ function useScreenFit(active: boolean, ready: boolean) {
     w: number;
     h: number;
     scale: number;
+    boxH: number;
   } | null>(null);
 
   useEffect(() => {
@@ -113,12 +100,17 @@ function useScreenFit(active: boolean, ready: boolean) {
     }
     const measure = () => {
       const w = window.innerWidth;
+      // The launched screen is the viewport under the nav. The nav is measured
+      // rather than read from the CSS variable so a unit change cannot lie here.
+      const nav =
+        document.querySelector("header")?.getBoundingClientRect().height ?? 0;
+      const h = window.innerHeight - nav;
       const room = el.getBoundingClientRect();
       // A pane with no size yet says nothing about how big the screen is;
       // measuring it would only produce a scale to correct a moment later.
-      if (w <= 0 || room.width <= 0 || room.height <= 0) return;
+      if (w <= 0 || h <= 0 || room.width <= 0) return;
       const scale = Math.min(1, room.width / w);
-      setFit({ w, h: room.height / scale, scale });
+      setFit({ w, h, scale, boxH: Math.round(h * scale) });
     };
     measure();
     // The panel is draggable and the window is resizable, and only one of those
@@ -133,6 +125,16 @@ function useScreenFit(active: boolean, ready: boolean) {
   }, [active, ready]);
 
   return { box, fit };
+}
+
+/**
+ * A write landed. Arranging a screen saves constantly and silently, and
+ * silence about your own data is not reassuring — the saved mark lives in the
+ * workspace bar beside the name, so the page announces each save by event
+ * rather than lifting state through a layout that renders the nav.
+ */
+function markSaved() {
+  window.dispatchEvent(new Event("dryos:saved"));
 }
 
 /** One screen, running, with the tools that shaped it beside it. */
@@ -208,9 +210,6 @@ export default function AppPage() {
    * and each ends in the way on: the explorer's own footer, then the shelf.
    */
   const [stage, setStage] = useState<"data" | "build">("data");
-  /** When the last write landed. Arranging a screen saves constantly and
-   *  silently, and silence about your own data is not reassuring. */
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
   /**
    * The panel's width, draggable at its left edge. Judging a preview in a
@@ -252,6 +251,37 @@ export default function AppPage() {
   const [pullOpen, setPullOpen] = useState(false);
   /** The canvas keeps the launched screen's proportions while being edited. */
   const { box: canvasBox, fit } = useScreenFit(asideOpen, Boolean(app));
+
+  /**
+   * A drag begins: size the incoming tile to the preview it was taken from.
+   *
+   * The payload carries the preview box's on-screen pixels, and the canvas is
+   * the launched screen scaled down — so dividing by the fit's scale and
+   * snapping to the grid gives the tile that *looks* exactly as big as the
+   * thing being dragged. What lands is what you saw, size included; the
+   * shape's default layout is only the fallback for when there is nothing to
+   * measure against.
+   */
+  const beginDrag = useCallback(
+    (payload: TrayPayload | null) => {
+      if (payload?.px && fit) {
+        // The frame's #root keeps 16px of padding on each side, so the grid is
+        // that much narrower than the launched width.
+        const canvasW = fit.w - 32;
+        const col = (canvasW - (GRID.cols - 1) * GRID.gap) / GRID.cols;
+        const stride = col + GRID.gap;
+        const w = Math.min(
+          GRID.cols,
+          Math.max(2, Math.round((payload.px.w / fit.scale + GRID.gap) / stride)),
+        );
+        const h = Math.max(120, Math.round(payload.px.h / fit.scale));
+        setDragging({ ...payload, layout: { w, h } });
+      } else {
+        setDragging(payload);
+      }
+    },
+    [fit],
+  );
 
   useEffect(() => {
     fetch(`/api/workspace/apps/${id}`)
@@ -328,9 +358,9 @@ export default function AppPage() {
           switch (e.type) {
             case "done":
               setApp(e.app as App);
-              setSavedAt(Date.now());
+              markSaved();
               // A placement reports nothing, either path. The tile is on the
-              // page — that is the report — and the save mark in the controls
+              // page — that is the report — and the save mark in the bar
               // says it was written. A banner announcing what you can already
               // see is one more thing to read and then dismiss.
               break;
@@ -377,7 +407,7 @@ export default function AppPage() {
         await readNdjson(res, (e) => {
           if (e.type === "done") {
             setApp(e.app as App);
-            setSavedAt(Date.now());
+            markSaved();
           } else if (e.type === "failed" || e.type === "error") {
             setError(String(e.message));
           }
@@ -398,7 +428,7 @@ export default function AppPage() {
       body: JSON.stringify({ spec, name: spec.custom?.name ?? spec.kind }),
     });
     setSavedTick((n) => n + 1);
-    setSavedAt(Date.now());
+    markSaved();
   }, []);
 
   /**
@@ -419,7 +449,7 @@ export default function AppPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      setSavedAt(Date.now());
+      markSaved();
     },
     [id, app?.manifest],
   );
@@ -536,22 +566,19 @@ export default function AppPage() {
       >
         <div className="relative flex min-h-0 flex-col gap-2">
           {/*
-            The screen takes every pixel of its column above the sentence box —
-            the scale is what makes it the launched screen, not a smaller
-            rectangle drawn inside a larger one.
+            Editing, the canvas is the launched screen scaled — exactly it,
+            letterboxed to its height — and everything under it belongs to the
+            chat. Until the fit is measured (and whenever the panel is closed)
+            it fills the column the way it always did.
           */}
-          <div ref={canvasBox} className="relative min-h-0 flex-1">
-            {/*
-              The save mark sits on the screen itself, top right, rather than in
-              a row beside the panel. Arranging happens on the canvas, so the
-              reassurance that it was kept belongs where the gesture was — and it
-              floats over the corner rather than taking a band of height from a
-              screen that runs edge to edge. Pointer-transparent: the tile under
-              it still answers the cursor.
-            */}
-            <div className="pointer-events-none absolute top-2 right-2 z-10">
-              <SavedMark at={savedAt} />
-            </div>
+          <div
+            ref={canvasBox}
+            className={cx(
+              "relative",
+              asideOpen && fit ? "shrink-0" : "min-h-0 flex-1",
+            )}
+            style={asideOpen && fit ? { height: fit.boxH } : undefined}
+          >
             <Runner
               appId={app.id}
               version={app.updatedAt}
@@ -583,24 +610,21 @@ export default function AppPage() {
           )}
 
           {/*
-            The sentence for what no shape covers, under the screen it is about.
-            It was the last thing in the build panel, below three sections of
-            cards — but it is not one more choice about a component, it is a
-            request about the dashboard, and it reads as one here.
+            The conversation, under the screen it is about, taking every pixel
+            the letterboxed canvas leaves. Ask is just chat — the data guide,
+            words only; Agent takes the sentence and builds it on the dashboard
+            above, with the explorer's selection attached.
           */}
           {asideOpen && (
-            <div className={cx("shrink-0", DOCK_H)}>
-              <CustomComponent
+            <div className="min-h-0 flex-1">
+              <ChatDock
+                appId={app.id}
                 refs={attached}
-                // The tiles it can be asked about. A model-edited page has no
-                // manifest, so it offers none rather than offering tiles it
-                // could not put a change back into.
-                manifest={app.manifest}
-                reloadKey={savedTick}
-                onOpen={(start, at) => {
-                  setReplaceIndex(at ?? null);
-                  setEditing(start);
+                onApp={(a) => {
+                  setApp(a);
+                  markSaved();
                 }}
+                onPick={toggle}
               />
             </div>
           )}
@@ -700,9 +724,9 @@ export default function AppPage() {
             ) : (
               <>
                 {/*
-                  One column, three jobs, taken in turns. Building, reading what
-                  happened and checking what it costs are not done together, and
-                  stacking them made every one too short to use.
+                  One column, two jobs, taken in turns. Building and reading
+                  what happened are not done together, and stacking them made
+                  both too short to use.
                 */}
                 <div className="flex shrink-0 gap-1 rounded-lg border border-line bg-surface p-1">
                   {PANELS.map((p) => (
@@ -725,8 +749,6 @@ export default function AppPage() {
                     </button>
                   ))}
                 </div>
-
-                {panel === "cost" && <CostPanel appId={app.id} />}
 
                 {panel === "changes" && (
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-surface">
@@ -855,7 +877,7 @@ export default function AppPage() {
                       <div className="min-h-0 flex-1">
                         <BuildPanel
                           refs={attached}
-                          onDragStateChange={setDragging}
+                          onDragStateChange={beginDrag}
                           reloadKey={savedTick}
                         />
                       </div>
@@ -867,11 +889,6 @@ export default function AppPage() {
           </aside>
         )}
       </div>
-
-      {/*
-        Clear of the sentence box while editing — the bar is 96 tall over a 16
-        gutter, and the dock steps up over it rather than sitting on it.
-      */}
 
       {pullOpen && (
         <PullDialog
@@ -1118,42 +1135,3 @@ function PullDialog({
   );
 }
 
-/**
- * That everything is already saved, said quietly.
- *
- * Arranging a screen writes constantly — every resize, every move — and none of
- * it announces itself. Silence about your own work is not reassuring, so the
- * last write gets a mark. It fades to a resting state rather than disappearing,
- * because "saved a while ago" is still the answer to the question being asked.
- */
-function SavedMark({ at }: { at: number | null }) {
-  const [, tick] = useState(0);
-
-  useEffect(() => {
-    if (!at) return;
-    const t = setInterval(() => tick((n) => n + 1), 20_000);
-    return () => clearInterval(t);
-  }, [at]);
-
-  if (!at) return null;
-  const secs = Math.round((Date.now() - at) / 1000);
-  const when =
-    secs < 5
-      ? "just now"
-      : secs < 60
-        ? `${secs}s ago`
-        : `${Math.round(secs / 60)}m ago`;
-
-  return (
-    <span
-      className={cx(
-        "inline-flex items-center gap-1 rounded border px-1.5 py-px font-mono text-[9.5px] transition-colors",
-        secs < 5
-          ? "border-accent-line bg-accent-dim text-accent"
-          : "border-line text-faint",
-      )}
-    >
-      ✓ Saved {when}
-    </span>
-  );
-}

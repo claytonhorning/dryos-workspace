@@ -39,9 +39,9 @@ import { SeriesStyles } from "@/components/workspace/SeriesStyles";
  * the page is the thing you are looking at. What lands is what you saw,
  * settings and all, which is not something a card could ever promise.
  *
- * The sentence for the thing no shape covers is not here: `CustomComponent`
- * lives under the screen, because it is a request about the dashboard rather
- * than one more choice about a component.
+ * The sentence for the thing no shape covers is not here either: the chat
+ * lives under the screen (`ChatDock`), because it is a request about the
+ * dashboard rather than one more choice about a component.
  *
  * Every path reads the same selection from the explorer, so the data is chosen
  * once and the only remaining question is what to do with it.
@@ -73,6 +73,14 @@ export interface TrayPayload {
   custom?: { name: string; code: string };
   refs?: DataRef[];
   layout: { w: number; h: number };
+  /**
+   * The preview box as it was on screen when the drag began, in CSS pixels.
+   * The page converts it through the canvas's own scale into columns and
+   * pixels, so the tile lands at exactly the size it was being looked at —
+   * `layout` above is only the fallback for when there is no fit to convert
+   * through.
+   */
+  px?: { w: number; h: number };
 }
 
 interface Saved extends ComponentSpec {
@@ -327,12 +335,16 @@ export function BuildPanel({
             e.dataTransfer.effectAllowed = "copy";
             setDragged(true);
             setHint(false);
+            // What lands is what was being looked at — including its size, so
+            // the box is measured as the hand takes it.
+            const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
             onDragStateChange({
               kind: preview.def.kind,
               options: previewOpts,
               custom: preview.custom,
               refs: previewRefs,
               layout: preview.layout,
+              px: { w: box.width, h: box.height },
             });
           }}
           onDragEnd={() => onDragStateChange(null)}
@@ -518,8 +530,10 @@ export function BuildPanel({
  *
  * It is the shelf's other state rather than a box below it: what you are
  * looking at is the only thing on screen, so it gets the height a chart needs
- * instead of the strip left over under three sections of cards. Settings sit
- * above it because changing one reloads what is underneath.
+ * instead of the strip left over under three sections of cards. The pane reads
+ * top to bottom into the thing it produces — settings, then the series they
+ * shape, then the running component at the bottom, which is also the handle
+ * you drag out and so sits nearest the screen it lands on.
  */
 function PreviewPane({
   def,
@@ -575,7 +589,37 @@ function PreviewPane({
         </div>
       )}
 
-      {live ? (
+      {!live && <p className="text-[11.5px] text-muted">{why}</p>}
+
+      {/*
+        Between the settings and the preview: what the component is actually
+        drawing, and how each one is drawn. Scrolls on its own — eight series
+        and a short panel is a normal combination.
+
+        A map's references are layers rather than series — nothing per-row to
+        colour or dash, since the measure's own scale paints the points and
+        visibility and order live on the map's own legend — so it gets the list
+        in the map's words instead.
+
+        Frozen source is exempt for the same reason the selects above are: a
+        refined component ignores its settings, so offering them would be a lie.
+      */}
+      {live && tunable && (
+        <div className="dr-scroll min-h-0 flex-1 overflow-y-auto">
+          {def.kind === "map" ? (
+            <MapLayers refs={refs} />
+          ) : (
+            <SeriesStyles
+              refs={refs}
+              kind={def.kind}
+              options={options}
+              onChange={(series) => onOption("series", series)}
+            />
+          )}
+        </div>
+      )}
+
+      {live && (
         <div
           // The widget itself is the handle: what you drag is what lands, so
           // the accent border belongs to the thing being carried rather than to
@@ -585,11 +629,14 @@ function PreviewPane({
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           title="Drag onto the page to place exactly what you see"
-          // A fixed height, not the rest of the pane. It is tall enough for the
-          // worst case — a fan-out over eight fuel types spends a short tile
-          // entirely on axes and legend — and the height below it belongs to
-          // the series, which is where the reading of the chart is decided.
-          className="relative h-72 shrink-0 cursor-grab overflow-hidden rounded-md border border-accent bg-code active:cursor-grabbing"
+          // At the bottom of the pane, under the settings and the series that
+          // shape it — the controls read top to bottom into the thing they
+          // produce, and the handle you drag out sits nearest the screen it is
+          // dragged onto. `mt-auto` keeps it pinned there when what is above
+          // runs short. A fixed height, not the rest of the pane: tall enough
+          // for the worst case — a fan-out over eight fuel types spends a
+          // short tile entirely on axes and legend.
+          className="relative mt-auto h-72 shrink-0 cursor-grab overflow-hidden rounded-md border border-accent bg-code active:cursor-grabbing"
         >
           <iframe
             ref={frameRef}
@@ -617,28 +664,50 @@ function PreviewPane({
             </span>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A map's references, listed as the layers they become.
+ *
+ * The series list is wrong here twice over: nothing per-row is choosable (the
+ * measure's declared scale colours the points, so a colour picker would be
+ * overridden by the data), and "series" is not what anyone calls a set of
+ * things on a map. Visibility and draw order are decided on the map itself —
+ * its legend is the layer switch — so this list only says what will be there.
+ */
+function MapLayers({ refs }: { refs: DataRef[] }) {
+  return (
+    <div className="rounded-lg border border-line bg-surface-2/40 p-2">
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+          Layers
+        </span>
+        <span className="ml-auto font-mono text-[9.5px] text-faint">
+          {refs.length} on the map
+        </span>
+      </div>
+
+      {refs.length === 0 ? (
+        <p className="mt-1.5 text-[11.5px] text-muted">Nothing selected yet.</p>
       ) : (
-        <p className="text-[11.5px] text-muted">{why}</p>
+        <ul className="mt-1.5 flex flex-col gap-1">
+          {refs.map((r) => (
+            <li
+              key={r.schemaId + r.label}
+              className="truncate rounded-md border border-line bg-surface px-2 py-1.5 text-[11.5px] text-ink"
+            >
+              {r.label}
+            </li>
+          ))}
+        </ul>
       )}
 
-      {/*
-        Under the preview, taking the height it no longer does: what the
-        component is actually drawing, and how each one is drawn. Scrolls on
-        its own — eight series and a short panel is a normal combination.
-
-        Frozen source is exempt for the same reason the selects above are: a
-        refined component ignores its settings, so offering them would be a lie.
-      */}
-      {live && tunable && (
-        <div className="dr-scroll min-h-0 flex-1 overflow-y-auto">
-          <SeriesStyles
-            refs={refs}
-            kind={def.kind}
-            options={options}
-            onChange={(series) => onOption("series", series)}
-          />
-        </div>
-      )}
+      <p className="mt-1.5 font-mono text-[9.5px] leading-snug text-faint">
+        visibility and draw order are set on the map itself, in its legend
+      </p>
     </div>
   );
 }
