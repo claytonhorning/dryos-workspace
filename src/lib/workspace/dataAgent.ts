@@ -11,6 +11,7 @@ import {
   tokenLabel,
 } from "./catalog";
 import { mockRows } from "./mockData";
+import { chatModel, effortOf } from "./models";
 
 /**
  * The data explorer's agent.
@@ -28,7 +29,6 @@ import { mockRows } from "./mockData";
  * without asking anything a second time.
  */
 
-const MODEL = "claude-opus-5";
 const API = process.env.DRYOS_API_URL ?? "http://127.0.0.1:8000";
 
 export type { DataRef };
@@ -379,18 +379,28 @@ async function runTool(
   throw new Error(`Unknown tool ${name}`);
 }
 
-export async function ask(question: string, emit: (e: AskEvent) => void) {
+export async function ask(
+  question: string,
+  emit: (e: AskEvent) => void,
+  opts?: { model?: string; effort?: string },
+) {
   const client = new Anthropic();
+  // Validated against the roster, never trusted as strings — and shaped per
+  // model: effort is a 400 on Haiku 4.5. Thinking stays omitted on purpose;
+  // the 5-family runs adaptive by default and Haiku has no adaptive mode.
+  const picked = chatModel(opts?.model);
+  const effort = effortOf(opts?.effort);
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: question }];
 
   // A handful of turns is plenty for "what exists and what does it say"; the
   // cap is there so a confused loop cannot bill indefinitely.
   for (let turn = 0; turn < 6; turn++) {
     const stream = client.messages.stream({
-      model: MODEL,
+      model: picked.id,
       max_tokens: 8000,
       system: SYSTEM,
       tools: TOOLS,
+      ...(picked.effort ? { output_config: { effort } } : {}),
       messages,
     });
     stream.on("text", (delta) => emit({ type: "text", text: delta }));

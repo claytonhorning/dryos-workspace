@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { cx } from "@/components/ui";
 import {
   DataChip,
@@ -20,6 +25,7 @@ import {
   domains,
   entityCountLabel,
   entityRef,
+  streamRef,
 } from "@/lib/workspace/catalog";
 import { entityNote } from "@/lib/workspace/entityNotes";
 
@@ -70,10 +76,16 @@ export function DataExplorer({
   const [drill, setDrill] = useState<Schema | null>(null);
 
   const refs = useMemo(() => catalogRefs(), []);
-  const cats = useMemo(() => [ALL, ...categories(domain)], [domain]);
+  const cats = useMemo(
+    () => [ALL, ...categories(domain)],
+    [domain],
+  );
 
   const chosen = useMemo(
-    () => new Set(selected.map((r) => `${r.snippet}::${r.label}`)),
+    () =>
+      new Set(
+        selected.map((r) => `${r.snippet}::${r.label}`),
+      ),
     [selected],
   );
 
@@ -105,13 +117,17 @@ export function DataExplorer({
       const heading = s.path.slice(1).join(" › ");
       const entry = {
         schema: s,
-        streamRef: refs.find((r) => r.schemaId === s.id && r.kind === "schema"),
+        streamRef: refs.find(
+          (r) => r.schemaId === s.id && r.kind === "schema",
+        ),
       };
       const list = bySection.get(heading);
       if (list) list.push(entry);
       else bySection.set(heading, [entry]);
     }
-    return [...bySection.entries()].map(([heading, entries]) => ({ heading, entries }));
+    return [...bySection.entries()].map(
+      ([heading, entries]) => ({ heading, entries }),
+    );
   }, [refs, domain, category, query]);
 
   const shown = groups.length;
@@ -176,7 +192,10 @@ export function DataExplorer({
               setDomain(d);
               setCategory(ALL);
             }}
-            options={all.map((d) => ({ value: d, label: d }))}
+            options={all.map((d) => ({
+              value: d,
+              label: d,
+            }))}
             aria-label="Domain"
             align="right"
             className="shrink-0"
@@ -216,7 +235,10 @@ export function DataExplorer({
           </p>
         ) : (
           groups.map((g) => (
-            <section key={g.heading} className="mb-3 last:mb-0">
+            <section
+              key={g.heading}
+              className="mb-3 last:mb-0"
+            >
               {/* No count out here: it rides on each card as a chip, beside
                   the cadence and the price, where a heading shared by two
                   streams could not carry it anyway. */}
@@ -232,7 +254,10 @@ export function DataExplorer({
                     <DrillRow
                       key={e.schema.id}
                       schema={e.schema}
-                      picked={countPicked(selected, e.schema)}
+                      picked={countPicked(
+                        selected,
+                        e.schema,
+                      )}
                       onOpen={() => setDrill(e.schema)}
                     />
                   ) : (
@@ -243,7 +268,9 @@ export function DataExplorer({
                         selected={chosen.has(
                           `${e.streamRef.snippet}::${e.streamRef.label}`,
                         )}
-                        onClick={() => onToggle(e.streamRef!)}
+                        onClick={() =>
+                          onToggle(e.streamRef!)
+                        }
                       />
                     )
                   ),
@@ -309,14 +336,20 @@ function Footer({
 
 /** A stream with more than one entity has something to choose. */
 function hasEntities(schema: Schema): boolean {
-  return Boolean(schema.dataset) && schema.entities.count > 1;
+  return (
+    Boolean(schema.dataset) && schema.entities.count > 1
+  );
 }
 
 /** Entities picked from this stream, for the card's badge. */
-function countPicked(selected: DataRef[], schema: Schema): number {
+function countPicked(
+  selected: DataRef[],
+  schema: Schema,
+): number {
   return selected.filter(
     (r) =>
-      r.schemaId === schema.id && (r.kind === "entity" || r.kind === "schema"),
+      r.schemaId === schema.id &&
+      (r.kind === "entity" || r.kind === "schema"),
   ).length;
 }
 
@@ -382,15 +415,19 @@ interface EntityRow {
  * row of numbers never showed. A stream that stopped three days ago looks
  * exactly like a healthy one until somebody says so.
  */
-function freshness(iso?: string | null): { short: string; stale: boolean } | null {
+function freshness(
+  iso?: string | null,
+): { short: string; stale: boolean } | null {
   if (!iso) return null;
   const at = Date.parse(iso);
   if (Number.isNaN(at)) return null;
   const mins = Math.round((Date.now() - at) / 60000);
   if (mins < 2) return { short: "just now", stale: false };
-  if (mins < 60) return { short: `${mins}m ago`, stale: false };
+  if (mins < 60)
+    return { short: `${mins}m ago`, stale: false };
   const hours = Math.round(mins / 60);
-  if (hours < 24) return { short: `${hours}h ago`, stale: hours >= 6 };
+  if (hours < 24)
+    return { short: `${hours}h ago`, stale: hours >= 6 };
   const days = Math.round(hours / 24);
   return { short: `${days}d ago`, stale: true };
 }
@@ -423,8 +460,13 @@ function SetView({
   const [facet, setFacet] = useState<string | null>(null);
   // Which measure a picked entity refers to. Most streams have one; the rest
   // get a radio, because "wind actual" and "wind forecast" are different picks.
-  const [varKey, setVarKey] = useState(schema.variables[0]?.key);
-  const [facets, setFacets] = useState<Record<string, number> | null>(null);
+  const [varKey, setVarKey] = useState(
+    schema.variables[0]?.key,
+  );
+  const [facets, setFacets] = useState<Record<
+    string,
+    number
+  > | null>(null);
   /** The tier in view, unfiltered. Typing never refetches this. */
   const [rows, setRows] = useState<EntityRow[]>([]);
   const [opened, setOpened] = useState(false);
@@ -441,7 +483,10 @@ function SetView({
    * hand. Those arrive underneath, labelled, without disturbing what was
    * already on screen.
    */
-  const [far, setFar] = useState<{ q: string; rows: EntityRow[] } | null>(null);
+  const [far, setFar] = useState<{
+    q: string;
+    rows: EntityRow[];
+  } | null>(null);
   const [farBusy, setFarBusy] = useState(false);
 
   // The tier: fetched when the set opens and when a tier chip is pressed, and
@@ -450,7 +495,10 @@ function SetView({
     let live = true;
     (async () => {
       try {
-        const url = new URL("/api/workspace/entities", window.location.origin);
+        const url = new URL(
+          "/api/workspace/entities",
+          window.location.origin,
+        );
         url.searchParams.set("dataset", schema.dataset!);
         if (facet) url.searchParams.set("node_type", facet);
         url.searchParams.set("limit", "2000");
@@ -469,7 +517,9 @@ function SetView({
           // the unfiltered rows this first fetch returned are never shown:
           // painting them for a beat and then jumping to the tier read as a
           // glitch, and the second fetch is the one that matters.
-          const tiers = Object.entries(json.facets as Record<string, number>)
+          const tiers = Object.entries(
+            json.facets as Record<string, number>,
+          )
             .filter(([, n]) => n > 1 && n <= 12)
             .sort((a, b) => a[1] - b[1]);
           setOpened(true);
@@ -496,7 +546,10 @@ function SetView({
     is deliberately not what you are shown first: it lands when it lands, and
     nothing waits for it.
   */
-  const beyond = Math.max(0, schema.entities.count - rows.length);
+  const beyond = Math.max(
+    0,
+    schema.entities.count - rows.length,
+  );
   useEffect(() => {
     const query = q.trim();
     if (!query || beyond === 0) {
@@ -508,14 +561,20 @@ function SetView({
     setFarBusy(true);
     const t = setTimeout(async () => {
       try {
-        const url = new URL("/api/workspace/entities", window.location.origin);
+        const url = new URL(
+          "/api/workspace/entities",
+          window.location.origin,
+        );
         url.searchParams.set("dataset", schema.dataset!);
         url.searchParams.set("q", query);
         url.searchParams.set("limit", "2000");
         const res = await fetch(url);
         const json = await res.json();
         if (!live) return;
-        setFar({ q: query, rows: res.ok ? (json.nodes ?? []) : [] });
+        setFar({
+          q: query,
+          rows: res.ok ? (json.nodes ?? []) : [],
+        });
       } catch {
         if (live) setFar({ q: query, rows: [] });
       } finally {
@@ -538,8 +597,12 @@ function SetView({
     ? rows.filter(
         (r) =>
           r.node.toLowerCase().includes(needle) ||
-          (r.nodeType ?? "").toLowerCase().includes(needle) ||
-          (entityNote(r.node) ?? "").toLowerCase().includes(needle),
+          (r.nodeType ?? "")
+            .toLowerCase()
+            .includes(needle) ||
+          (entityNote(r.node) ?? "")
+            .toLowerCase()
+            .includes(needle),
       )
     : rows;
   const seen = new Set(here.map((r) => r.node));
@@ -547,6 +610,48 @@ function SetView({
     needle && far?.q === q.trim()
       ? far.rows.filter((r) => !seen.has(r.node))
       : [];
+
+  /*
+    Select-all: the whole view in hand as one chip.
+
+    This is the map gesture. The set view's grain is series — pick a handful,
+    each its own chip — and a map's grain is streams, which one-at-a-time
+    picking cannot reach. So whatever the view currently shows is selectable
+    whole: the unfiltered stream as the fan-out chip (all 1,118, no
+    enumeration), a tier or a search as a subset chip that names its entities
+    outright. One chip either way, priced as one query, and pressing it again
+    puts it back.
+
+    Enumerated subsets stop at 200 entities: past that the list is most of
+    the stream anyway, and it travels inside every spec and preview URL — the
+    8KB request-line lesson applies. The whole stream needs no list, so it
+    has no cap.
+  */
+  const SUBSET_CAP = 200;
+  const scope = needle
+    ? {
+        label: `matching “${q.trim()}”`,
+        rows: [...here, ...elsewhere],
+      }
+    : facet
+      ? { label: facet, rows }
+      : null;
+  const allRef = scope
+    ? settled &&
+      scope.rows.length > 0 &&
+      scope.rows.length <= SUBSET_CAP
+      ? streamRef(schema, varKey, {
+          label: scope.label,
+          entities: scope.rows.map((r) => r.node),
+        })
+      : null
+    : streamRef(schema, varKey);
+  const allCount = scope
+    ? scope.rows.length
+    : schema.entities.count;
+  const allPicked = allRef
+    ? chosen.has(`${allRef.snippet}::${allRef.label}`)
+    : false;
 
   return (
     <>
@@ -557,7 +662,9 @@ function SetView({
         >
           ‹ All data
         </button>
-        <span className="truncate text-[12.5px] text-ink">{schema.name}</span>
+        <span className="truncate text-[12.5px] text-ink">
+          {schema.name}
+        </span>
         <span className="ml-auto shrink-0 font-mono text-[9.5px] text-faint">
           {entityCountLabel(schema)}
         </span>
@@ -596,7 +703,9 @@ function SetView({
               .map(([kind, n]) => (
                 <button
                   key={kind}
-                  onClick={() => setFacet(facet === kind ? null : kind)}
+                  onClick={() =>
+                    setFacet(facet === kind ? null : kind)
+                  }
                   className={cx(
                     "shrink-0 rounded-full border px-2.5 py-[3px] font-mono text-[10.5px] transition-colors",
                     kind === facet
@@ -609,6 +718,31 @@ function SetView({
               ))}
           </div>
         )}
+        {/* One chip for the whole view — see the select-all comment above. */}
+        {allRef ? (
+          <button
+            onClick={() => onToggle(allRef)}
+            className={cx(
+              "w-full rounded border border-dashed px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
+              allPicked
+                ? "border-accent-line bg-accent-dim text-accent"
+                : "border-line text-muted hover:border-accent-line hover:text-accent",
+            )}
+          >
+            {allPicked ? "✓ Selected" : "Select"} all{" "}
+            {scope ? scope.label : "of this stream"} ·{" "}
+            {allCount.toLocaleString()}{" "}
+            {allCount === 1 ? "entity" : "entities"}
+          </button>
+        ) : scope &&
+          settled &&
+          scope.rows.length > SUBSET_CAP ? (
+          <p className="px-0.5 text-[10.5px] leading-snug text-faint">
+            {scope.rows.length.toLocaleString()} is too many
+            to carry as one selection — narrow further, or
+            select the whole stream.
+          </p>
+        ) : null}
       </div>
 
       {/* Under the filters, exactly where it sits one level up. */}
@@ -617,14 +751,18 @@ function SetView({
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
         {/* Only the first load can be a wait; after it, typing never is. */}
         {!settled && rows.length === 0 ? (
-          <p className="px-1 py-1.5 text-[11.5px] text-faint">Loading…</p>
+          <p className="px-1 py-1.5 text-[11.5px] text-faint">
+            Loading…
+          </p>
         ) : (
           <>
-            {here.length === 0 && elsewhere.length === 0 && !farBusy && (
-              <p className="px-1 py-1.5 text-[11.5px] text-faint">
-                Nothing matches “{q}”.
-              </p>
-            )}
+            {here.length === 0 &&
+              elsewhere.length === 0 &&
+              !farBusy && (
+                <p className="px-1 py-1.5 text-[11.5px] text-faint">
+                  Nothing matches “{q}”.
+                </p>
+              )}
 
             {here.map((row) => (
               <EntityButton
@@ -663,7 +801,8 @@ function SetView({
             {/* Said quietly, at the end, while the slow half is still out. */}
             {farBusy && needle && (
               <p className="px-1 py-1.5 font-mono text-[10px] text-faint">
-                looking through the other {beyond.toLocaleString()}…
+                looking through the other{" "}
+                {beyond.toLocaleString()}…
               </p>
             )}
           </>
@@ -701,13 +840,24 @@ function EntityButton({
     >
       <span className="flex w-full items-baseline gap-2">
         <span
-          className={cx("font-mono text-[12px]", picked ? "text-accent" : "text-ink")}
+          className={cx(
+            "font-mono text-[12px]",
+            picked ? "text-accent" : "text-ink",
+          )}
         >
           {row.node}
         </span>
-        {row.nodeType && <span className="text-[10px] text-faint">{row.nodeType}</span>}
+        {row.nodeType && (
+          <span className="text-[10px] text-faint">
+            {row.nodeType}
+          </span>
+        )}
       </span>
-      {note && <span className="text-[11px] leading-snug text-muted">{note}</span>}
+      {note && (
+        <span className="text-[11px] leading-snug text-muted">
+          {note}
+        </span>
+      )}
       {/*
         What you are actually being offered: how much of it there is, and
         whether it is still coming. "obs" said neither — it was a count with no
@@ -723,11 +873,15 @@ function EntityButton({
         }
         className="flex w-full items-baseline gap-1.5 font-mono text-[9.5px] text-faint"
       >
-        <span>{row.observations.toLocaleString()} readings</span>
+        <span>
+          {row.observations.toLocaleString()} readings
+        </span>
         {fresh && (
           <>
             <span className="text-line-strong">·</span>
-            <span className={cx(fresh.stale && "text-warn")}>
+            <span
+              className={cx(fresh.stale && "text-warn")}
+            >
               last collected {fresh.short}
             </span>
           </>

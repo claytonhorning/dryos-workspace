@@ -127,15 +127,15 @@ export const RUNTIME_SHIM = String.raw`
     /*
       Move the page's cursor from inside a tile.
 
-      The frame does not own the instant and must not: the cursor is one answer
-      the whole screen gives, so a tile that set it locally would put its own
-      map at 14:00 beside a chart still at now — the exact thing the cursor
-      exists to prevent. So this posts an intent outward and waits to be told,
-      the same shape as resize, move and remove. The handle does not jump
-      because the tile moved it; it jumps because the page came back and said so.
+      Nothing generated calls this today: the map's scrubber holds a tile-local
+      instant instead (its useSeries rewrites only that tile's queries), because
+      scrubbing one map was a question about the map, not an instruction to the
+      dashboard. This stays for anything that genuinely means "move the whole
+      screen": it posts an intent outward and waits to be told, the same shape
+      as resize, move and remove.
 
       Standalone there is no parent to ask, so it self-serves — which is what
-      makes a scrubber work on a shared bundle URL and in the editor preview.
+      makes a page-wide scrubber work on a shared bundle URL.
     */
     setCursor: function (at) {
       var next = at || null;
@@ -329,12 +329,13 @@ th { font-family: var(--mono); font-size:10px; letter-spacing:.12em; text-transf
 @keyframes dr-ghost { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 /*
-  An empty screen, which is the one screen with nothing to say for itself.
-
-  Two animations and no paragraph: the ground drifts so the canvas reads as a
-  live surface rather than a broken one, and a component slides into an empty
-  slot on a loop — which is the gesture, performed, in less time than the
-  sentence describing it takes to read.
+  The empty screen in the editor, which is the one screen with nothing to say
+  for itself. Two animations and no paragraph: the ground drifts so the canvas
+  reads as a live surface rather than a broken one, and a component slides
+  into an empty slot on a loop — the gesture, performed, in less time than the
+  sentence describing it takes to read. Previews never animate: a thumbnail is
+  looked at, not arranged, so its empty state is a still gradient and a line
+  of text (see composeApp's bare branch).
 */
 @keyframes dr-drift {
   0%, 100% { transform: translate3d(-3%, -2%, 0) scale(1.06); }
@@ -374,9 +375,22 @@ const THEME_SHIM = String.raw`
   var initial = new URLSearchParams(location.search).get("theme");
   if (initial) apply(initial);
 
+  /*
+    The display timezone rides the same two channels as the theme, for the
+    same reasons: "?tz=" covers the first paint, a message covers a change
+    made while the frame is open. The value is "source" (each component
+    resolves its own stream's timezone) or an IANA name the host already
+    resolved — the frame never guesses at the viewer's locale itself.
+  */
+  window.__dryosTz = new URLSearchParams(location.search).get("tz") || "source";
+
   window.addEventListener("message", function (e) {
     var m = e.data;
     if (m && m.__dryos === "theme") apply(m.value);
+    if (m && m.__dryos === "tz") {
+      window.__dryosTz = m.value || "source";
+      window.dispatchEvent(new Event("dryos:tz"));
+    }
   });
 })();
 `;

@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { SCHEMAS, type DataRef, pathLabel, tokenLabel } from "./catalog";
+import { chatModel, effortOf } from "./models";
 import { compile } from "./runtime";
 
 /**
@@ -189,10 +190,20 @@ export async function editApp(input: {
    * correct.
    */
   seed?: string;
+  /**
+   * The composer's model and effort, validated against `models.ts` — never
+   * trusted as strings. Per-model shape rules live there too: effort is a 400
+   * on Haiku 4.5, adaptive thinking does not exist there, and the refusal
+   * fallback is Opus 5 / Fable 5 only.
+   */
+  model?: string;
+  effort?: string;
   onEvent?: (e: EditEvent) => void;
 }): Promise<EditResult> {
   const emit = input.onEvent ?? (() => {});
   const client = new Anthropic();
+  const picked = chatModel(input.model);
+  const effort = effortOf(input.effort);
   const seed = input.seed
     ? `\n\nHere is a generated component that already does the data part. Fold it into the app, keeping its query and refresh behaviour:\n\n\`\`\`tsx\n${input.seed}\n\`\`\``
     : "";
@@ -214,12 +225,19 @@ export async function editApp(input: {
       // HTTP timeout on a single response, and the workspace needs something
       // truthful to show while it is being written.
       const stream = client.beta.messages.stream({
-        model: MODEL,
+        model: picked.id,
         max_tokens: 16000,
         system: SYSTEM,
-        thinking: { type: "adaptive", display: "summarized" },
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
+        ...(picked.adaptive
+          ? { thinking: { type: "adaptive" as const, display: "summarized" as const } }
+          : {}),
+        ...(picked.effort ? { output_config: { effort } } : {}),
+        ...(picked.fallback
+          ? {
+              betas: ["server-side-fallback-2026-07-01"],
+              fallbacks: "default" as const,
+            }
+          : {}),
         messages,
       });
 

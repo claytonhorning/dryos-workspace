@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { supabaseServer } from "@/lib/supabase/server";
 import { importLocalOnce } from "./import";
-import { deleteApp, listApps } from "./store";
+import { deleteApp, listAppIds } from "./store";
 
 /**
  * Workspaces: collections of pages.
@@ -78,16 +78,28 @@ async function writeAll(spaces: Space[]): Promise<void> {
  */
 export async function listSpaces(): Promise<Space[]> {
   await importLocalOnce();
-  let spaces = await readAll();
-  const apps = await listApps();
+  // The sweep only ever needs ids. Loading full summaries here cost every
+  // space operation the whole apps listing, on top of the one its route
+  // usually does anyway.
+  const [spaces_, appIds] = await Promise.all([readAll(), listAppIds()]);
+  let spaces = spaces_;
   const now = Date.now();
 
   if (spaces.length === 0) {
+    // Seeding is a first touch of a signed-in account. Signed out, the empty
+    // read was legitimately empty — there is nobody to seed for, and the
+    // write would only bounce off RLS and turn a quiet [] into a 500.
+    const supabase = await supabaseServer();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return [];
+
     spaces = [
       {
         id: randomUUID().slice(0, 8),
         name: "My workspace",
-        pages: apps.map((a) => a.id),
+        pages: [...appIds],
         createdAt: now,
         updatedAt: now,
       },
@@ -97,8 +109,8 @@ export async function listSpaces(): Promise<Space[]> {
   }
 
   const known = new Set(spaces.flatMap((s) => s.pages));
-  const orphans = apps.filter((a) => !known.has(a.id)).map((a) => a.id);
-  const missing = new Set(apps.map((a) => a.id));
+  const orphans = appIds.filter((id) => !known.has(id));
+  const missing = new Set(appIds);
 
   // Deleted apps leave dangling ids behind; a tab pointing at nothing is worse
   // than no tab.

@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button, cx } from "@/components/ui";
+import { cx } from "@/components/ui";
 import { AttachedChip } from "@/components/workspace/DataChip";
 import type { DataRef } from "@/lib/workspace/catalog";
+import {
+  CHAT_MODELS,
+  DEFAULT_CHAT_MODEL,
+  EFFORTS,
+  chatModel,
+  effortOf,
+} from "@/lib/workspace/models";
 import { readNdjson } from "@/lib/workspace/ndjson";
 import type { App } from "@/lib/workspace/types";
 
@@ -57,6 +64,63 @@ export function ChatDock({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  /*
+    Which model answers, and at what effort — remembered per machine, like the
+    panel width: a preference about how you work, not a fact about any page.
+    The chip renders from the roster in models.ts, the same list the server
+    validates against, so the picker can never offer what the call would
+    refuse. Effort is hidden entirely for a model that rejects it (Haiku),
+    because a select that 400s is worse than no select.
+  */
+  const [modelId, setModelId] = useState(DEFAULT_CHAT_MODEL);
+  const [effort, setEffort] = useState<string>("high");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
+  const picker = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      const m = localStorage.getItem("dryos:chatModel");
+      const e = localStorage.getItem("dryos:chatEffort");
+      if (m && CHAT_MODELS.some((x) => x.id === m)) setModelId(m);
+      if (e) setEffort(effortOf(e));
+    } catch {
+      // A machine that will not keep the preference still gets the default.
+    }
+  }, []);
+
+  // The account menu's idiom: close on a click outside, or Escape.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!picker.current?.contains(e.target as Node)) setPickerOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPickerOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pickerOpen]);
+
+  const model = chatModel(modelId);
+
+  function pickModel(id: string) {
+    setModelId(id);
+    setPickerOpen(false);
+    try {
+      localStorage.setItem("dryos:chatModel", id);
+    } catch {}
+  }
+
+  function pickEffort(level: string) {
+    setEffort(level);
+    setEffortOpen(false);
+    try {
+      localStorage.setItem("dryos:chatEffort", level);
+    } catch {}
+  }
 
   // Follow the conversation: everything new lands at the bottom.
   useEffect(() => {
@@ -72,7 +136,7 @@ export function ChatDock({
     const res = await fetch("/api/workspace/ask", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, model: modelId, effort }),
     });
     if (!res.ok) throw new Error("The data guide is unavailable right now.");
     let text = "";
@@ -99,7 +163,7 @@ export function ChatDock({
     const res = await fetch(`/api/workspace/apps/${appId}/edit`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ intent, refs }),
+      body: JSON.stringify({ intent, refs, model: modelId, effort }),
     });
     if (!res.ok && !res.headers.get("content-type")?.includes("ndjson")) {
       const d = await res.json().catch(() => ({}));
@@ -246,32 +310,145 @@ export function ChatDock({
         )}
       </div>
 
-      <div className="flex shrink-0 items-end gap-2 border-t border-line px-3 py-2">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
+      {/*
+        One composer box, the way a chat expects it: the text spans the whole
+        column and the controls live inside the box on their own row beneath
+        it, rather than beside the text stealing its width. The border belongs
+        to the box, so the textarea inside it is naked — two nested borders
+        read as a form inside a form.
+      */}
+      <div className="shrink-0 border-t border-line px-3 py-2">
+        {/*
+          The active state belongs to the box, not the field inside it. The
+          global `*:focus-visible` outline is UNLAYERED css, so it beats any
+          Tailwind utility on the textarea regardless of specificity — the
+          inline style is the only thing that outranks it. The box then wears
+          the same accent ring the global rule would have drawn, as a
+          box-shadow ring (no unlayered outline rule competes with those).
+        */}
+        <div className="rounded-md border border-line bg-surface-2 transition-colors focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-surface">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            rows={2}
+            placeholder={
+              mode === "ask"
+                ? "Ask about the data…"
+                : "Describe a change to this dashboard…"
             }
-          }}
-          rows={2}
-          placeholder={
-            mode === "ask"
-              ? "Ask about the data…"
-              : "Describe a change to this dashboard…"
-          }
-          className="min-h-0 w-full flex-1 resize-none rounded-md border border-line bg-surface-2 px-2.5 py-2 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
-        />
-        <Button
-          tone="primary"
-          size="sm"
-          disabled={busy || !input.trim()}
-          onClick={send}
-        >
-          {busy ? "Working…" : "Send"}
-        </Button>
+            style={{ outline: "none" }}
+            className="block w-full resize-none bg-transparent px-2.5 pt-2 pb-0.5 text-[12.5px] text-ink placeholder:text-faint"
+          />
+
+          <div className="flex items-center justify-end gap-1.5 px-1.5 pb-1.5">
+            {/*
+              The model chip, and the menu above it. The chip states both
+              choices ("Opus 5 · High") because a hidden effort is a bill
+              nobody agreed to; the menu opens upward — the composer sits at
+              the bottom of its column and a menu that opens off-screen is
+              not a menu.
+            */}
+            <div ref={picker} className="relative shrink-0">
+              <button
+                onClick={() => {
+                  setPickerOpen((v) => !v);
+                  setEffortOpen(false);
+                }}
+                aria-expanded={pickerOpen}
+                aria-label="Choose the model"
+                className="rounded-md border border-line px-2 py-1 text-[11px] whitespace-nowrap text-muted transition-colors hover:bg-surface-3 hover:text-ink"
+              >
+                {model.name}
+                {model.effort && (
+                  <span className="ml-1 text-faint capitalize">
+                    {effortOf(effort)}
+                  </span>
+                )}
+              </button>
+
+              {pickerOpen && (
+                <div className="absolute right-0 bottom-full z-30 mb-1.5 w-60 rounded-lg border border-line-strong bg-surface p-1 shadow-2xl shadow-black/50">
+                  {CHAT_MODELS.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => pickModel(m.id)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-2"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[12.5px] text-ink">
+                          {m.name}
+                        </span>
+                        <span className="block truncate text-[10.5px] text-faint">
+                          {m.blurb}
+                        </span>
+                      </span>
+                      {m.id === modelId && (
+                        <span
+                          aria-hidden
+                          className="shrink-0 text-[12px] text-accent"
+                        >
+                          ✓
+                        </span>
+                      )}
+                    </button>
+                  ))}
+
+                  {/* Only where the model honours it — a select that 400s is
+                      worse than no select. */}
+                  {model.effort && (
+                    <>
+                      <div className="mx-1 my-1 border-t border-line" />
+                      <button
+                        onClick={() => setEffortOpen((v) => !v)}
+                        aria-expanded={effortOpen}
+                        className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink transition-colors hover:bg-surface-2"
+                      >
+                        Effort
+                        <span className="ml-auto text-[11px] text-faint capitalize">
+                          {effortOf(effort)} {effortOpen ? "▾" : "›"}
+                        </span>
+                      </button>
+                      {effortOpen && (
+                        <div className="flex flex-wrap gap-1 px-2 pt-0.5 pb-1.5">
+                          {EFFORTS.map((level) => (
+                            <button
+                              key={level}
+                              onClick={() => pickEffort(level)}
+                              aria-pressed={effortOf(effort) === level}
+                              className={cx(
+                                "rounded border px-1.5 py-0.5 text-[10.5px] capitalize transition-colors",
+                                effortOf(effort) === level
+                                  ? "border-accent-line bg-accent-dim text-accent"
+                                  : "border-line text-muted hover:text-ink",
+                              )}
+                            >
+                              {level}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={send}
+              disabled={busy || !input.trim()}
+              title="Submit (Enter)"
+              className="shrink-0 rounded-md border border-accent-line bg-accent-dim px-2.5 py-1 text-[11px] whitespace-nowrap text-accent transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? "…" : "Submit"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

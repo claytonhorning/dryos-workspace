@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+} from "react";
 import { cx } from "@/components/ui";
 import {
   COMPONENTS,
@@ -33,7 +38,9 @@ export function CommunityStrip({
   onDragStateChange: (payload: TrayPayload | null) => void;
   reloadKey: number;
 }) {
-  const [community, setCommunity] = useState<PublishedComponent[]>([]);
+  const [community, setCommunity] = useState<
+    PublishedComponent[]
+  >([]);
   const [openId, setOpenId] = useState<string | null>(null);
   /**
    * The preview frame's inner height, measured from the strip when the card is
@@ -53,9 +60,13 @@ export function CommunityStrip({
       .catch(() => {});
   }, [reloadKey]);
 
-  const open = community.find((c) => c.id === openId) ?? null;
-  const def = open ? COMPONENTS.find((d) => d.kind === open.kind) : null;
-  const options = open && def ? withDefaults(def, open.options) : {};
+  const open =
+    community.find((c) => c.id === openId) ?? null;
+  const def = open
+    ? COMPONENTS.find((d) => d.kind === open.kind)
+    : null;
+  const options =
+    open && def ? withDefaults(def, open.options) : {};
 
   /** Clicking the open card puts the preview away; any other card swaps it. */
   function show(c: PublishedComponent) {
@@ -65,7 +76,8 @@ export function CommunityStrip({
     }
     // The generated grid keeps its own gutter, so the tile is composed a
     // little shorter than the box it fills.
-    const room = body.current?.getBoundingClientRect().height ?? 256;
+    const room =
+      body.current?.getBoundingClientRect().height ?? 256;
     setPh(Math.max(140, Math.round(room) - 16));
     setOpenId(c.id);
   }
@@ -86,7 +98,9 @@ export function CommunityStrip({
     e.dataTransfer.effectAllowed = "copy";
     // What lands is what was being looked at — including its size, so the box
     // is measured as the hand takes it.
-    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const box = (
+      e.currentTarget as HTMLElement
+    ).getBoundingClientRect();
     onDragStateChange({
       kind: def.kind,
       options,
@@ -106,7 +120,7 @@ export function CommunityStrip({
         <span className="min-w-0 truncate font-mono text-[9.5px] text-faint">
           {open
             ? "drag the preview onto the screen to place it"
-            : "published, ready to take — click one to run it here"}
+            : "click to preview"}
         </span>
         {open && (
           <button
@@ -118,17 +132,23 @@ export function CommunityStrip({
         )}
       </div>
 
-      <div ref={body} className="flex min-h-0 flex-1 gap-3 px-3 py-2">
+      <div
+        ref={body}
+        className="flex min-h-0 flex-1 gap-3 px-3 py-2"
+      >
         {/* The shelf: wraps into as many columns as the strip's width holds. */}
         <div className="dr-scroll grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(200px,1fr))] content-start gap-2 overflow-y-auto">
           {community.length === 0 ? (
             <p className="col-span-full text-[12px] text-faint">
-              Nothing published yet. Components published to the community
-              appear here, ready to drop onto your screen.
+              Nothing published yet. Components published to
+              the community appear here, ready to drop onto
+              your screen.
             </p>
           ) : (
             community.map((c) => {
-              const d = COMPONENTS.find((x) => x.kind === c.kind);
+              const d = COMPONENTS.find(
+                (x) => x.kind === c.kind,
+              );
               if (!d) return null;
               const on = openId === c.id;
               return (
@@ -182,7 +202,11 @@ export function CommunityStrip({
               src={src}
               sandbox="allow-scripts"
               className="absolute border-0"
-              style={{ inset: -16, width: "calc(100% + 32px)", height: "calc(100% + 32px)" }}
+              style={{
+                inset: -16,
+                width: "calc(100% + 32px)",
+                height: "calc(100% + 32px)",
+              }}
               title="Community component preview"
             />
             {/*

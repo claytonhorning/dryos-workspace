@@ -18,6 +18,7 @@ import {
 } from "@/lib/workspace/components";
 import { type DataRef } from "@/lib/workspace/catalog";
 import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
+import { useTimeZone } from "@/lib/useTimeZone";
 import { SeriesStyles } from "@/components/workspace/SeriesStyles";
 
 /**
@@ -62,8 +63,14 @@ const HINT_DELAY = 4000;
  * draws a band you cannot read. A preview that has to be enlarged before it
  * answers the question is not previewing anything. The box outside it is a
  * little taller again — the generated grid keeps its own gutter.
+ *
+ * The ticker is the exception: one number at a fixed content height, so its
+ * worst case *is* its tile height, and padding it to the chart's budget only
+ * framed a small card in dead space. It previews at the height it lands at.
  */
-const PREVIEW_LAYOUT = { w: 12, h: 272 };
+export function previewLayout(kind: ComponentKind) {
+  return { w: 12, h: kind === "ticker" ? DEFAULT_LAYOUT.ticker.h : 272 };
+}
 
 export interface TrayPayload {
   kind: ComponentKind;
@@ -90,7 +97,6 @@ export interface TrayPayload {
 export interface EditorStart {
   def: ComponentDef;
   refs: DataRef[];
-  ask?: string;
   name?: string;
   options?: Record<string, string>;
   custom?: { name: string; code: string };
@@ -147,6 +153,9 @@ export function BuildPanel({
   // The missing parent: a sandboxed frame can only reach data through whoever
   // embeds it, and outside Runner that is this hook or a 30-second timeout.
   const previewFrame = usePreviewHost();
+  // The previews have no Runner to message them the display timezone, so it
+  // rides their URL instead.
+  const tzPref = useTimeZone();
 
   useEffect(() => {
     try {
@@ -232,7 +241,7 @@ export function BuildPanel({
     options: Record<string, string>,
     on: DataRef[],
   ): string {
-    const q = new URLSearchParams({ bare: "1" });
+    const q = new URLSearchParams({ bare: "1", tz: tzPref });
     if (p.shelf === "base") {
       q.set(
         "spec",
@@ -240,14 +249,14 @@ export function BuildPanel({
           kind: p.def.kind,
           refs: on,
           options,
-          layout: PREVIEW_LAYOUT,
+          layout: previewLayout(p.def.kind),
         }),
       );
     } else {
       q.set(p.shelf === "saved" ? "component" : "community", p.id);
       q.set("options", JSON.stringify(options));
-      q.set("w", String(PREVIEW_LAYOUT.w));
-      q.set("h", String(PREVIEW_LAYOUT.h));
+      q.set("w", String(previewLayout(p.def.kind).w));
+      q.set("h", String(previewLayout(p.def.kind).h));
     }
     return `/api/workspace/preview?${q.toString()}`;
   }
@@ -421,8 +430,16 @@ export function BuildPanel({
  * top to bottom into the thing it produces — settings, then the series they
  * shape, then the running component at the bottom, which is also the handle
  * you drag out and so sits nearest the screen it lands on.
+ *
+ * It is also the whole of editing a tile: `ComponentEditor` renders this same
+ * pane, because building a component and changing one are the same activity
+ * and two layouts for it made each other harder to learn. The one difference
+ * is the gesture at the bottom — `onDragStart` present makes the preview the
+ * drag handle (creating: the drop says where it lands); absent, the preview
+ * is just the preview and the editor's own footer says keep-or-remove
+ * (editing: the tile already has a place).
  */
-function PreviewPane({
+export function PreviewPane({
   def,
   refs,
   live,
@@ -435,6 +452,7 @@ function PreviewPane({
   frameRef,
   onDragStart,
   onDragEnd,
+  layersEditor,
 }: {
   def: ComponentDef;
   /** What it is drawing, so the series can be listed and painted. */
@@ -447,8 +465,15 @@ function PreviewPane({
   src: string;
   frameKey: string;
   frameRef: RefObject<HTMLIFrameElement | null>;
-  onDragStart: (e: DragEvent) => void;
-  onDragEnd: () => void;
+  /** Present when the preview is the drag handle — the create path. */
+  onDragStart?: (e: DragEvent) => void;
+  onDragEnd?: () => void;
+  /**
+   * An editable stand-in for the read-only layer list, for the map in an
+   * editing context — layers *are* a map's composition, so editing a map tile
+   * means adding, removing and reordering them in place.
+   */
+  layersEditor?: ReactNode;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pt-2.5 pb-3">
@@ -489,7 +514,7 @@ function PreviewPane({
       {live && tunable && (
         <div className="dr-scroll min-h-0 flex-1 overflow-y-auto">
           {def.kind === "map" ? (
-            <MapLayers refs={refs} />
+            (layersEditor ?? <MapLayers refs={refs} />)
           ) : (
             <SeriesStyles
               refs={refs}
@@ -503,22 +528,33 @@ function PreviewPane({
 
       {live && (
         <div
-          // The widget itself is the handle: what you drag is what lands, so
-          // the accent border belongs to the thing being carried rather than to
-          // a chip pointing at it. It is also the *only* handle — the cards
-          // behind it place nothing.
-          draggable
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          title="Drag onto the page to place exactly what you see"
+          // The widget itself is the handle when there is a drop to make: what
+          // you drag is what lands, so the accent border belongs to the thing
+          // being carried rather than to a chip pointing at it, and it is the
+          // *only* handle — the cards behind it place nothing. Editing a tile
+          // has no drop to make, so there the box is only the preview.
+          {...(onDragStart
+            ? {
+                draggable: true,
+                onDragStart,
+                onDragEnd,
+                title: "Drag onto the page to place exactly what you see",
+              }
+            : {})}
           // At the bottom of the pane, under the settings and the series that
           // shape it — the controls read top to bottom into the thing they
           // produce, and the handle you drag out sits nearest the screen it is
           // dragged onto. `mt-auto` keeps it pinned there when what is above
-          // runs short. A fixed height, not the rest of the pane: tall enough
-          // for the worst case — a fan-out over eight fuel types spends a
-          // short tile entirely on axes and legend.
-          className="relative mt-auto h-72 shrink-0 cursor-grab overflow-hidden rounded-md border border-accent bg-code active:cursor-grabbing"
+          // runs short. A fixed height, not the rest of the pane: the shape's
+          // own preview height (the chart's worst-case budget, the ticker's
+          // tile height) plus the generated grid's gutter.
+          className={cx(
+            "relative mt-auto shrink-0 overflow-hidden rounded-md bg-code",
+            onDragStart
+              ? "cursor-grab border border-accent active:cursor-grabbing"
+              : "border border-line",
+          )}
+          style={{ height: previewLayout(def.kind).h + 16 }}
         >
           <iframe
             ref={frameRef}
@@ -538,13 +574,17 @@ function PreviewPane({
             the frame would never reach this wrapper. A transparent sheet
             catches it — and carries the one label in the panel, because the
             shelf behind it does not answer a drag and something has to say
-            where the gesture moved to.
+            where the gesture moved to. Only while dragging is on offer: the
+            sheet also swallows hovers, and an editor preview that cannot be
+            hovered is not previewing the chart it claims to.
           */}
-          <div className="absolute inset-0 flex items-start justify-start p-1.5">
-            <span className="pointer-events-none rounded border border-accent-line bg-surface/85 px-1.5 py-[2px] font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase backdrop-blur">
-              ⠿ drag onto the screen
-            </span>
-          </div>
+          {onDragStart && (
+            <div className="absolute inset-0 flex items-start justify-start p-1.5">
+              <span className="pointer-events-none rounded border border-accent-line bg-surface/85 px-1.5 py-[2px] font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase backdrop-blur">
+                ⠿ drag onto the screen
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

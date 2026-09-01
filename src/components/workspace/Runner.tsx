@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cx } from "@/components/ui";
-import { GRID } from "@/lib/workspace/components";
 import { useTheme } from "@/lib/useTheme";
+import { useTimeZone } from "@/lib/useTimeZone";
 
 /**
  * Hosts a running app, answers its data calls, and takes drops.
@@ -36,6 +36,7 @@ export function Runner({
   onError,
   dropping,
   dropSize,
+  dropPreview,
   onDropAt,
   placing,
   onResize,
@@ -60,6 +61,13 @@ export function Runner({
   dropping?: boolean;
   /** Footprint of the incoming tile, so the frame previews it at the right size. */
   dropSize?: { w: number; h: number };
+  /**
+   * The live preview of what is being carried, as a bare preview URL. When
+   * the frame answers a dragover with a landing, this renders at that exact
+   * rectangle — the incoming component itself, where the drop will put it,
+   * instead of a dashed box standing in for it.
+   */
+  dropPreview?: string;
   /**
    * The place on the canvas the frame says the drop would take — null when it
    * never found one, which is a release over ground the tile does not fit on.
@@ -139,18 +147,40 @@ export function Runner({
   /** The place on the canvas the frame says the pointer is currently over. */
   const spot = useRef<{ x: number; y: number } | null>(null);
   /**
+   * The ghost's rectangle in the frame's own pixels, for floating the live
+   * preview of the incoming tile at exactly the place the drop would take.
+   * State rather than a ref because it positions an element per answer.
+   */
+  const [spotRect, setSpotRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  // The carried thing changes or the drag ends — either way the floated
+  // preview no longer describes anything.
+  useEffect(() => {
+    if (!dropping) setSpotRect(null);
+  }, [dropping]);
+  /**
    * Where the last drop landed, kept until the revision that fills it swaps
    * in. Composing and compiling take a second or two, and a screen that shows
    * nothing at the drop point for that second reads as frozen — so a skeleton
-   * stands in the tile's place immediately. Columns come from the frame's own
-   * answer, so the width is exact; the vertical anchor is the pointer, because
-   * the frame may be scrolled and its document coordinates are not ours.
+   * stands in the tile's place immediately.
+   *
+   * It is the ghost's own rectangle, verbatim — the same frame-pixel answer
+   * the floated preview tracked all drag long. It used to anchor vertically
+   * to the pointer instead, on the theory that the frame might be scrolled;
+   * but the rect is viewport-relative (the frame builds it from
+   * getBoundingClientRect), and the pointer is exactly what the ghost does
+   * NOT follow when it snaps, stops at a neighbour, or holds on unlandable
+   * ground — which put the skeleton somewhere the tile was never going to be.
    */
   const [landing, setLanding] = useState<{
-    x: number;
-    hostY: number;
-    w: number;
-    h: number;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
   } | null>(null);
   const theme = useTheme();
 
@@ -188,6 +218,12 @@ export function Runner({
   useEffect(() => {
     frame.current?.contentWindow?.postMessage({ __dryos: "theme", value: theme }, "*");
   }, [theme, live]);
+
+  // The display timezone rides the same channel, for the same reason.
+  const tz = useTimeZone();
+  useEffect(() => {
+    frame.current?.contentWindow?.postMessage({ __dryos: "tz", value: tz }, "*");
+  }, [tz, live]);
 
   // Same story for the mode: the frame cannot see the panel, so it is told
   // whether one is open and which tile it is showing. `live` is in the deps
@@ -253,7 +289,12 @@ export function Runner({
       const m = e.data as
         | { __dryos: "call"; id: number; op: string; payload: unknown }
         | { __dryos: "error"; message: string }
-        | { __dryos: "spot"; x: number; y: number }
+        | {
+            __dryos: "spot";
+            x: number;
+            y: number;
+            rect?: { left: number; top: number; width: number; height: number };
+          }
         | { __dryos: "resize"; index: number; w: number; h: number }
         | {
             __dryos: "move";
@@ -274,6 +315,7 @@ export function Runner({
       else if (m.__dryos === "error") onError?.(m.message);
       else if (m.__dryos === "spot") {
         spot.current = { x: m.x, y: m.y };
+        setSpotRect(m.rect ?? null);
       } else if (m.__dryos === "resize") {
         // The frame has already applied it; this is only the save. Nothing here
         // touches `version`, so the tile is not remounted under the cursor.
@@ -343,8 +385,17 @@ export function Runner({
                 { __dryos: "theme", value: theme },
                 "*",
               );
-              // A frame that has just booted knows neither of these, and the
-              // effects above fired before it existed.
+              // A frame that has just booted knows none of these, and the
+              // effects above fired before it existed. The timezone rides the
+              // message only, never this frame's URL — on the URL a zone
+              // change would change the address and reload the dashboard
+              // under the person who picked it, and unlike the theme a clock
+              // paints nothing before data arrives, so the message is early
+              // enough.
+              e.currentTarget.contentWindow?.postMessage(
+                { __dryos: "tz", value: tz },
+                "*",
+              );
               e.currentTarget.contentWindow?.postMessage(
                 { __dryos: "mode", edit: Boolean(editing), selected },
                 "*",
@@ -387,6 +438,41 @@ export function Runner({
         );
       })}
       {/*
+        The incoming component itself, floated at the exact rectangle the
+        frame's ghost holds — the live preview the panel was already running,
+        not a picture of it. Scaled the way the main frame is, and offset by
+        the preview document's own 16px root padding so the tile inside lands
+        pixel-on-pixel over the ghost. Below the sheet and with pointer events
+        off, so the drag it is following never notices it. Mounted once per
+        drag (the src is stable) and moved by style, because remounting is a
+        recompile.
+      */}
+      {dropping &&
+        dropPreview &&
+        spotRect &&
+        (() => {
+          const s = fit?.scale ?? 1;
+          return (
+            <iframe
+              ref={(el) => {
+                if (el?.contentWindow) windows.current.add(el.contentWindow);
+              }}
+              src={dropPreview}
+              sandbox="allow-scripts"
+              title="The component being placed"
+              className="pointer-events-none absolute z-[5] origin-top-left border-0"
+              style={{
+                left: (spotRect.left - 16) * s,
+                top: (spotRect.top - 16) * s,
+                width: spotRect.width + 32,
+                height: spotRect.height + 32,
+                transform: `scale(${s})`,
+              }}
+            />
+          );
+        })()}
+
+      {/*
         A transparent sheet, purely to catch the pointer events the iframe would
         otherwise swallow. Every position is forwarded inward, where the grid
         opens a real gap at the size of the tile that is coming — so there is
@@ -419,6 +505,7 @@ export function Runner({
             );
           }}
           onDragLeave={() => {
+            setSpotRect(null);
             frame.current?.contentWindow?.postMessage(
               { __dryos: "dragend" },
               "*",
@@ -435,16 +522,10 @@ export function Runner({
             );
             // Something has to occupy the drop point *now* — the save takes a
             // second or two, and an empty spot for that second reads as a
-            // screen that ignored the gesture.
-            if (spot.current && dropSize) {
-              const rect = e.currentTarget.getBoundingClientRect();
-              setLanding({
-                x: spot.current.x,
-                hostY: e.clientY - rect.top,
-                w: dropSize.w,
-                h: dropSize.h,
-              });
-            }
+            // screen that ignored the gesture. It stands exactly where the
+            // ghost was, because that is where the tile is going to be.
+            if (spot.current && spotRect) setLanding(spotRect);
+            setSpotRect(null);
             // The frame decided where; it told us on the last dragover.
             onDropAt?.(spot.current);
             spot.current = null;
@@ -455,24 +536,23 @@ export function Runner({
       {/*
         The dropped tile, as a skeleton, the instant the hand lets go. The real
         one arrives with the next revision; until then this pulses in its place
-        so the gesture visibly took. Width and column are the frame's own
-        answer scaled back out; the top is anchored to the pointer, since a new
-        tile travels centred under the hand.
+        so the gesture visibly took. The rectangle is the ghost's own — the
+        frame's last answer, in frame pixels, scaled back out the same way the
+        floated preview was — so the skeleton stands exactly where the drop is
+        going to put the tile, not merely near the pointer.
       */}
       {landing &&
         (() => {
           const s = fit?.scale ?? 1;
-          const w = fit?.w ?? shell.current?.clientWidth ?? 0;
-          if (!w) return null;
-          const col = (w - 32 - (GRID.cols - 1) * GRID.gap) / GRID.cols;
-          const left = (16 + landing.x * (col + GRID.gap)) * s;
-          const width = (landing.w * col + (landing.w - 1) * GRID.gap) * s;
-          const height = landing.h * s;
-          const top = Math.max(16 * s, landing.hostY - height / 2);
           return (
             <div
               className="pointer-events-none absolute z-10 animate-pulse rounded-md border border-line bg-surface-2/90"
-              style={{ left, top, width, height }}
+              style={{
+                left: landing.left * s,
+                top: landing.top * s,
+                width: landing.width * s,
+                height: landing.height * s,
+              }}
             >
               <div className="m-2 h-3 w-24 max-w-[60%] rounded bg-surface-3" />
             </div>

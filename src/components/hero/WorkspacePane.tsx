@@ -47,9 +47,6 @@ export function WorkspacePane() {
           className="pointer-events-none absolute top-0 left-0 h-[152%] w-[152%] origin-top-left scale-[0.658] border-0"
         />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface to-transparent" />
-        <span className="pointer-events-none absolute top-2 right-2 rounded-sm border border-dashed border-info-line bg-bg/80 px-1.5 py-px font-mono text-[9px] tracking-[0.1em] text-info uppercase backdrop-blur">
-          Sample data
-        </span>
       </div>
 
       {/* ── The build box ───────────────────────────────────────────── */}

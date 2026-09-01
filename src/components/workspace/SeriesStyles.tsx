@@ -64,9 +64,29 @@ export function SeriesStyles({
   /** Which series' picker is open. One at a time: two would be a colour wheel each. */
   const [open, setOpen] = useState<string | null>(null);
 
-  function set(key: string, patch: { c?: number | string; d?: string }) {
-    onChange(JSON.stringify({ ...styles, [key]: { ...styles[key], ...patch } }));
+  function set(
+    key: string,
+    patch: { c?: number | string; d?: string; a?: string },
+  ) {
+    onChange(
+      JSON.stringify({
+        ...styles,
+        [key]: { ...styles[key], ...patch },
+      }),
+    );
   }
+
+  /*
+    A second y-axis is only offered where the generator will honour it: the
+    chart shape, overlapping (a stack sums onto one axis, a spread is one
+    derived series), and only once there are two series — one series on the
+    right is the same chart with its axis moved, which the generator
+    normalises away.
+  */
+  const axisable =
+    controls.axis &&
+    (options.shape ?? "line") !== "stacked" &&
+    options.combine !== "spread";
 
   /*
     A colour input reports every value the pointer passes through, and each one
@@ -78,13 +98,22 @@ export function SeriesStyles({
     closure — by the time it fires, the render that scheduled it may be two
     settings out of date.
   */
-  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<
+    Record<string, string>
+  >({});
   const latest = useRef(styles);
   useEffect(() => {
     latest.current = styles;
   });
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const timer = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   function pickColour(key: string, hex: string) {
     setDraft((d) => ({ ...d, [key]: hex }));
@@ -143,20 +172,26 @@ export function SeriesStyles({
       */}
       {slots === null ? (
         <p className="mt-1.5 text-[11.5px] leading-snug text-muted">
-          This stream fans out — a series per entity, discovered from the data
-          and coloured in name order, so an entity added later appears without
+          This stream fans out — a series per entity,
+          discovered from the data and coloured in name
+          order, so an entity added later appears without
           this page being rebuilt.
         </p>
       ) : slots.length === 0 ? (
-        <p className="mt-1.5 text-[11.5px] text-muted">Nothing selected yet.</p>
+        <p className="mt-1.5 text-[11.5px] text-muted">
+          Nothing selected yet.
+        </p>
       ) : (
         <>
           <ul className="mt-1.5 flex flex-col gap-1">
             {slots.map((slot, n) => {
               const pick = styles[slot.key] ?? {};
-              const custom = draft[slot.key] ?? seriesHex(pick.c);
+              const custom =
+                draft[slot.key] ?? seriesHex(pick.c);
               const slotIndex =
-                typeof pick.c === "number" ? pick.c % palette.length : n;
+                typeof pick.c === "number"
+                  ? pick.c % palette.length
+                  : n;
               const colour = custom ?? palette[slotIndex];
               const showing = open === slot.key;
               return (
@@ -167,13 +202,17 @@ export function SeriesStyles({
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     {controls.color ? (
                       <button
-                        onClick={() => setOpen(showing ? null : slot.key)}
+                        onClick={() =>
+                          setOpen(showing ? null : slot.key)
+                        }
                         aria-expanded={showing}
                         aria-label={`Colour for ${slot.label}`}
                         title="Choose a colour"
                         className={cx(
                           "h-5 w-5 shrink-0 rounded-full ring-offset-1 ring-offset-surface transition-transform hover:scale-110",
-                          showing ? "ring-2 ring-ink" : "ring-1 ring-line",
+                          showing
+                            ? "ring-2 ring-ink"
+                            : "ring-1 ring-line",
                         )}
                         style={{ background: colour }}
                       />
@@ -185,21 +224,52 @@ export function SeriesStyles({
                       />
                     )}
 
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink">
-                      {slot.label}
+                    {/*
+                      The entity carries the row; the stream sits under it in
+                      small type. One truncating line held both, and what the
+                      ellipsis ate was exactly the half that told two rows
+                      apart. No hex readout — the swatch already is the
+                      colour, and the number is inside the picker for whoever
+                      needs it.
+                    */}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11.5px] text-ink">
+                        {slot.short}
+                      </span>
+                      {slot.stream && (
+                        <span className="block truncate text-[9.5px] text-faint">
+                          {slot.stream}
+                        </span>
+                      )}
                     </span>
 
-                    {controls.color && (
-                      <span className="shrink-0 font-mono text-[10px] text-faint">
-                        {colour.toUpperCase()}
-                      </span>
+                    {axisable && slots.length >= 2 && (
+                      <Select
+                        value={pick.a === "r" ? "r" : "l"}
+                        onChange={(v) =>
+                          set(slot.key, { a: v })
+                        }
+                        options={[
+                          { value: "l", label: "Left" },
+                          { value: "r", label: "Right" },
+                        ]}
+                        aria-label="Which y-axis this series plots on"
+                        size="sm"
+                        align="right"
+                        className="shrink-0"
+                      />
                     )}
 
                     {controls.line && (
                       <Select
                         value={pick.d ?? "solid"}
-                        onChange={(v) => set(slot.key, { d: v })}
-                        options={SERIES_LINES.map((l) => ({ value: l.value, label: l.label }))}
+                        onChange={(v) =>
+                          set(slot.key, { d: v })
+                        }
+                        options={SERIES_LINES.map((l) => ({
+                          value: l.value,
+                          label: l.label,
+                        }))}
                         aria-label="Line style"
                         size="sm"
                         align="right"
@@ -212,15 +282,18 @@ export function SeriesStyles({
                       colour, it is the slot this series' position earns — which
                       is the one that follows the theme.
                     */}
-                    {controls.color && pick.c !== undefined && (
-                      <button
-                        onClick={() => resetColour(slot.key)}
-                        title="Back to the default colour"
-                        className="shrink-0 rounded px-1 font-mono text-[10px] text-faint transition-colors hover:text-ink"
-                      >
-                        reset
-                      </button>
-                    )}
+                    {controls.color &&
+                      pick.c !== undefined && (
+                        <button
+                          onClick={() =>
+                            resetColour(slot.key)
+                          }
+                          title="Back to the default colour"
+                          className="shrink-0 rounded px-1 font-mono text-[10px] text-faint transition-colors hover:text-ink"
+                        >
+                          reset
+                        </button>
+                      )}
                   </div>
 
                   {showing && controls.color && (
@@ -237,17 +310,6 @@ export function SeriesStyles({
               );
             })}
           </ul>
-
-          {/*
-            Said once, at the bottom, and only when it applies: the palette has a
-            light stepping and a dark one, and a colour somebody picked is neither.
-          */}
-          {slots.some((s) => draft[s.key] || seriesHex(styles[s.key]?.c)) && (
-            <p className="mt-1.5 font-mono text-[9.5px] leading-snug text-faint">
-              A picked colour stays that colour in both themes; the default steps
-              with them.
-            </p>
-          )}
         </>
       )}
     </div>
@@ -298,8 +360,11 @@ function ColourPicker({
 
   function commitTyped(value: string) {
     setTyped(value);
-    const full = value.startsWith("#") ? value : `#${value}`;
-    if (/^#[0-9a-fA-F]{6}$/.test(full)) onHex(full.toLowerCase());
+    const full = value.startsWith("#")
+      ? value
+      : `#${value}`;
+    if (/^#[0-9a-fA-F]{6}$/.test(full))
+      onHex(full.toLowerCase());
   }
 
   return (
@@ -351,21 +416,33 @@ function ColourPicker({
               const isSlot = row === RAMP_BASE;
               const on = isSlot
                 ? slot === col
-                : slot === null && hex.toLowerCase() === c.toLowerCase();
+                : slot === null &&
+                  hex.toLowerCase() === c.toLowerCase();
               return (
                 <button
                   key={`${row}:${col}`}
-                  onClick={() => (isSlot ? onSlot(col) : onHex(c))}
+                  onClick={() =>
+                    isSlot ? onSlot(col) : onHex(c)
+                  }
                   aria-label={`Colour ${col + 1}, step ${row + 1}`}
                   aria-pressed={on}
-                  title={isSlot ? `Colour ${col + 1} · follows the theme` : c}
+                  title={
+                    isSlot
+                      ? `Colour ${col + 1} · follows the theme`
+                      : c
+                  }
                   className={cx(
                     "flex aspect-square items-center justify-center rounded-md text-[11px] leading-none transition-transform hover:scale-110",
                     // The slot row is the one with a guarantee behind it, so it
                     // is the one the eye lands on: full size, the others inset.
-                    isSlot ? "ring-1 ring-line-strong" : "scale-95 ring-1 ring-line",
+                    isSlot
+                      ? "ring-1 ring-line-strong"
+                      : "scale-95 ring-1 ring-line",
                   )}
-                  style={{ background: c, color: readableInk(c) }}
+                  style={{
+                    background: c,
+                    color: readableInk(c),
+                  }}
                 >
                   {on ? "✓" : ""}
                 </button>

@@ -28,7 +28,9 @@ export async function GET(
   const preview = new URL(req.url).searchParams.get("preview") === "1";
 
   return new Response(
-    buildDocument(`/api/workspace/apps/${id}/script/${v}`, { preview }),
+    // A preview is framed to be looked at, never arranged, so it is also bare:
+    // no drop-room below the last tile, and an empty page says so in words.
+    buildDocument(`/api/workspace/apps/${id}/script/${v}`, { preview, bare: preview }),
     {
       headers: {
         "content-type": "text/html; charset=utf-8",

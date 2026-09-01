@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { cx } from "@/components/ui";
+import { ThemeMenuItem } from "@/components/ThemeToggle";
 import { supabaseBrowser, supabaseConfigured } from "@/lib/supabase/client";
 
 /**
@@ -111,6 +112,11 @@ export function AccountButton() {
           >
             Usage &amp; billing
           </Link>
+
+          {/* Toggling stays in the menu: changing the theme is not leaving. */}
+          <div className="border-b border-line">
+            <ThemeMenuItem />
+          </div>
 
           <button
             onClick={signOut}

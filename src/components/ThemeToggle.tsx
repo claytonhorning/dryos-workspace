@@ -77,6 +77,39 @@ export function ThemeToggle() {
   );
 }
 
+/**
+ * The same choice as a menu row, for the account popup.
+ *
+ * Stateless on purpose: which side is lit comes from the `dr-when-*` CSS
+ * variants, the same way the standalone button picks its icon, so it can never
+ * disagree with the page and there is nothing to reconcile on hydrate.
+ */
+export function ThemeMenuItem() {
+  function set(next: Theme) {
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("dryos-theme", next);
+  }
+
+  return (
+    <div className="px-3 py-2" aria-label="Theme">
+      <div className="grid grid-cols-2 overflow-hidden rounded-md border border-line-strong text-[12px]">
+        <button
+          onClick={() => set("dark")}
+          className="py-1.5 text-center transition-colors dr-when-dark:bg-accent-dim dr-when-dark:text-accent dr-when-light:text-muted dr-when-light:hover:bg-surface-2 dr-when-light:hover:text-ink"
+        >
+          Dark mode
+        </button>
+        <button
+          onClick={() => set("light")}
+          className="border-l border-line-strong py-1.5 text-center transition-colors dr-when-light:bg-accent-dim dr-when-light:text-accent dr-when-dark:text-muted dr-when-dark:hover:bg-surface-2 dr-when-dark:hover:text-ink"
+        >
+          Light mode
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SunIcon({ className }: { className?: string }) {
   return (
     <svg

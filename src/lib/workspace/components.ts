@@ -1,4 +1,10 @@
-import { DRAW_CAP, type DataRef, grainSeconds, schemaFor } from "./catalog";
+import {
+  DRAW_CAP,
+  type DataRef,
+  grainSeconds,
+  schemaFor,
+  sourceTzOf,
+} from "./catalog";
 import { ERCOT_POINTS, ERCOT_VIEW, hasGeography } from "./geo";
 import { MOCK_POINT_SOURCE } from "./geoMock";
 import { schemaById } from "./catalog";
@@ -232,6 +238,11 @@ function series(refs: DataRef[]) {
       column: column(r),
       unit: unit(r),
       label: streams.size > 1 && stream ? `${base} — ${stream}` : base,
+      // The two halves of the label, separately: the panel lists series in a
+      // row too narrow for "HB_HOUSTON — ERCOT real-time LMP" to survive
+      // truncation with the part that distinguishes intact.
+      short: base,
+      stream,
       mock: r.availability === "mock",
     };
   });
@@ -265,16 +276,22 @@ export const SERIES_LINES = [
 ];
 
 /**
- * One series' overrides: `c` a colour, `d` a line style.
+ * One series' overrides: `c` a colour, `d` a line style, `a` a y-axis.
  *
  * A colour is either a palette slot — a number, which follows the theme, since
  * each mode has its own stepping — or a literal `#rrggbb` somebody picked, which
  * does not. That is the trade for arbitrary colour and it is the caller's to
  * make; the panel says so where it is made.
+ *
+ * `a` is "l" or "r". Anything else — absent included — is the left axis, and
+ * the right axis only exists once both sides have a series: everything moved
+ * right is the same chart as everything left, so it is normalised away rather
+ * than drawn as a chart whose one axis migrated.
  */
 export interface SeriesStyle {
   c?: number | string;
   d?: string;
+  a?: string;
 }
 
 /**
@@ -310,24 +327,34 @@ export function readSeries(
  */
 export function seriesSlots(
   refs: DataRef[],
-): { key: string; label: string }[] | null {
+): { key: string; label: string; short: string; stream?: string }[] | null {
   if (refs.length === 0) return [];
   if (refs.length === 1 && fanoutOf(refs[0])) return null;
-  return series(refs).map((x) => ({ key: x.key, label: x.label }));
+  return series(refs).map((x) => ({
+    key: x.key,
+    label: x.label,
+    short: x.short,
+    stream: x.stream,
+  }));
 }
 
 /** Which per-series controls a shape can honour. */
 export function seriesControls(kind: ComponentKind): {
   color: boolean;
   line: boolean;
+  axis: boolean;
 } {
-  if (kind === "chart" || kind === "distribution") {
-    return { color: true, line: true };
-  }
+  // Only the chart has a second y-axis to offer: a scatter's two axes are the
+  // two series, a bar has one measure by definition, and a stack sums — the
+  // panel additionally hides the control for the stacked shape.
+  if (kind === "chart") return { color: true, line: true, axis: true };
+  if (kind === "distribution") return { color: true, line: true, axis: false };
   // A bar is a colour and a length, and a scatter is a cloud of dots; neither
   // has a stroke to dash.
-  if (kind === "bar" || kind === "scatter") return { color: true, line: false };
-  return { color: false, line: false };
+  if (kind === "bar" || kind === "scatter") {
+    return { color: true, line: false, axis: false };
+  }
+  return { color: false, line: false, axis: false };
 }
 
 /**
@@ -384,10 +411,32 @@ function titleFor(refs: DataRef[], s: { label: string }[]): string {
  * at runtime — which also means an entity ERCOT adds next year shows up
  * without anyone recomposing the page.
  */
-function fanoutOf(ref: DataRef): { key: string; omit: string[] } | null {
+function fanoutOf(
+  ref: DataRef,
+): { key: string; omit: string[]; only?: string[] } | null {
   if (ref.kind === "entity" || ref.kind === "query") return null;
   const schema = schemaFor(ref.schemaId);
-  if (!schema?.entityKey) return null;
+  if (!schema) return null;
+  /*
+    A subset chip fans out over exactly the entities it enumerates — the
+    query carries them as its node filter, and the pivot keeps the list as a
+    guard so a row the filter should have excluded cannot sneak a series in.
+
+    It fans out even where the stream declares no `entityKey`: that flag
+    means "small enough that *all of it* is a chart", and a big stream
+    deliberately lacks it — but nine enumerated hubs are a chart whatever the
+    other 1,109 are. The pivot column is then the map's `entityColumn`
+    fallback chain, because it is the same question: which row column names
+    the entity.
+  */
+  if (ref.subset?.entities.length) {
+    return {
+      key: schema.entityColumn ?? schema.entityKey ?? "node",
+      omit: schema.entityOmit ?? [],
+      only: ref.subset.entities,
+    };
+  }
+  if (!schema.entityKey) return null;
   return { key: schema.entityKey, omit: schema.entityOmit ?? [] };
 }
 
@@ -418,10 +467,27 @@ function grainOf(ref: DataRef): number {
   return schema ? grainSeconds(schema) : ref.cadenceSeconds;
 }
 
+/**
+ * What "source time" means for this component: its first reference's stream,
+ * the same first-ref rule the unit and the colour scale already follow. The
+ * navbar's timezone choice resolves against it at runtime (`useTz`).
+ */
+function sourceTz(refs: DataRef[]): string {
+  const schema = refs[0] ? schemaFor(refs[0].schemaId) : undefined;
+  return schema ? sourceTzOf(schema) : "UTC";
+}
+
 /** Enough rows for every entity across the window, within the route's cap. */
-function fanoutLimit(window: string, grainSecs: number): number {
+function fanoutLimit(
+  window: string,
+  grainSecs: number,
+  entities?: number,
+): number {
   const span = WINDOW_SECONDS[window] ?? 86_400;
-  return Math.min(10_000, Math.ceil(span / Math.max(grainSecs, 60)) * 10);
+  // A subset fans out over a known count, so the budget is exact; the open
+  // fan-out keeps the old ten-entity heuristic.
+  const per = entities && entities > 0 ? entities : 10;
+  return Math.min(10_000, Math.ceil(span / Math.max(grainSecs, 60)) * per);
 }
 
 /** Rendered beside anything drawn from a schema with no collector. */
@@ -503,33 +569,69 @@ const chart: ComponentDef = {
     const title = spread
       ? `${s[0].label} − ${s[1].label}`
       : fan
-        ? (schemaFor(refs[0].schemaId)?.name ?? s[0].label)
+        ? // A subset chip already names itself ("… · Hubs"); the whole stream
+          // goes by the stream's name.
+          (refs[0].subset ? refs[0].label : (schemaFor(refs[0].schemaId)?.name ?? s[0].label))
         : titleFor(refs, s);
     // A day of a five-minute feed is 288 rows; a week is 2,016 — and a
     // fanned-out stream multiplies that by its entities. The limit follows
     // the window instead of quietly truncating the long one.
     const limit = fan
-      ? fanoutLimit(o.window, grainOf(refs[0]))
+      ? fanoutLimit(o.window, grainOf(refs[0]), fan.only?.length)
       : o.window === "-7d"
         ? 2000
         : 500;
-    // Hours carry a day of context; a week needs dates.
-    const tickFmt =
-      o.window === "-7d"
-        ? "(t) => new Date(t).toISOString().slice(5, 10)"
-        : "(t) => new Date(t).toISOString().slice(11, 16)";
     // A fanned-out chart is always several series, whatever its shape, so it
     // always carries the legend.
     const legend = stacked || fan;
 
+    /*
+      A second y-axis, when any series was sent to it. Only for overlapping
+      lines and areas: a stack sums onto one axis, a spread is one derived
+      series, and a fan-out's series have no rows here to be assigned. All-right
+      is normalised to all-left — the right axis exists to hold a second scale
+      *against* the first, and with nothing on the left it is the same chart
+      wearing its axis on the other side.
+    */
+    const axisOf = (key: string) => (styles[key]?.a === "r" ? "r" : "l");
+    const dual =
+      !stacked &&
+      !fan &&
+      !spread &&
+      s.some((x) => axisOf(x.key) === "r") &&
+      s.some((x) => axisOf(x.key) === "l");
+    // Each axis wears the unit of what it carries; mixed units are the whole
+    // reason to split axes, and the header saying only the left one was a lie
+    // about half the chart. The tooltip gets the per-series map for the same
+    // reason.
+    const leftUnit = s.find((x) => axisOf(x.key) === "l")?.unit ?? s[0].unit;
+    const rightUnit = s.find((x) => axisOf(x.key) === "r")?.unit ?? "";
+    const headerUnit =
+      dual && rightUnit && rightUnit !== leftUnit
+        ? `${leftUnit} · ${rightUnit}`
+        : s[0].unit;
+    const tipUnits = dual
+      ? ` units={${JSON.stringify(Object.fromEntries(s.map((x) => [x.key, x.unit])))}}`
+      : "";
+
     const queries = fan
-      ? [{ dataset: s[0].dataset, start: o.window, limit }]
+      ? [
+          {
+            dataset: s[0].dataset,
+            // A subset chip filters at the server: nine hubs' rows, not
+            // 1,118 nodes' rows thinned after delivery.
+            ...(fan.only ? { node: fan.only } : {}),
+            start: o.window,
+            limit,
+          },
+        ]
       : s.map((x) => ({ dataset: x.dataset, node: x.node, start: o.window, limit }));
 
     const setup = fan
       ? `
   const ENTITY = ${JSON.stringify(fan.key)};
   const OMIT = ${JSON.stringify(fan.omit)};
+  const ONLY = ${JSON.stringify(fan.only ?? null)};
   const COLUMN = ${JSON.stringify(s[0].column)};
 
   /*
@@ -545,6 +647,9 @@ const chart: ComponentDef = {
     (rows[0] || []).forEach((r) => {
       const e = r[ENTITY];
       if (e == null || OMIT.includes(e)) return;
+      // The query already filters to ONLY; the guard keeps a row the filter
+      // should have excluded from sneaking a series in.
+      if (ONLY && !ONLY.includes(e)) return;
       const t = Date.parse(r.interval_start_utc);
       const at = by.get(t) || { t };
       at[e] = r[COLUMN];
@@ -634,7 +739,7 @@ ${
           : s
             .map((x, n) => {
               const p = paint(styles, x.key, n);
-              return `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
+              return `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} ${dual ? `yAxisId="${axisOf(x.key)}" ` : ""}stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
             })
             .join("\n          ");
 
@@ -651,31 +756,104 @@ ${
         ...(legend ? ["Legend"] : []),
       ],
       code: `function ${name}({ w, h }) {
+  const SOURCE_TZ = ${JSON.stringify(sourceTz(refs))};
   const { rows, error, loading } = useSeries(
     ${JSON.stringify(queries, null, 2).replace(/\n/g, "\n    ")},
     ${refreshMs(refs)},
   );
 ${setup}
 ${orderMemo}
+  /*
+    Evenly spaced clock ticks, generated from the domain rather than left to
+    the data. Recharts picks its labels from the rows it has, so a collection
+    gap pulled the labels with it — equal distances on screen stopped meaning
+    equal durations, and the gap itself became unreadable. A time axis is a
+    ruler, aligned to round times in the display timezone so labels land on
+    whole hours and days as the reader counts them.
+
+    The step is the finest one the tile has room for — a wide tile on a day
+    window labels every hour, and narrowing it degrades through 2h/3h/4h
+    rather than thinning arbitrarily. Room is the measured width of the plot
+    box at ~48px a label ("00:00" plus breathing space), so a resize redraws
+    the scale live; before the first measurement it assumes seven, the old
+    fixed budget.
+
+    Every tick shows its hour; the date sits on a second line beneath the
+    ticks where the day changes (rendered by TimeTick), so time is never
+    displaced by its own context. A daily step is dates only — every hour
+    would read 00:00. The axis is given the second line's height only when
+    some tick actually uses it.
+  */
+  const tz = useTz(SOURCE_TZ);
+  const plotBox = React.useRef(null);
+  const [plotW, setPlotW] = React.useState(0);
+  React.useEffect(() => {
+    const el = plotBox.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setPlotW(el.clientWidth));
+    ro.observe(el);
+    setPlotW(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const { ticks: TICKS, labels: TICKLABELS, tall: TICKTALL } = React.useMemo(() => {
+    if (merged.length < 2) return { ticks: undefined, labels: null, tall: false };
+    const lo = merged[0].t, hi = merged[merged.length - 1].t;
+    const HOUR = 3600000, DAY = 86400000;
+    const steps = [15 * 60000, 30 * 60000, HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY];
+    const fit = plotW > 0 ? Math.max(4, Math.floor(plotW / 48)) : 7;
+    const step = steps.find((x) => (hi - lo) / x <= fit) || 2 * DAY;
+    // Daily ticks land on the display zone's own midnights; sub-daily steps
+    // stay epoch-aligned, which is hour-aligned for every whole-hour zone.
+    const off = step >= DAY ? tzOffsetMs(lo, tz) : 0;
+    const ticks = [];
+    const labels = new Map();
+    let lastDay = null;
+    let tall = false;
+    for (let t = Math.ceil((lo + off) / step) * step - off; t <= hi; t += step) {
+      if (t < lo) continue;
+      ticks.push(t);
+      const day = tzDayKey(t, tz);
+      const sub = step < DAY && day !== lastDay ? tzDate(t, tz) : null;
+      labels.set(
+        t,
+        step >= DAY ? { top: tzDate(t, tz), sub: null } : { top: tzTime(t, tz), sub },
+      );
+      if (sub) tall = true;
+      lastDay = day;
+    }
+    return { ticks, labels, tall };
+  }, [merged, plotW, tz]);
   return (
-    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(title)} unit=${JSON.stringify(s[0].unit)} loading={loading} error={error}>
-${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
+    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(title)} unit=${JSON.stringify(headerUnit)} loading={loading} error={error}>
+${mockTag(anyMock)}      <div ref={plotBox} style={{ inset: 0, position: "absolute" }}>
       <ResponsiveContainer width="100%" height="100%">
-        <${Wrap} data={merged} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
+        <${Wrap} data={merged} margin={{ top: 4, right: ${dual ? -12 : 8}, bottom: 0, left: -12 }}>
           <CartesianGrid stroke="var(--line)" vertical={false} />
+          {/* interval 0 renders every tick handed to it: the step was already
+              sized to the room, and recharts's own collision guess re-thinned
+              an hourly scale unevenly — 3h, 3h, 2h — which is worse than
+              either density. */}
           <XAxis
             dataKey="t"
             type="number"
             scale="time"
             domain={["dataMin", "dataMax"]}
-            tickFormatter={${tickFmt}}
-            tick={{ fill: "var(--faint)", fontSize: 11 }}
+            ticks={TICKS}
+            interval={0}
+            tick={<TimeTick labels={TICKLABELS} tz={tz} />}
+            height={TICKTALL ? 34 : 30}
             stroke="var(--line)"
             tickLine={false}
           />
-          <YAxis tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={52} />
-          <ReferenceLine y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />
-          <Tooltip content={<ChartTip unit=${JSON.stringify(s[0].unit)} />} />
+${
+  dual
+    ? `          <YAxis yAxisId="l" tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={52} />
+          <YAxis yAxisId="r" orientation="right" tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={52} />
+          <ReferenceLine yAxisId="l" y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />`
+    : `          <YAxis tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={52} />
+          <ReferenceLine y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />`
+}
+          <Tooltip content={<ChartTip unit=${JSON.stringify(leftUnit)}${tipUnits} tz={tz} />} />
 ${
   legend
     ? `          <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />
@@ -809,13 +987,15 @@ const scatter: ComponentDef = {
     };
   }, [rows]);
 
+  const tz = useTz(${JSON.stringify(sourceTz(refs))});
+
   function ScatterTip({ active, payload }) {
     if (!active || !payload || !payload.length) return null;
     const p = payload[0].payload;
     return (
       <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
         <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
-          {new Date(p.t).toISOString().slice(11, 16)}Z
+          {tzTime(p.t, tz)} {tzShort(p.t, tz)}
         </div>
         <div style={{ color: "var(--ink)" }}>${s[0].label.replace(/"/g, "")}: <strong>{Number(p.x).toFixed(2)}</strong> ${s[0].unit}</div>
         <div style={{ color: "var(--ink)" }}>${s[1].label.replace(/"/g, "")}: <strong>{Number(p.y).toFixed(2)}</strong> ${s[1].unit}</div>
@@ -1122,20 +1302,28 @@ const bar: ComponentDef = {
     const name = `Bar${i}`;
     const fan = refs.length === 1 ? fanoutOf(refs[0]) : null;
     const title = fan
-      ? (schemaFor(refs[0].schemaId)?.name ?? s[0].label)
+      ? (refs[0].subset ? refs[0].label : (schemaFor(refs[0].schemaId)?.name ?? s[0].label))
       : titleFor(refs, s);
     const horizontal = o.orient === "h";
 
     const queries = fan
       ? // Two intervals' worth of rows covers every entity even when the
-        // newest interval is still filling in.
-        [{ dataset: s[0].dataset, limit: 24 }]
+        // newest interval is still filling in. A subset filters at the server
+        // and sizes the fetch to its own count.
+        [
+          {
+            dataset: s[0].dataset,
+            ...(fan.only ? { node: fan.only } : {}),
+            limit: fan.only ? Math.max(24, fan.only.length * 2) : 24,
+          },
+        ]
       : s.map((x) => ({ dataset: x.dataset, node: x.node, limit: 1 }));
 
     const dataMemo = fan
       ? `
   const ENTITY = ${JSON.stringify(fan.key)};
   const OMIT = ${JSON.stringify(fan.omit)};
+  const ONLY = ${JSON.stringify(fan.only ?? null)};
   const COLUMN = ${JSON.stringify(s[0].column)};
 
   // Rows arrive newest-first, so the first row per entity is its latest
@@ -1146,6 +1334,7 @@ const bar: ComponentDef = {
     (rows[0] || []).forEach((r) => {
       const e = r[ENTITY];
       if (e == null || OMIT.includes(e) || latest.has(e)) return;
+      if (ONLY && !ONLY.includes(e)) return;
       latest.set(e, r[COLUMN]);
     });
     const names = [...latest.keys()].sort();
@@ -1370,6 +1559,7 @@ const heatmap: ComponentDef = {
   const COLUMN = ${JSON.stringify(s[0].column)};
   const UNIT = ${JSON.stringify(s[0].unit)};
   const AGG = ${JSON.stringify(o.agg)};
+  const SOURCE_TZ = ${JSON.stringify(sourceTz(refs))};
   /*
     The grid, decided from the granularity of the data when the page was
     composed. "day" is a row per day and a column per hour; "hour" is a row per
@@ -1385,12 +1575,16 @@ const heatmap: ComponentDef = {
   const pad2 = (n) => String(n).padStart(2, "0");
 
   /*
-    Bucketed in Central time, because "hour of day" is a claim about when
-    Texans were using power, not about UTC. Intl does the DST arithmetic.
+    Bucketed in the display timezone, because "hour of day" is a claim about a
+    clock somebody keeps — by default the source's own (US Central for ERCOT:
+    when Texans were using power, not when UTC says so), and the navbar's
+    choice otherwise. Intl does the DST arithmetic. The zone is a real input
+    to the grid, not a relabel: change it and the buckets themselves move.
   */
+  const tz = useTz(SOURCE_TZ);
   const grid = React.useMemo(() => {
     const fmt = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Chicago",
+      timeZone: tz,
       year: "numeric", month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit", hour12: false,
     });
@@ -1426,7 +1620,7 @@ const heatmap: ComponentDef = {
       for (const cKey in d) { const x = val(d[cKey]); if (x < lo) lo = x; if (x > hi) hi = x; }
     });
     return { keys, cells, lo, hi, val };
-  }, [rows]);
+  }, [rows, tz]);
 
   const [hover, setHover] = React.useState(null);
 
@@ -1734,6 +1928,7 @@ const table: ComponentDef = {
   );
 
   const cols = ${JSON.stringify(s.map((x) => ({ label: x.label, column: x.column, unit: x.unit })))};
+  const tz = useTz(${JSON.stringify(sourceTz(refs))});
   const merged = React.useMemo(() => {
     const by = new Map();
     cols.forEach((c, n) => {
@@ -1753,7 +1948,9 @@ const table: ComponentDef = {
         <table>
           <thead>
             <tr>
-              <th>Interval</th>
+              {/* The zone once, on the column, not per row: a table of times
+                  each wearing "CST" is a table half made of the same word. */}
+              <th>Interval ({tzShort(Date.now(), tz)})</th>
               {cols.map((c) => (
                 <th key={c.label} style={{ textAlign: "right" }}>{c.label} {c.unit && "(" + c.unit + ")"}</th>
               ))}
@@ -1763,7 +1960,7 @@ const table: ComponentDef = {
             {merged.map((r) => (
               <tr key={r.t}>
                 <td style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 11 }}>
-                  {new Date(r.t).toISOString().slice(11, 16)}Z
+                  {tzTime(Date.parse(r.t), tz)}
                 </td>
                 {cols.map((c, n) => (
                   <td key={c.label} style={{ fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
@@ -1827,17 +2024,24 @@ const map: ComponentDef = {
   ],
   accepts(refs) {
     /*
-      Four ways to be mappable, and only one of them needs a lookup table.
+      Five ways to be mappable, and only one of them needs a lookup table.
 
       A gridded field, a moving fleet and a located stream all carry their own
       position — the grid in its cell id, the fleet and the located stream in
-      every row — so none of them is asked whether we happen to know where its
-      entities are. Only named places are, and for those the answer really is
-      no when we do not.
+      every row — and a schema declaring `mockLocations` invents one per
+      entity, marked mock on every surface that draws it. So none of those is
+      asked whether we happen to know where its entities are. Only named
+      places are, and for those the answer really is no when we do not.
+      (`mockLocations` was missing from this list once: the emitter placed
+      every settlement point while accepts refused any node that was not a
+      hub, so the map greyed out for exactly the streams the invented
+      positions were built for.)
     */
     const hasField = refs.some((r) => schemaById(r.schemaId)?.field);
     const hasMotion = refs.some((r) => schemaById(r.schemaId)?.motion);
-    const hasLocated = refs.some((r) => schemaById(r.schemaId)?.located);
+    const hasLocated = refs.some(
+      (r) => schemaById(r.schemaId)?.located || schemaById(r.schemaId)?.mockLocations,
+    );
 
     if (refs.length === 0) return { ok: false, why: "Pick a series." };
     if (hasField || hasMotion || hasLocated) return { ok: true };
@@ -1901,13 +2105,18 @@ const map: ComponentDef = {
       What it gives up is the label baked into each marker, which is what the
       hover readout is for.
     */
-    const dense = (locatedSchema?.entities.count ?? 0) > 200;
+    const dense =
+      (locatedRef?.subset?.entities.length ?? locatedSchema?.entities.count ?? 0) >
+      200;
 
     const nodes = locatedRef ? [] : [
       ...new Set(
         pointRefs.flatMap((r) => {
           const n = node(r);
           if (n) return [n];
+          // A subset chip names its entities outright; only the open
+          // whole-stream chip falls back to guessing from the samples.
+          if (r.subset) return r.subset.entities;
           const sample = schemaFor(r.schemaId)?.entities.sample ?? [];
           return Object.keys(ERCOT_POINTS).filter(
             (k) =>
@@ -1960,19 +2169,55 @@ ${locatedRef && invented ? MOCK_POINT_SOURCE : ""}
   const FIELD = ${showField ? JSON.stringify({ dataset: fieldDataset, column: fieldColumn, unit: fieldUnit, mode: fieldMode, label: fieldRef!.label, entity: fieldEntity, direction: vector?.direction ?? null }) : "null"};
   const MOTION = ${motionRef ? JSON.stringify({ dataset: motionDataset, trails, label: motionRef.label }) : "null"};
 
+  /*
+    The scrubber's instant, scoped to this map alone.
+
+    It used to drive the page-wide cursor, so scrubbing one map dragged every
+    other tile on the screen through time with it. The instant is local state
+    now, handed to useSeries, which bounds only this tile's queries at it —
+    the rest of the screen stays on its own time. Declared above the queries
+    because the queries are what it rewrites.
+  */
+  const CURSOR_BACK_H = 24, CURSOR_FWD_H = 48, CURSOR_STEP = 3600000;
+  const hourFloor = (ms) => Math.floor(ms / CURSOR_STEP) * CURSOR_STEP;
+  const [cursorNow, setCursorNow] = React.useState(() => hourFloor(Date.now()));
+  const [cursorAt, setCursorAt] = React.useState(null);
+  React.useEffect(() => {
+    // Only while live, so the scale cannot slide under a handle somebody set.
+    if (cursorAt) return;
+    const id = setInterval(() => setCursorNow(hourFloor(Date.now())), 60000);
+    return () => clearInterval(id);
+  }, [cursorAt]);
+  const cursorMs = cursorAt ? Date.parse(cursorAt) : cursorNow;
+  // The scrubber's clock follows the navbar's timezone choice like every
+  // other clock on the page — source time by default, never the browser's
+  // own guess.
+  const tz = useTz(${JSON.stringify(sourceTz(refs))});
+
   const { rows, error, loading } = useSeries(
     [
 ${
   locatedRef
     ? /*
-         No node filter: a located stream fans out, so the query asks for the
-         whole stream and the pins are whatever came back. `end` is the
-         load-bearing half — a forecast's newest row is seven days out, and a
-         map of "now" that drew next Sunday would be wrong in a way nobody
-         would catch by looking at it. Bounded at now, the newest row is the
-         current one for observations and forecasts alike.
+         A whole-stream reference carries no node filter: a located stream
+         fans out, so the query asks for everything and the pins are whatever
+         came back. A subset chip filters at the server instead — nine hubs'
+         rows, not 1,118 thinned after delivery — and its limit is sized to
+         the subset. `end` is the load-bearing half either way — a forecast's
+         newest row is seven days out, and a map of "now" that drew next
+         Sunday would be wrong in a way nobody would catch by looking at it.
+         Bounded at now, the newest row is the current one for observations
+         and forecasts alike.
       */
-      `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, end: "-0m", limit: ${Math.min(DRAW_CAP, Math.max(60, (locatedSchema?.entities.count ?? 50) * 2))} },`
+      `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, ${
+        locatedRef.subset
+          ? `node: ${JSON.stringify(locatedRef.subset.entities)}, `
+          : ""
+      }end: "-0m", limit: ${
+        locatedRef.subset
+          ? Math.min(DRAW_CAP, Math.max(30, locatedRef.subset.entities.length * 2))
+          : Math.min(DRAW_CAP, Math.max(60, (locatedSchema?.entities.count ?? 50) * 2))
+      } },`
     : nodes.length
       ? `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 },`
       : ""
@@ -1994,6 +2239,7 @@ ${
 ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m", limit: ${motionLimit} },` : ""}
     ],
     ${refreshMs(refs)},
+    cursorAt,
   );
 
   const pointRows = ${locatedRef || nodes.length ? "rows[0] || []" : "[]"};
@@ -2158,35 +2404,6 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   }, [order, ready, placed, hidden]);
 
   /*
-    The time scrubber, on the map rather than only in the bar.
-
-    The instant is still the page's — one answer for every tile, which is the
-    point of it — but the control belongs next to the thing it changes. A map is
-    the tile you most want to scrub, and reaching for a control in the navbar
-    two thousand pixels away to move what is under your cursor is the wrong
-    distance. So this drives the page cursor through \`dryos.setCursor\`, and the
-    handle only moves when the page answers back. Every other tile moves with it,
-    which is the behaviour that teaches what the control actually does.
-
-    The label says "screen" for the same reason: a scrubber sitting on a map
-    would otherwise read as belonging to the map.
-  */
-  const CURSOR_BACK_H = 24, CURSOR_FWD_H = 48, CURSOR_STEP = 3600000;
-  const hourFloor = (ms) => Math.floor(ms / CURSOR_STEP) * CURSOR_STEP;
-  const [cursorNow, setCursorNow] = React.useState(() => hourFloor(Date.now()));
-  const [cursorAt, setCursorAt] = React.useState(
-    () => (typeof dryos !== "undefined" && dryos.cursor) || null,
-  );
-  React.useEffect(() => {
-    const on = () => setCursorAt((typeof dryos !== "undefined" && dryos.cursor) || null);
-    window.addEventListener("dryos:cursor", on);
-    // Only while live, so the scale cannot slide under a handle somebody set.
-    const id = setInterval(() => { if (!dryos.cursor) setCursorNow(hourFloor(Date.now())); }, 60000);
-    return () => { window.removeEventListener("dryos:cursor", on); clearInterval(id); };
-  }, []);
-  const cursorMs = cursorAt ? Date.parse(cursorAt) : cursorNow;
-
-  /*
     What instant the rows actually are, which is not always the one asked for.
 
     A query bounded at the cursor returns the newest row at or before it — so
@@ -2208,7 +2425,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   }, [rows]);
   const behind = cursorAt && dataMs && cursorMs - dataMs > 3600000;
   const cursorLabel = cursorAt
-    ? new Date(cursorMs).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    ? new Date(cursorMs).toLocaleString([], { timeZone: tz, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : "Live";
 
   /*
@@ -2225,15 +2442,15 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     let last = null;
     for (let t = from; t <= to; t += 12 * CURSOR_STEP) {
       const d = new Date(t);
-      const day = d.toLocaleDateString([], { month: "short", day: "numeric" });
+      const day = d.toLocaleDateString([], { timeZone: tz, month: "short", day: "numeric" });
       out.push({
         at: t,
-        label: day === last ? d.toLocaleTimeString([], { hour: "numeric" }) : day,
+        label: day === last ? d.toLocaleTimeString([], { timeZone: tz, hour: "numeric" }) : day,
       });
       last = day;
     }
     return out;
-  }, [cursorNow]);
+  }, [cursorNow, tz]);
 
   /*
     A grid cell carries its own position: G_315_1005 is 31.5N 100.5W. Encoding
@@ -3166,7 +3383,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         <div style={{ alignItems: "center", display: "flex", gap: 8 }}>
           <button
             type="button"
-            onClick={() => dryos.setCursor(null)}
+            onClick={() => setCursorAt(null)}
             title="Back to now"
             style={{
               background: cursorAt ? "var(--accent-dim)" : "transparent",
@@ -3184,8 +3401,8 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             max={cursorNow + CURSOR_FWD_H * CURSOR_STEP}
             step={CURSOR_STEP}
             value={cursorMs}
-            onChange={(e) => dryos.setCursor(new Date(Number(e.target.value)).toISOString())}
-            aria-label="Time shown on this screen"
+            onChange={(e) => setCursorAt(new Date(Number(e.target.value)).toISOString())}
+            aria-label="Time shown on this map"
             style={{ accentColor: "var(--accent)", flex: 1, height: 12, minWidth: 0 }}
           />
           <span style={{ color: cursorAt ? "var(--accent)" : "var(--muted)", flexShrink: 0, fontSize: 10, minWidth: 96, textAlign: "right", whiteSpace: "nowrap" }}>
@@ -3203,7 +3420,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         </div>
         {behind ? (
           <div style={{ color: "var(--warn)", fontSize: 9, paddingLeft: 44 }}>
-            newest data {new Date(dataMs).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            newest data {new Date(dataMs).toLocaleString([], { timeZone: tz, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
           </div>
         ) : null}
       </div>

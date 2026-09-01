@@ -29,17 +29,40 @@ export const PREAMBLE = `import React, { useEffect, useMemo, useRef, useState } 
  * data reference and a shape — no model wrote this file.
  */
 
-/** One request per selection, polled together and kept in step. */
-function useSeries(queries, refreshMs) {
+/**
+ * One request per selection, polled together and kept in step.
+ *
+ * \`cursor\` is a tile-local instant (the map's scrubber). When set, every query
+ * is rewritten against it before it leaves: \`end\` becomes the cursor, and a
+ * *relative* \`start\` — "-30m" — is resolved against the cursor rather than the
+ * wall clock, because "the last 30 minutes" means the 30 minutes before the
+ * instant on screen. Rewriting only \`end\` would slide the window's far edge
+ * while pinning its near one, stretching the window as it scrubbed. The same
+ * two rewrites the shim applies for the page-wide cursor, applied here so one
+ * tile can hold an instant without dragging the rest of the screen to it.
+ */
+function useSeries(queries, refreshMs, cursor) {
   const [rows, setRows] = useState(queries.map(() => []));
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let live = true;
+    function atInstant(q) {
+      const at = cursor ? Date.parse(cursor) : NaN;
+      if (!at) return q;
+      const out = { ...q, end: cursor };
+      const m = /^-(\\d+)([mhd])$/.exec(String(q.start == null ? "" : q.start).trim());
+      if (m) {
+        const n = Number(m[1]);
+        const span = m[2] === "m" ? n * 60000 : m[2] === "h" ? n * 3600000 : n * 86400000;
+        out.start = new Date(at - span).toISOString();
+      }
+      return out;
+    }
     async function load() {
       try {
-        const out = await Promise.all(queries.map((q) => dryos.query(q)));
+        const out = await Promise.all(queries.map((q) => dryos.query(atInstant(q))));
         if (!live) return;
         setRows(out.map((r) => r.rows));
         setError(null);
@@ -51,17 +74,18 @@ function useSeries(queries, refreshMs) {
     }
     load();
     const id = setInterval(load, refreshMs);
-    // The shim fires this when the page's time cursor moves. Without it a tile
-    // on a five-minute poll would keep showing the instant you scrubbed away
-    // from for another five minutes, and a screen half at one time and half at
-    // another is worse than one that is simply behind.
+    // The shim fires this when the page's time cursor moves (a shared ?t=
+    // link). Without it a tile on a five-minute poll would keep showing the
+    // instant you scrubbed away from for another five minutes, and a screen
+    // half at one time and half at another is worse than one that is simply
+    // behind.
     window.addEventListener("dryos:cursor", load);
     return () => {
       live = false;
       clearInterval(id);
       window.removeEventListener("dryos:cursor", load);
     };
-  }, []);
+  }, [cursor]);
 
   return { rows, error, loading };
 }
@@ -168,10 +192,107 @@ function axisNum(v) {
   return (Math.round(n * 10) / 10).toString();
 }
 
+/*
+  The display timezone, threaded through everything that prints a clock.
+
+  The page-level choice lives in the navbar and reaches the frame as
+  window.__dryosTz — "source", or an IANA name the host resolved. "source"
+  means each component shows its stream's own operating time (ERCOT talks in
+  US Central, weather in UTC), which is what SOURCE_TZ carries per component.
+  One hook so a change repaints every axis at once; cached formatters because
+  Intl.DateTimeFormat construction is the expensive half.
+*/
+function useTz(sourceTz) {
+  const read = () => {
+    const v = (typeof window !== "undefined" && window.__dryosTz) || "source";
+    return v === "source" ? (sourceTz || "UTC") : v;
+  };
+  const [tz, setTz] = useState(read);
+  useEffect(() => {
+    const on = () => setTz(read());
+    window.addEventListener("dryos:tz", on);
+    return () => window.removeEventListener("dryos:tz", on);
+  }, []);
+  return tz;
+}
+
+const __tzFmt = {};
+function tzParts(ms, tz) {
+  let f = __tzFmt[tz];
+  if (!f) {
+    try {
+      f = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      });
+    } catch {
+      // An unknown zone name falls back to UTC rather than throwing mid-render.
+      f = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "UTC",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      });
+    }
+    __tzFmt[tz] = f;
+  }
+  const out = {};
+  f.formatToParts(ms).forEach((p) => { out[p.type] = p.value; });
+  return out;
+}
+/** "14:05" in the display timezone. */
+function tzTime(ms, tz) {
+  const p = tzParts(ms, tz);
+  return p.hour + ":" + p.minute;
+}
+/** "09-01" in the display timezone. */
+function tzDate(ms, tz) {
+  const p = tzParts(ms, tz);
+  return p.month + "-" + p.day;
+}
+/** A day key for change detection — same day, same string. */
+function tzDayKey(ms, tz) {
+  const p = tzParts(ms, tz);
+  return p.year + "-" + p.month + "-" + p.day;
+}
+/** The zone's offset from UTC at an instant, in ms — for aligning day ticks. */
+function tzOffsetMs(ms, tz) {
+  const p = tzParts(ms, tz);
+  return (
+    Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) -
+    Math.floor(ms / 60000) * 60000
+  );
+}
+/** "CST" / "UTC" — the label a reader needs to trust a clock. */
+function tzShort(ms, tz) {
+  try {
+    const f = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short", hour: "2-digit" });
+    const p = f.formatToParts(ms).find((x) => x.type === "timeZoneName");
+    return p ? p.value : tz;
+  } catch {
+    return tz;
+  }
+}
+
 function gridW(w) {
   const track = "(100% - " + (GRID_COLS - 1) * GRID_GAP + "px) / " + GRID_COLS;
   return "calc(" + track + " * " + w + " + " + (w - 1) * GRID_GAP + "px)";
 }
+
+/*
+  A blank stand-in for the browser's native drag snapshot.
+
+  The editing canvas is the launched screen scaled down, and the browser
+  snapshots a dragged element at its *layout* size, not its rendered one — so
+  the header bar's ghost drew at unscaled width, longer than the tile it was
+  grabbed from. The dashed Ghost on the canvas is the real preview of the
+  move; the snapshot adds nothing, so it is a transparent pixel. Created at
+  module load rather than in the handler, because setDragImage silently falls
+  back to the default when handed an image that has not finished loading.
+*/
+const DRAG_BLANK = new Image();
+DRAG_BLANK.src =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
 /**
  * Every section has the same frame, so the page reads as one thing.
@@ -400,43 +521,60 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         );
       }}
     >
-      <header style={{ alignItems: "center", display: "flex", gap: 8, marginBottom: 8 }}>
-        {/*
-          The header is the handle. Dragging a tile by its body would fight every
-          chart underneath it for the same gesture.
-        */}
+      {/*
+        The whole header is the handle, the way a window is dragged by its
+        title bar. Dragging by the body would fight every chart underneath it
+        for the same gesture, and the ⠿ glyph alone was a target a few pixels
+        wide that had to be aimed at. The glyph stays as the cue that the bar
+        is grabbable; the buttons in the bar cancel the drag so they stay pure
+        clicks.
+      */}
+      <header
+        draggable={!bare && !full}
+        onDragStart={(e) => {
+          if (bare || full) return;
+          if (e.target.closest && e.target.closest("button, a, input, select, textarea")) {
+            e.preventDefault();
+            return;
+          }
+          e.dataTransfer.setData("text/dryos-tile", String(index));
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setDragImage(DRAG_BLANK, 0, 0);
+          // The canvas decides where it lands; this only says what is in
+          // flight — and where inside it the cursor took hold, so the tile
+          // travels under the hand instead of snapping its corner there.
+          const r = box.current.getBoundingClientRect();
+          window.dispatchEvent(
+            new CustomEvent("dryos:tilegrab", {
+              detail: {
+                index,
+                w: size.w,
+                h: size.h,
+                offX: e.clientX - r.left,
+                offY: e.clientY - r.top,
+              },
+            }),
+          );
+        }}
+        onDragEnd={() => window.dispatchEvent(new CustomEvent("dryos:tiledrop"))}
+        title={!bare && !full ? "Drag to move" : undefined}
+        style={{
+          alignItems: "center",
+          cursor: !bare && !full ? "grab" : undefined,
+          display: "flex",
+          gap: 8,
+          marginBottom: 8,
+          userSelect: "none",
+        }}
+      >
         {!bare && (
         <span
-          data-nopick
-          draggable={!full}
-          onDragStart={(e) => {
-            e.dataTransfer.setData("text/dryos-tile", String(index));
-            e.dataTransfer.effectAllowed = "move";
-            // The canvas decides where it lands; this only says what is in
-            // flight — and where inside it the cursor took hold, so the tile
-            // travels under the hand instead of snapping its corner there.
-            const r = box.current.getBoundingClientRect();
-            window.dispatchEvent(
-              new CustomEvent("dryos:tilegrab", {
-                detail: {
-                  index,
-                  w: size.w,
-                  h: size.h,
-                  offX: e.clientX - r.left,
-                  offY: e.clientY - r.top,
-                },
-              }),
-            );
-          }}
-          onDragEnd={() => window.dispatchEvent(new CustomEvent("dryos:tiledrop"))}
-          title="Drag to move"
+          aria-hidden="true"
           style={{
             color: "var(--line-strong)",
-            cursor: full ? "default" : "grab",
             fontSize: 11,
             letterSpacing: "-1px",
             lineHeight: 1,
-            userSelect: "none",
           }}
         >
           ⠿
@@ -595,9 +733,14 @@ function tileLanding(grid, rects, self, drag, px, py) {
   const stride = (r.width - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS + GRID_GAP;
   const w = drag.w;
   const h = drag.h;
+  // Clamped on every side, the bottom included: the canvas is the whole of the
+  // droppable ground, and a tile allowed past its edge is a tile dragged out
+  // of view. The strip past the last tile is inside the rect, so a page still
+  // grows downward — by one visible step at a time, never into the void.
+  const floor = Math.max(0, Math.floor((r.height - h) / GRID_SNAP) * GRID_SNAP);
   const want = {
     x: Math.max(0, Math.min(GRID_COLS - w, Math.round((px - r.left - drag.offX) / stride))),
-    y: Math.max(0, Math.round((py - r.top - drag.offY) / GRID_SNAP) * GRID_SNAP),
+    y: Math.max(0, Math.min(floor, Math.round((py - r.top - drag.offY) / GRID_SNAP) * GRID_SNAP)),
     w: w,
     h: h,
   };
@@ -665,12 +808,40 @@ function Ghost({ x, y, w, h, placing, trading }) {
   );
 }
 
-function ChartTip({ active, payload, label, unit }) {
+/*
+  A two-line time tick: the hour on the first line, the date beneath it where
+  the day changes. One axis wearing two levels of context, rather than a
+  second XAxis — a time ruler is one ruler, and a second axis would spend a
+  band of plot height restating the first. \`labels\` is the chart's own
+  tick-to-label map (built beside the ticks, because a formatter sees one
+  value at a time and cannot know its neighbour's day); anything not in it
+  falls back to the plain hour so a degenerate chart still labels itself.
+*/
+function TimeTick({ x, y, payload, labels, tz }) {
+  const v = payload && payload.value;
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  const at = (labels && labels.get(v)) || { top: tzTime(v, tz || "UTC"), sub: null };
+  return (
+    <g transform={"translate(" + x + "," + y + ")"}>
+      <text dy={10} textAnchor="middle" fill="var(--faint)" fontSize={11}>{at.top}</text>
+      {at.sub ? (
+        <text dy={23} textAnchor="middle" fill="var(--faint)" fontSize={9.5}>{at.sub}</text>
+      ) : null}
+    </g>
+  );
+}
+
+// \`units\` maps a dataKey to its own unit, for a dual-axis chart whose sides
+// measure different things; absent, every row wears the chart's one unit.
+// \`tz\` is the display timezone; absent, UTC — and the short zone name rides
+// beside the clock, because a time with no zone on it is a number, not a time.
+function ChartTip({ active, payload, label, unit, units, tz }) {
   if (!active || !payload || !payload.length) return null;
+  const zone = tz || "UTC";
   return (
     <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
       <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
-        {new Date(label).toISOString().slice(11, 16)}Z
+        {tzTime(label, zone)} {tzShort(label, zone)}
       </div>
       {payload.map((p) => (
         <div key={p.dataKey} style={{ color: "var(--ink)" }}>
@@ -686,7 +857,7 @@ function ChartTip({ active, payload, label, unit }) {
             the rule.
           */}
           <span style={{ color: p.stroke && p.stroke !== "var(--surface)" ? p.stroke : p.fill }}>■ </span>
-          {p.name}: <strong>{p.value == null ? "—" : Number(p.value).toFixed(2)}</strong> {unit}
+          {p.name}: <strong>{p.value == null ? "—" : Number(p.value).toFixed(2)}</strong> {(units && units[p.dataKey]) || unit}
         </div>
       ))}
     </div>
@@ -792,6 +963,11 @@ export function composeApp(input: ComponentSpec[]): string {
     return `${PREAMBLE}
 
 export default function App() {
+  // Stamped by buildDocument for thumbnails and previews. A thumbnail is
+  // looked at, not arranged, so the drop-target demo out there was an
+  // animation performing to nobody — a preview of an empty page just says so.
+  const bare = typeof window !== "undefined" && window.__dryosBare;
+
   return (
     <div
       style={{
@@ -804,11 +980,13 @@ export default function App() {
         position: "relative",
       }}
     >
-      {/* The ground: a slow wash of the accent, well under the threshold of
-          being noticed, so the surface reads as live rather than blank. */}
+      {/* The ground: a wash of the accent, well under the threshold of being
+          noticed, so the surface reads as live rather than blank. It drifts
+          only in the editor — a preview is a postcard, and a postcard that
+          moves is a bug report. */}
       <div
         aria-hidden
-        className="dr-drift"
+        className={bare ? undefined : "dr-drift"}
         style={{
           background:
             "radial-gradient(60% 55% at 50% 42%, color-mix(in oklab, var(--accent) 14%, transparent), transparent 70%)," +
@@ -818,57 +996,66 @@ export default function App() {
         }}
       />
 
-      <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 14, position: "relative" }}>
-        {/* The slot, and the component landing in it. */}
-        <div
-          className="dr-slot"
-          style={{
-            alignItems: "center",
-            border: "1px dashed var(--line-strong)",
-            borderRadius: 10,
-            display: "flex",
-            height: 104,
-            justifyContent: "center",
-            width: 168,
-          }}
-        >
+      {bare ? (
+        /* Sized for the thumbnail it lives in: the frame renders at 250% and
+           is scaled to 0.4, so anything under ~32px out there is lint. */
+        <p style={{ color: "var(--muted)", fontSize: 40, fontWeight: 500, letterSpacing: "-0.02em", margin: 0, position: "relative" }}>
+          Nothing here yet
+        </p>
+      ) : (
+        <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 14, position: "relative" }}>
+          {/* The slot, and the component landing in it on a loop — the
+              gesture performed, faster than the sentence below reads. */}
           <div
-            className="dr-drop"
+            className="dr-slot"
             style={{
               alignItems: "center",
-              background: "var(--surface)",
-              border: "1px solid var(--accent)",
-              borderRadius: 8,
-              boxShadow: "0 8px 24px rgba(0,0,0,.28)",
+              border: "1px dashed var(--line-strong)",
+              borderRadius: 10,
               display: "flex",
-              height: 76,
+              height: 104,
               justifyContent: "center",
-              width: 140,
+              width: 168,
             }}
           >
-            <svg width="104" height="40" viewBox="0 0 104 40" fill="none" aria-hidden>
-              <polyline
-                points="4,30 20,22 34,26 50,10 66,18 82,6 100,14"
-                stroke="var(--s1)"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <polyline
-                points="4,36 20,33 34,34 50,27 66,31 82,24 100,29"
-                stroke="var(--s2)"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <div
+              className="dr-drop"
+              style={{
+                alignItems: "center",
+                background: "var(--surface)",
+                border: "1px solid var(--accent)",
+                borderRadius: 8,
+                boxShadow: "0 8px 24px rgba(0,0,0,.28)",
+                display: "flex",
+                height: 76,
+                justifyContent: "center",
+                width: 140,
+              }}
+            >
+              <svg width="104" height="40" viewBox="0 0 104 40" fill="none" aria-hidden>
+                <polyline
+                  points="4,30 20,22 34,26 50,10 66,18 82,6 100,14"
+                  stroke="var(--s1)"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <polyline
+                  points="4,36 20,33 34,34 50,27 66,31 82,24 100,29"
+                  stroke="var(--s2)"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
           </div>
-        </div>
 
-        <p style={{ color: "var(--muted)", fontSize: 12.5, margin: 0 }}>
-          Pick data, then drag a component here
-        </p>
-      </div>
+          <p style={{ color: "var(--muted)", fontSize: 12.5, margin: 0 }}>
+            Pick data, then drag a component here
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -969,7 +1156,20 @@ export default function App() {
     `        // centred on the cursor rather than by a corner.`,
     `        drag.current = { index: null, w: m.w, h: m.h, offX: (m.w * stride - GRID_GAP) / 2, offY: m.h / 2 };`,
     `        const at = propose(m.x, m.y);`,
-    `        if (at) parent.postMessage({ __dryos: "spot", x: at.x, y: at.y }, "*");`,
+    `        // The ghost's own rectangle rides along in frame pixels, so the`,
+    `        // host can float the live preview of the incoming tile exactly`,
+    `        // where the drop will put it — a dashed box says where, but the`,
+    `        // component itself already exists in the panel and showing it is`,
+    `        // strictly more answer.`,
+    `        if (at) {`,
+    `          const track = (r.width - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS;`,
+    `          parent.postMessage({ __dryos: "spot", x: at.x, y: at.y, rect: {`,
+    `            left: r.left + at.x * (track + GRID_GAP),`,
+    `            top: r.top + at.y,`,
+    `            width: track * m.w + (m.w - 1) * GRID_GAP,`,
+    `            height: m.h,`,
+    `          } }, "*");`,
+    `        }`,
     `      } else if (m.__dryos === "placed") {`,
     `        setPlacing(true);`,
     `      } else if (m.__dryos === "dragend") {`,

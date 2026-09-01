@@ -15,7 +15,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
 
   const preview = new URL(req.url).searchParams.get("preview") === "1";
 
-  return new Response(buildDocument(`/api/workspace/templates/${slug}/script`, { preview }), {
+  return new Response(buildDocument(`/api/workspace/templates/${slug}/script`, { preview, bare: preview }), {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 }

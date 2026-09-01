@@ -98,6 +98,12 @@ export interface Schema {
    */
   entityColumn?: string;
   /**
+   * The IANA timezone the source itself operates in — what "source time"
+   * means for this stream. Declared only where the domain default is wrong;
+   * see `sourceTzOf` for the defaults and the reasoning.
+   */
+  sourceTz?: string;
+  /**
    * Entities a fan-out must leave behind: the aggregate rows the source
    * publishes alongside the parts. Stacking TOTAL on top of the zones it sums
    * counts everything twice.
@@ -400,6 +406,9 @@ export const SCHEMAS: Schema[] = [
       label: "settlement points",
       sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
     },
+    // Same settlement points as the SCED LMP, same absence of published
+    // coordinates — so the map invents them, marked mock.
+    mockLocations: true,
     blurb:
       "The 15-minute price settlement actually uses, every ERCOT settlement point — the SCED LMP plus price adders. Collected from ERCOT MIS (NP6-905).",
     maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
@@ -457,6 +466,9 @@ export const SCHEMAS: Schema[] = [
       label: "electrical buses",
       sample: ["ADICKS__138C", "0001DUPV1_", "0001HWFG1"],
     },
+    // ERCOT publishes no coordinates for these, so the map invents them.
+    mockLocations: true,
+    entityColumn: "bus",
     blurb:
       "Bus-level prices under the settlement points: ~19,000 electrical buses from every SCED run. The heaviest feed ERCOT publishes. Collected from ERCOT MIS (NP6-787).",
     maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
@@ -485,6 +497,9 @@ export const SCHEMAS: Schema[] = [
       label: "settlement points",
       sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
     },
+    // Same settlement points as the SCED LMP, same absence of published
+    // coordinates — so the map invents them, marked mock.
+    mockLocations: true,
     blurb:
       "Where real-time prices are about to go: RTD's forward intervals for every settlement point, republished each run with every vintage kept. Collected from ERCOT MIS (NP6-970).",
     maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
@@ -1586,6 +1601,16 @@ export interface DataRef {
   tokens: number;
   /** The call an app would make. Handed to the build agent, not shown as text. */
   snippet: string;
+  /**
+   * A stream-level reference narrowed to named entities — "the hubs", "all
+   * matching austin". Made only in the explorer, by an explicit select-all
+   * over a filtered view: the entities are enumerated at selection time, so
+   * the chip says exactly what was made and every consumer reads it
+   * literally — no shape reinterprets a selection. Absent, a schema-level
+   * reference still means the whole stream (the fan-out rule), and an entity
+   * reference stays its own kind.
+   */
+  subset?: { label: string; entities: string[] };
 }
 
 export function makeRef(
@@ -1686,6 +1711,21 @@ export function catalogRefs(): DataRef[] {
  */
 export function domainOf(schema: Schema): string {
   return schema.path[0];
+}
+
+/**
+ * What "source time" means for a stream.
+ *
+ * ERCOT publishes, settles and talks in US Central — its operating day is a
+ * Central day, and the heatmap already bucketed there long before this
+ * existed — so the Energy domain defaults to America/Chicago. Weather sources
+ * (NWS, Open-Meteo) publish in UTC. A stream whose source disagrees with its
+ * domain declares `sourceTz` and wins.
+ */
+export function sourceTzOf(schema: Schema): string {
+  return (
+    schema.sourceTz ?? (domainOf(schema) === "Energy" ? "America/Chicago" : "UTC")
+  );
 }
 
 export function categoryOf(schema: Schema): string {
@@ -1824,6 +1864,52 @@ export function usdLabel(dollars: number): string {
  * is the answer's shape. The sublabel leads with the variable key because that
  * is where `components.ts` reads the column from.
  */
+/**
+ * A stream-level reference: the whole stream, or an explicit subset of it.
+ *
+ * The whole-stream form is the fan-out chip the catalogue already hands out —
+ * this makes it reachable from the set view, where the big streams live and
+ * one click on the card cannot say "all 1,118". The subset form is select-all
+ * over a filtered view: one chip, its entities enumerated (and sorted, so the
+ * same selection made twice is the same chip and toggles itself off), sent
+ * server-side as the query's node filter. A map draws it as one layer; a
+ * chart fans it out over exactly those entities.
+ *
+ * The sublabel leads with the variable key because that is where
+ * `components.ts` reads the column from — same contract as `entityRef`.
+ */
+export function streamRef(
+  schema: Schema,
+  varKey?: string,
+  subset?: { label: string; entities: string[] },
+): DataRef {
+  const v =
+    schema.variables.find((x) => x.key === varKey) ?? schema.variables[0];
+  const target = schema.dataset ?? schema.id;
+  const entities = subset
+    ? [...subset.entities].sort()
+    : undefined;
+  return {
+    kind: "schema",
+    schemaId: schema.id,
+    path: pathLabel(schema),
+    label: subset ? `${schema.name} · ${subset.label}` : schema.name,
+    sublabel: `${v?.key ?? "value"} · ${
+      entities
+        ? `${entities.length} of ${entityCountLabel(schema)}`
+        : `all ${entityCountLabel(schema)}`
+    }`,
+    availability: schema.availability,
+    cadence: schema.cadence.label,
+    cadenceSeconds: schema.cadence.seconds,
+    tokens: schema.tokens,
+    snippet: entities
+      ? `dryos.query({ dataset: ${JSON.stringify(target)}, node: ${JSON.stringify(entities)}, start: "-24h" })`
+      : querySnippet(schema),
+    ...(entities && subset ? { subset: { label: subset.label, entities } } : {}),
+  };
+}
+
 export function entityRef(schema: Schema, node: string, varKey?: string): DataRef {
   const v =
     schema.variables.find((x) => x.key === varKey) ?? schema.variables[0];

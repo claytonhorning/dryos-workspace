@@ -55,7 +55,6 @@ export function SpaceCard({
                   <div key={p.id} className="relative flex-1 overflow-hidden bg-code">
                     <Thumbnail
                       src={`/api/workspace/apps/${p.id}/bundle/${p.updatedAt}`}
-                      label={false}
                     />
                   </div>
                 ))}

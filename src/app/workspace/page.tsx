@@ -106,8 +106,14 @@ export default function WorkspacePage() {
     // A new workspace's one page is empty, and nobody makes one in order to
     // look at nothing — so it opens in edit mode, the same way a new page
     // does. A community set lands launched: those pages have something to see.
+    // A blank one also arrives with its name armed in the nav (`?name=1`) —
+    // the subject is the one thing already in your head when you press
+    // Create, and "New workspace" names nothing. Typing over the selected
+    // default or ignoring it are both one gesture.
     const blank = slugs.length === 1 && slugs[0] === "compose";
-    router.push(`/workspace/${made.space.id}/${first}${blank ? "?edit=1" : ""}`);
+    router.push(
+      `/workspace/${made.space.id}/${first}${blank ? "?edit=1&name=1" : ""}`,
+    );
   }
 
   const grid = "grid gap-3 sm:grid-cols-2 lg:grid-cols-3";

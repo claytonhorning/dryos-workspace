@@ -42,7 +42,7 @@ export async function POST(
   if (!app)
     return NextResponse.json({ error: "No such screen." }, { status: 404 });
 
-  const { intent, refs, component, options, custom, layout, replaceAt } =
+  const { intent, refs, component, options, custom, layout, replaceAt, model, effort } =
     (await req.json()) as {
       intent?: string;
       refs?: DataRef[];
@@ -54,6 +54,9 @@ export async function POST(
       layout?: { x?: number; y?: number; w: number; h: number };
       /** Reconfigure the tile at this index instead of adding a new one. */
       replaceAt?: number;
+      /** The composer's picks — validated in models.ts, not here. */
+      model?: string;
+      effort?: string;
     };
 
   const said = intent?.trim() ?? "";
@@ -229,6 +232,8 @@ export async function POST(
       intent: request,
       refs: chosen,
       seed,
+      model,
+      effort,
       onEvent: send,
     });
 

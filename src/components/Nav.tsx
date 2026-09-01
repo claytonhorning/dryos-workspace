@@ -38,7 +38,12 @@ export function Nav() {
       {marketing ? (
         <MarketingNav pathname={pathname} />
       ) : inside ? (
-        <SpaceNav spaceId={inside[1]} pageId={inside[2]} editMode={search.get("edit") === "1"} />
+        <SpaceNav
+          spaceId={inside[1]}
+          pageId={inside[2]}
+          editMode={search.get("edit") === "1"}
+          naming={search.get("name") === "1"}
+        />
       ) : (
         <AppNav pathname={pathname} />
       )}

@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wordmark } from "@/components/Logo";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import type { AppSummary } from "@/lib/workspace/types";
 import { cx } from "@/components/ui";
 import { useSelectOnMount } from "@/lib/useSelectOnMount";
 import { AccountButton } from "./AccountButton";
+import { TimeSelect } from "./TimeSelect";
 import { UsageDock } from "@/components/workspace/UsageDock";
 
 /**
@@ -33,11 +33,22 @@ export function SpaceNav({
   spaceId,
   pageId,
   editMode,
+  naming,
 }: {
   spaceId: string;
   pageId?: string;
   /** Whether the open page is being edited. Lives in the URL, not in state. */
   editMode?: boolean;
+  /**
+   * The workspace just came into being, so its name arrives armed — the
+   * Finder new-folder moment, in the nav. From the URL (`?name=1`, appended
+   * by the create flow) like every other mode, and stripped on the first
+   * commit or Escape. This never turns the name into a rename control:
+   * clicking the name still navigates, always — the field only ever
+   * *arrives* editing, and renaming later still lives on the workspace's
+   * own page.
+   */
+  naming?: boolean;
 }) {
   const router = useRouter();
   const [space, setSpace] = useState<Space | null>(null);
@@ -46,9 +57,28 @@ export function SpaceNav({
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const nameField = useSelectOnMount();
+  /** The workspace-name draft while `naming`; null means untouched. */
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const spaceNameField = useSelectOnMount();
   /** The tab being dragged, and the gap it is currently over. */
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  /**
+   * Whether the open page has nothing on it yet, announced by the page
+   * (`dryos:blank`). While a blank page is being edited the Edit control
+   * hides entirely: "Done" is a claim that something was done, and the only
+   * thing it could do here is close the panel the page is built from.
+   */
+  const [blank, setBlank] = useState(false);
+
+  useEffect(() => {
+    const h = (e: Event) => setBlank(Boolean((e as CustomEvent).detail));
+    window.addEventListener("dryos:blank", h);
+    return () => window.removeEventListener("dryos:blank", h);
+  }, []);
+
+  // The flag belongs to the open page; switching tabs clears it.
+  useEffect(() => setBlank(false), [pageId]);
 
   useEffect(() => {
     let live = true;
@@ -121,6 +151,33 @@ export function SpaceNav({
     });
   }
 
+  /** Put `?name=1` away — the arming is single-shot either way it ends. */
+  function disarmNaming() {
+    const qs = new URLSearchParams(window.location.search);
+    qs.delete("name");
+    const s = qs.toString();
+    router.replace(`${window.location.pathname}${s ? `?${s}` : ""}`, {
+      scroll: false,
+    });
+  }
+
+  /*
+    Commit whatever was typed, or nothing. Escape clears the draft *before*
+    disarming, so the blur that follows finds an empty draft and keeps the
+    default — no cancelled flag to carry, the order is the guard.
+  */
+  async function commitSpaceName() {
+    const next = (nameDraft ?? "").trim();
+    disarmNaming();
+    if (!space || !next || next === space.name) return;
+    setSpace({ ...space, name: next });
+    await fetch(`/api/workspace/spaces/${spaceId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: next }),
+    });
+  }
+
   async function renamePage(id: string) {
     setEditing(null);
     const name = draft.trim();
@@ -164,7 +221,25 @@ export function SpaceNav({
 
         <span className="flex items-center text-line-strong">/</span>
 
-        {space ? (
+        {space && naming ? (
+          <input
+            ref={spaceNameField}
+            value={nameDraft ?? space.name}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={() => void commitSpaceName()}
+            onKeyDown={(e) => {
+              // Enter commits through the blur, so there is one exit path.
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                setNameDraft(null);
+                disarmNaming();
+              }
+            }}
+            aria-label="Name this workspace"
+            size={Math.max(8, (nameDraft ?? space.name).length)}
+            className="my-auto shrink-0 rounded border border-line-strong bg-surface-2 px-1.5 py-1 text-[13.5px] font-medium text-ink outline-none"
+          />
+        ) : space ? (
           <Link
             href={`/workspace/${spaceId}`}
             title="All pages in this workspace"
@@ -317,7 +392,7 @@ export function SpaceNav({
           because the mode is in the URL, so it survives a reload and can be
           sent to someone.
         */}
-        {pageId && (
+        {pageId && !(editMode && blank) && (
           <Link
             href={`/workspace/${spaceId}/${pageId}${editMode ? "" : "?edit=1"}`}
             aria-label={editMode ? "Done editing" : "Edit this page"}
@@ -351,7 +426,8 @@ export function SpaceNav({
             already there in both modes.
           */}
           <UsageDock spaceId={spaceId} placement="nav" />
-          <ThemeToggle />
+          {/* Which clock the data reads in — source time, or a zone of yours. */}
+          <TimeSelect />
           <AccountButton />
         </div>
       </div>

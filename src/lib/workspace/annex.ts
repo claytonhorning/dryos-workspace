@@ -33,6 +33,7 @@ const SLOT = "{/* dryos:annex-slot */}";
 
 /** Helpers the generated runtime defines, renamed so they cannot collide. */
 const HELPERS = [
+  "DRAG_BLANK",
   "useSeries",
   "useMapbox",
   "useFrameTheme",
@@ -47,6 +48,15 @@ const HELPERS = [
   "tileLanding",
   "Ghost",
   "ChartTip",
+  "TimeTick",
+  "useTz",
+  "tzParts",
+  "tzTime",
+  "tzDate",
+  "tzDayKey",
+  "tzOffsetMs",
+  "tzShort",
+  "__tzFmt",
 ];
 
 /** Recharts components a generated or refined section may render. */

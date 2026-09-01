@@ -37,7 +37,7 @@ export function CommunityStarter({
           <div className="flex w-[24%] flex-col gap-px">
             {rest.slice(0, 2).map((t) => (
               <div key={t.slug} className="relative flex-1 overflow-hidden bg-code">
-                <Thumbnail src={`/api/workspace/templates/${t.slug}/bundle`} label={false} />
+                <Thumbnail src={`/api/workspace/templates/${t.slug}/bundle`} />
               </div>
             ))}
           </div>

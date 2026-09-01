@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { Wordmark } from "@/components/Logo";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { AccountButton } from "./AccountButton";
+import { TimeSelect } from "./TimeSelect";
 import { UsageDock } from "@/components/workspace/UsageDock";
 import { MobileStrip, NavLink, Shell } from "./shared";
 
@@ -50,7 +50,8 @@ export function AppNav({ pathname }: { pathname: string }) {
           placement="nav"
           spaceId={pathname.match(/^\/workspace\/([^/]+)$/)?.[1]}
         />
-        <ThemeToggle />
+        {/* Which clock the data reads in — source time, or a zone of yours. */}
+        <TimeSelect />
         <AccountButton />
       </div>
     </Shell>

@@ -13,6 +13,7 @@ import { ScreenSkeleton } from "@/components/Skeleton";
 import { type DataRef } from "@/lib/workspace/catalog";
 import {
   BuildPanel,
+  DRAG_TYPE,
   type EditorStart,
   type TrayPayload,
 } from "@/components/workspace/BuildPanel";
@@ -20,8 +21,16 @@ import { ComponentEditor } from "@/components/workspace/ComponentEditor";
 import { ChatDock } from "@/components/workspace/ChatDock";
 import { CommunityStrip } from "@/components/workspace/CommunityStrip";
 import { FeedsPanel } from "@/components/workspace/FeedsPanel";
-import { componentDef, GRID, type ComponentSpec } from "@/lib/workspace/components";
+import {
+  componentDef,
+  DEFAULT_LAYOUT,
+  GRID,
+  type ComponentSpec,
+} from "@/lib/workspace/components";
 import { readNdjson } from "@/lib/workspace/ndjson";
+import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
+import { useTheme } from "@/lib/useTheme";
+import { useTimeZone } from "@/lib/useTimeZone";
 import type { App, AppSummary } from "@/lib/workspace/types";
 
 /**
@@ -154,11 +163,10 @@ export default function AppPage() {
     The time cursor, read from the URL the way edit mode is — one answer, it
     survives a reload, and it can be sent to someone.
 
-    It is still the *page's* instant even though the only control for it now
-    lives on a map: every frame is told the same value, so two tiles cannot
-    disagree about when they are. What changed is that there is no longer a
-    second control in the chrome — a screen with no map simply has no scrubber,
-    which is honest, because nothing on it was time-varying enough to want one.
+    Nothing in the product sets it any more — the map's scrubber went
+    tile-local, holding its own instant and rewriting only its own queries —
+    so ?t= is the shared-link form of an instant: pasted in, every frame is
+    told the same value and the whole screen answers for that moment together.
   */
   const urlCursor = search.get("t");
   const [scrubbing, setScrubbing] = useState<string | null>(null);
@@ -166,15 +174,15 @@ export default function AppPage() {
   const cursor = scrubbing ?? urlCursor;
 
   /*
-    A tile asked to move the cursor — the scrubber on a map.
+    A tile asked to move the page's cursor.
 
-    Applied here rather than in the frame, because the instant belongs to the
-    page: a tile that set it locally would put its own map at 14:00 beside a
-    chart still at now, which is the whole thing the cursor exists to prevent.
-    So the frame posts an intent, this sets the value, and every frame including
-    the one that asked is told the answer on the way back.
+    Nothing generated posts this today — the map's scrubber is tile-local now,
+    deliberately, because moving every other tile on the screen to answer a
+    question about one map read as breakage rather than coherence. The intent
+    path stays because the runtime still exposes setCursor: the frame posts,
+    this sets the value, and every frame is told the answer on the way back.
 
-    Live locally, debounced to the URL. A map scrubber fires continuously and a
+    Live locally, debounced to the URL. A scrubber fires continuously and a
     `router.replace` per pixel would re-render the route across the gesture; the
     only position worth putting in an address bar is the one it settles on.
   */
@@ -301,6 +309,12 @@ export default function AppPage() {
     here", and closed, there is nowhere to pick data from. Steered through the
     URL rather than a state override — edit mode stays derived from one place,
     and the navbar's pencil, the skeleton and the frame all keep agreeing.
+
+    This pairs with the `dryos:blank` event below: while the page is empty the
+    nav shows no Done button, so the mode being unleavable is invisible rather
+    than a button that snaps straight back. Both halves are needed — the force
+    alone made Done a lie, and hiding Done alone left a blank page opening
+    onto a canvas with no panel to build it from.
   */
   useEffect(() => {
     if (!asideOpen && app?.manifest?.length === 0) {
@@ -308,7 +322,21 @@ export default function AppPage() {
       qs.set("edit", "1");
       router.replace(`?${qs}`, { scroll: false });
     }
-  }, [asideOpen, app?.manifest?.length, router, search]);
+  }, [asideOpen, app, router, search]);
+
+  /*
+    Whether the page has anything on it yet, for the nav — "Done" on a page
+    with nothing done is a claim, so the nav hides it until the first tile
+    lands. An event, like the saved and busy marks: the nav and the page share
+    no parent below the layout.
+  */
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("dryos:blank", {
+        detail: app ? app.manifest?.length === 0 : false,
+      }),
+    );
+  }, [app]);
 
   const onRuntimeError = useCallback((m: string) => setRuntimeError(m), []);
 
@@ -400,10 +428,9 @@ export default function AppPage() {
     [dragging, pending, id, attached],
   );
 
-  /** Add a component built in the editor, at the end of the dashboard. */
-  const addSpec = useCallback(
-    async (spec: ComponentSpec) => {
-      setEditing(null);
+  /** POST one spec at the page — into a slot, or appended under everything. */
+  const placeSpec = useCallback(
+    async (spec: ComponentSpec, at?: number) => {
       setPending(true);
       setError(null);
       try {
@@ -416,7 +443,7 @@ export default function AppPage() {
             custom: spec.custom,
             layout: spec.layout,
             refs: spec.refs,
-            replaceAt: replaceIndex ?? undefined,
+            replaceAt: at,
           }),
         });
         const ct = res.headers.get("content-type");
@@ -435,11 +462,84 @@ export default function AppPage() {
         });
       } finally {
         setPending(false);
+      }
+    },
+    [id],
+  );
+
+  /** Add a component built in the editor, at the end of the dashboard. */
+  const addSpec = useCallback(
+    async (spec: ComponentSpec) => {
+      setEditing(null);
+      try {
+        await placeSpec(spec, replaceIndex ?? undefined);
+      } finally {
         setReplaceIndex(null);
       }
     },
-    [id, replaceIndex],
+    [placeSpec, replaceIndex],
   );
+
+  /**
+   * A copy of the tile being edited, staged over the canvas.
+   *
+   * Clicking Duplicate creates nothing yet. The copy hovers over a dimmed
+   * canvas as the thing to pick up — appending it sight-unseen landed it
+   * below the fold, which read as the button doing nothing — and grabbing it
+   * enters the same drag-ghost-drop that places everything else, so the drop
+   * says where and the compile gate runs then. Letting go anywhere it does
+   * not land, Escape, or a click on the scrim all cost nothing, because
+   * nothing was made. What floats is the spec as the editor currently shows
+   * it, unsaved edits included, at the original tile's size.
+   */
+  const [dupe, setDupe] = useState<TrayPayload | null>(null);
+  const dupeFrame = usePreviewHost();
+  const theme = useTheme();
+  const tzPref = useTimeZone();
+
+  const duplicateSpec = useCallback(
+    (spec: ComponentSpec) => {
+      const orig =
+        replaceIndex != null ? app?.manifest?.[replaceIndex]?.layout : undefined;
+      const size = orig ?? spec.layout ?? DEFAULT_LAYOUT[spec.kind];
+      setDupe({
+        kind: spec.kind,
+        options: spec.options,
+        custom: spec.custom,
+        refs: spec.refs,
+        layout: { w: size.w, h: size.h },
+      });
+    },
+    [replaceIndex, app],
+  );
+
+  /*
+    The live preview of whatever is in flight, for the canvas to float at the
+    ghost's own rectangle — the incoming component where the drop will put
+    it, not a dashed box standing in for it. Stable for the length of a drag,
+    so the frame mounts once and only moves.
+  */
+  const dropPreviewUrl = dragging
+    ? `/api/workspace/preview?bare=1&theme=${theme}&tz=${encodeURIComponent(tzPref)}&spec=${encodeURIComponent(
+        JSON.stringify({
+          kind: dragging.kind,
+          options: dragging.options,
+          custom: dragging.custom,
+          refs: dragging.refs ?? attached,
+          layout: { w: 12, h: dragging.layout.h },
+        }),
+      )}`
+    : undefined;
+
+  // Escape puts the staged copy away — but not mid-drag: the browser's own
+  // Escape cancels the drag, and unmounting the source there would kill the
+  // dragend that cleans up. The card's own handler covers that exit.
+  useEffect(() => {
+    if (!dupe || dragging) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDupe(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dupe, dragging]);
 
   /** Keep a component so it shows up on the shelf for the next dashboard too. */
   const saveSpec = useCallback(async (spec: ComponentSpec) => {
@@ -606,6 +706,7 @@ export default function AppPage() {
               onError={onRuntimeError}
               dropping={Boolean(dragging)}
               dropSize={dragging?.layout}
+              dropPreview={dropPreviewUrl}
               onDropAt={place}
               placing={pending}
               onResize={resize}
@@ -622,6 +723,81 @@ export default function AppPage() {
               cursor={cursor}
               onCursor={moveCursor}
             />
+
+            {/*
+              The staged duplicate: the copy hovering over a dimmed canvas,
+              waiting to be picked up. Hidden rather than unmounted once
+              grabbed — removing a drag's source element mid-drag cancels the
+              drag — and with pointer events off so the positions fall through
+              to the sheet that forwards them into the frame. The scrim is the
+              cancel: clicking it, or Escape, puts the copy away unmade.
+            */}
+            {dupe && (
+              <div
+                className={cx(
+                  "absolute inset-0 z-20",
+                  dragging && "pointer-events-none",
+                )}
+                onClick={() => !dragging && setDupe(null)}
+              >
+                <div
+                  className={cx(
+                    "absolute inset-0 rounded bg-bg/60 backdrop-blur-[2px] transition-opacity",
+                    dragging ? "opacity-0" : "opacity-100",
+                  )}
+                />
+                <div className="relative flex h-full items-center justify-center">
+                  <div
+                    draggable
+                    onClick={(e) => e.stopPropagation()}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(DRAG_TYPE, "1");
+                      e.dataTransfer.effectAllowed = "copy";
+                      /*
+                        Deferred a tick on purpose. Setting `dragging` here
+                        restyles this very element (the card hides once
+                        grabbed), and Chrome cancels a drag whose source is
+                        restyled in the dragstart tick — the grab died in the
+                        hand and the overlay just snapped back. After the
+                        browser has taken its drag snapshot, hiding is safe.
+                      */
+                      const payload = dupe;
+                      setTimeout(() => beginDrag(payload), 0);
+                    }}
+                    onDragEnd={() => {
+                      setDupe(null);
+                      beginDrag(null);
+                    }}
+                    title="Drag onto the screen to place the copy"
+                    className={cx(
+                      "relative w-[340px] cursor-grab overflow-hidden rounded-md border border-accent bg-code shadow-2xl shadow-black/50 active:cursor-grabbing",
+                      dragging && "opacity-0",
+                    )}
+                  >
+                    <iframe
+                      ref={dupeFrame}
+                      src={`/api/workspace/preview?bare=1&theme=${theme}&tz=${encodeURIComponent(tzPref)}&spec=${encodeURIComponent(
+                        JSON.stringify({
+                          kind: dupe.kind,
+                          options: dupe.options,
+                          custom: dupe.custom,
+                          refs: dupe.refs ?? [],
+                          layout: { w: 12, h: 168 },
+                        }),
+                      )}`}
+                      sandbox="allow-scripts"
+                      title="The copy being placed"
+                      className="pointer-events-none h-44 w-full border-0"
+                    />
+                    <div className="absolute inset-0 flex items-start justify-start p-1.5">
+                      <span className="pointer-events-none rounded border border-accent-line bg-surface/85 px-1.5 py-[2px] font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase backdrop-blur">
+                        ⠿ grab to place the copy
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {runtimeError && (
@@ -713,7 +889,6 @@ export default function AppPage() {
                   key={`${replaceIndex ?? "new"}:${editing.name ?? editing.def.kind}`}
                   def={editing.def}
                   refs={editing.refs}
-                  initialAsk={editing.ask}
                   initialName={editing.name}
                   initialOptions={editing.options}
                   initialCode={editing.custom?.code}
@@ -723,6 +898,9 @@ export default function AppPage() {
                   }}
                   onAdd={addSpec}
                   onSave={saveSpec}
+                  // Only a tile has a size and settings worth copying; the
+                  // create path's copy is "Add to dashboard" itself.
+                  onDuplicate={replaceIndex === null ? undefined : duplicateSpec}
                   // Only a tile can be deleted, and only a tile has a slot to
                   // put a change back into — so the same fact decides both.
                   onDelete={

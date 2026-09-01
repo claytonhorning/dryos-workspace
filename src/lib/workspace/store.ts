@@ -28,23 +28,32 @@ async function db() {
 
 export async function listApps(): Promise<AppSummary[]> {
   const supabase = await db();
+  // `app_summaries` computes these fields in Postgres (security_invoker, so the
+  // apps table's RLS still decides what exists). Selecting `data` here shipped
+  // every app's full source and revision history — most of a megabyte for a
+  // shelf that renders eight fields per card — on every list, and the list is
+  // under every space operation.
   const { data } = await supabase
-    .from("apps")
-    .select("data")
+    .from("app_summaries")
+    .select("id, name, template, updatedAt, revisions, authors, forkedFrom, sharedBy")
     .order("updated_at", { ascending: false });
-  return (data ?? []).map(({ data }) => {
-    const app = data as App;
-    return {
-      id: app.id,
-      name: app.name,
-      template: app.template,
-      updatedAt: app.updatedAt,
-      revisions: app.history.length,
-      authors: [...new Set(app.history.map((r) => r.author))],
-      forkedFrom: app.forkedFrom,
-      sharedBy: app.sharedBy,
-    };
-  });
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    name: r.name as string,
+    template: r.template as string,
+    updatedAt: r.updatedAt as number,
+    revisions: r.revisions as number,
+    authors: (r.authors ?? []) as string[],
+    forkedFrom: (r.forkedFrom ?? undefined) as AppSummary["forkedFrom"],
+    sharedBy: (r.sharedBy ?? undefined) as AppSummary["sharedBy"],
+  }));
+}
+
+/** Just the ids — all the orphan sweep needs to know about the store. */
+export async function listAppIds(): Promise<string[]> {
+  const supabase = await db();
+  const { data } = await supabase.from("apps").select("id");
+  return (data ?? []).map((r) => r.id as string);
 }
 
 /**
