@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useMemo,
   useState,
   type DragEvent,
   type ReactNode,
@@ -12,11 +13,18 @@ import { Select } from "@/components/Select";
 import {
   COMPONENTS,
   DEFAULT_LAYOUT,
+  GRID,
   type ComponentDef,
   type ComponentKind,
+  type ComponentSpec,
   withDefaults,
 } from "@/lib/workspace/components";
 import { type DataRef } from "@/lib/workspace/catalog";
+import {
+  communityComponents,
+  communityGroups,
+  type PublishedGroup,
+} from "@/lib/workspace/community";
 import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
 import { useTimeZone } from "@/lib/useTimeZone";
 import { SeriesStyles } from "@/components/workspace/SeriesStyles";
@@ -24,19 +32,30 @@ import { SeriesStyles } from "@/components/workspace/SeriesStyles";
 /**
  * The shelf of things a screen can be built from, and the preview of one.
  *
- * The shelf is the base shapes. It used to carry your saved components and the
- * community's published ones too; the community moved to the strip under the
- * canvas (`CommunityStrip`), where starting from somebody's finished decision
- * is the first thing offered rather than the last section of a column.
+ * It renders one of two shelves, chosen by the page. **Shapes** is the base
+ * shapes, offered or refused on the strength of the explorer's selection —
+ * the second step of building from data. **Community** is what was published
+ * (`lib/workspace/community.ts`): single components and wired groups of them,
+ * each bringing its own data and ignoring the selection entirely, which is
+ * why the page offers it *before* the explorer rather than after it. A
+ * published component previews and drags like a shape; a published group
+ * opens as its members in stacking order, with the wiring written on the
+ * rows, and drags as one drop the way a staged group does from the wires
+ * strip. Your saved components are not on the shelf today.
  *
- * **A card is not draggable, and only the preview is.** One gesture used to
- * mean two things: dragging a card placed the shape sight-unseen at its
- * defaults, while clicking it opened the real thing. Judging a component from
- * its name is the guess the inline preview exists to remove, so the shelf does
- * one job — click a card and the component runs on live data in the shelf's own
- * place, the pane taking one state or the other — and the thing you drag onto
- * the page is the thing you are looking at. What lands is what you saw,
- * settings and all, which is not something a card could ever promise.
+ * **A card is not draggable; the bar above the running preview is.** One
+ * gesture used to mean two things: dragging a card placed the shape
+ * sight-unseen at its defaults, while clicking it opened the real thing.
+ * Judging a component from its name is the guess the inline preview exists to
+ * remove, so the shelf does one job — click a card and the component runs on
+ * live data in the shelf's own place, the pane taking one state or the other —
+ * and what you drag out is the thing you are looking at. What lands is what
+ * you saw, settings and all, which is not something a card could ever promise.
+ *
+ * The handle is a strip above the frame rather than the frame itself, because
+ * an iframe cannot hand a drag to its host: catching one meant a sheet over
+ * the component, and a sheet over the component meant a map that would not pan
+ * and a chart that would not hover. See PreviewPane.
  *
  * The sentence for the thing no shape covers is not here either: the chat
  * lives under the screen (`ChatDock`), because it is a request about the
@@ -46,6 +65,42 @@ import { SeriesStyles } from "@/components/workspace/SeriesStyles";
  * once and the only remaining question is what to do with it.
  */
 export const DRAG_TYPE = "application/x-dryos-component";
+
+/**
+ * The palette slots a wire may wear, and slot 1 is not one of them.
+ *
+ * Slot 1 is the accent, and the accent is the app talking about itself —
+ * selection, focus, the drop boundary, every chip that says "wired". A pair
+ * outlined in it on the launched screen is indistinguishable from chrome, and
+ * in edit mode it is indistinguishable from the tile you have open. The seven
+ * left are still the validated set, so nothing about colour-vision safety
+ * changes; a wire saved with slot 1 before this still draws as it was, and
+ * cycling moves it into the seven and cannot bring it back.
+ *
+ * Here rather than in the wires strip because both places hand a group to
+ * the canvas, and the strip already imports from this file.
+ */
+export const WIRE_SLOTS = [2, 3, 4, 5, 6, 7, 8];
+
+/** The one after this, around the seven. */
+export function nextWireSlot(slot?: number): number {
+  const i = slot === undefined ? -1 : WIRE_SLOTS.indexOf(slot);
+  return WIRE_SLOTS[(i + 1) % WIRE_SLOTS.length];
+}
+
+/**
+ * How many wired groups a manifest holds — one per tile that something
+ * follows. The next group to land takes the slot after them, so two groups
+ * never arrive wearing the same color by default.
+ */
+export function wiredGroupCount(manifest?: ComponentSpec[]): number {
+  const sources = new Set<number>();
+  (manifest ?? []).forEach((s) => {
+    const n = Number(s.options?.follow);
+    if (Number.isInteger(n) && n >= 0 && manifest?.[n]) sources.add(n);
+  });
+  return sources.size;
+}
 
 /** Turned down once, per machine — the same place the panel width lives. */
 const HINTS_KEY = "dryos:hints";
@@ -68,8 +123,32 @@ const HINT_DELAY = 4000;
  * worst case *is* its tile height, and padding it to the chart's budget only
  * framed a small card in dead space. It previews at the height it lands at.
  */
+/**
+ * The grab bar above a placeable preview. A row, not a chip on the widget —
+ * see PreviewPane — and its height is added to the box rather than taken out
+ * of the component's own budget.
+ */
+export const GRAB_BAR = 22;
+
 export function previewLayout(kind: ComponentKind) {
-  return { w: 12, h: kind === "ticker" ? DEFAULT_LAYOUT.ticker.h : 272 };
+  return {
+    w: 12,
+    h: kind === "ticker" ? DEFAULT_LAYOUT.ticker.h : 272,
+  };
+}
+
+/**
+ * One member of a staged group: a whole component, plus who it follows.
+ * `wireTo` is group-relative — the server resolves it to a manifest slot at
+ * placement, because only the server knows where the group will sit.
+ */
+export interface StagedComponent {
+  kind: ComponentKind;
+  options?: Record<string, string>;
+  custom?: { name: string; code: string };
+  refs?: DataRef[];
+  layout: { w: number; h: number };
+  wireTo?: number;
 }
 
 export interface TrayPayload {
@@ -78,6 +157,12 @@ export interface TrayPayload {
   custom?: { name: string; code: string };
   refs?: DataRef[];
   layout: { w: number; h: number };
+  /**
+   * Several tiles travelling as one drop, stacked in list order. When set,
+   * the singular fields above are only the ghost's footprint — the members
+   * are what land.
+   */
+  group?: StagedComponent[];
   /**
    * The preview box as it was on screen when the drag began, in CSS pixels.
    * The page converts it through the canvas's own scale into columns and
@@ -105,6 +190,9 @@ export interface EditorStart {
 /** Which shelf a card came from. It decides how the preview addresses it. */
 type Shelf = "base" | "saved" | "community";
 
+/** Which of the two shelves the panel is showing. */
+export type ShelfTab = "shapes" | "community";
+
 /**
  * The component running in the shelf's place.
  *
@@ -126,18 +214,39 @@ interface Preview {
 export function BuildPanel({
   refs,
   onDragStateChange,
+  manifest,
+  shelf = "shapes",
 }: {
   refs: DataRef[];
   onDragStateChange: (payload: TrayPayload | null) => void;
+  /** The page's manifest, so a landing group takes the next free wire color. */
+  manifest?: ComponentSpec[];
+  /** Which shelf to show. The page decides, from its own tabs. */
+  shelf?: ShelfTab;
 }) {
+  const tab = shelf;
+  /**
+   * A published group, open in the shelf's place. It is not a `Preview`: a
+   * group has no single frame to run, so it opens as its members listed in
+   * stacking order and the whole list is the drag handle.
+   */
+  const [group, setGroup] = useState<PublishedGroup | null>(null);
+  // Rebuilt from today's catalogue on every read, which is cheap and is the
+  // point — a recipe is a stream and a shape, never a frozen chip.
+  const published = useMemo(() => communityComponents(), []);
+  const groups = useMemo(() => communityGroups(), []);
   /**
    * The component being previewed, in the shelf's own place. Clicking a card
    * runs the real thing — the preview route composes a one-tile app on live
    * data — with its settings above it, so judging a component never means
    * leaving the panel, and switching cards switches the preview.
    */
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [previewOpts, setPreviewOpts] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<Preview | null>(
+    null,
+  );
+  const [previewOpts, setPreviewOpts] = useState<
+    Record<string, string>
+  >({});
   /**
    * The hint in the corner: shown only after a preview has sat there long
    * enough to mean somebody is looking at it and has not worked out that it
@@ -159,7 +268,9 @@ export function BuildPanel({
 
   useEffect(() => {
     try {
-      setHintsOff(localStorage.getItem(HINTS_KEY) === "off");
+      setHintsOff(
+        localStorage.getItem(HINTS_KEY) === "off",
+      );
     } catch {
       // A machine that will not keep the flag still gets the hint.
       setHintsOff(false);
@@ -171,7 +282,9 @@ export function BuildPanel({
     it. Only the ticker does this today: everything else that cannot take the
     selection has a reason worth reading, and greying carries the reason.
   */
-  const offered = COMPONENTS.filter((c) => c.offered?.(refs) ?? true);
+  const offered = COMPONENTS.filter(
+    (c) => c.offered?.(refs) ?? true,
+  );
   /** A stable identity for that list — the array itself is new every render. */
   const offeredKey = offered.map((c) => c.kind).join("|");
 
@@ -187,7 +300,9 @@ export function BuildPanel({
       ? refs
       : preview.refs
     : [];
-  const verdict = preview ? preview.def.accepts(previewRefs) : null;
+  const verdict = preview
+    ? preview.def.accepts(previewRefs)
+    : null;
   const previewLive = Boolean(verdict?.ok);
 
   // A shape the selection has moved past is gone from the shelf, so leaving its
@@ -219,13 +334,56 @@ export function BuildPanel({
     preview?.shelf === shelf && preview.id === id;
 
   /** Clicking the open card puts the preview away; any other card swaps it. */
-  function show(next: Preview, options: Record<string, string>) {
+  function show(
+    next: Preview,
+    options: Record<string, string>,
+  ) {
+    setGroup(null);
     if (isOpen(next.shelf, next.id)) {
       setPreview(null);
       return;
     }
     setPreview(next);
     setPreviewOpts(options);
+  }
+
+  /** Same gesture for a group: the open one closes, any other one opens. */
+  function showGroup(next: PublishedGroup) {
+    setPreview(null);
+    setGroup((cur) => (cur?.id === next.id ? null : next));
+  }
+
+  /**
+   * A published group leaves as one drop, exactly the way a staged group
+   * leaves the wires strip: the members are what land, the singular fields
+   * are only the ghost's footprint, and every follower wears the next unused
+   * wire color so the pair is told apart from the groups already on the page.
+   */
+  function grabGroup(e: DragEvent, g: PublishedGroup) {
+    e.dataTransfer.setData(DRAG_TYPE, "1");
+    e.dataTransfer.effectAllowed = "copy";
+    const color = String(
+      WIRE_SLOTS[wiredGroupCount(manifest) % WIRE_SLOTS.length],
+    );
+    onDragStateChange({
+      kind: g.members[0].kind,
+      layout: {
+        w: Math.max(...g.members.map((m) => m.layout.w)),
+        h:
+          g.members.reduce((a, m) => a + m.layout.h, 0) +
+          (g.members.length - 1) * GRID.gap,
+      },
+      group: g.members.map((m) => ({
+        kind: m.kind,
+        refs: m.refs,
+        layout: m.layout,
+        wireTo: m.wireTo,
+        options:
+          m.wireTo !== undefined
+            ? { ...(m.options ?? {}), wireColor: color }
+            : m.options,
+      })),
+    });
   }
 
   /**
@@ -241,7 +399,14 @@ export function BuildPanel({
     options: Record<string, string>,
     on: DataRef[],
   ): string {
-    const q = new URLSearchParams({ bare: "1", tz: tzPref });
+    // `naked`: the widget and nothing else. The pane is short, the shelf above
+    // already says what this is, and a legend, a scrubber and a title bar are
+    // most of a 260px box.
+    const q = new URLSearchParams({
+      bare: "1",
+      naked: "1",
+      tz: tzPref,
+    });
     if (p.shelf === "base") {
       q.set(
         "spec",
@@ -253,7 +418,10 @@ export function BuildPanel({
         }),
       );
     } else {
-      q.set(p.shelf === "saved" ? "component" : "community", p.id);
+      q.set(
+        p.shelf === "saved" ? "component" : "community",
+        p.id,
+      );
       q.set("options", JSON.stringify(options));
       q.set("w", String(previewLayout(p.def.kind).w));
       q.set("h", String(previewLayout(p.def.kind).h));
@@ -275,30 +443,29 @@ export function BuildPanel({
         control in the same place the heading was.
       */}
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
-        {preview ? (
+        {preview || group ? (
           <>
             <button
-              onClick={() => setPreview(null)}
+              onClick={() => {
+                setPreview(null);
+                setGroup(null);
+              }}
               className="-ml-1 shrink-0 rounded px-1 font-mono text-[10px] tracking-[0.14em] text-faint uppercase transition-colors hover:text-ink"
             >
-              ‹ Components
+              ‹ {tab === "shapes" ? "Shapes" : "Community"}
             </button>
             <span className="ml-auto truncate font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-              {preview.name}
+              {preview ? preview.name : group?.name}
             </span>
           </>
         ) : (
-          <>
-            {/*
-              The heading alone. The instruction that used to sit beside it said
-              the same thing as the note on the Components section one line
-              below, and the section is where somebody is actually looking when
-              they need it.
-            */}
-            <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
-              Build
-            </span>
-          </>
+          /*
+            The heading alone: the page's tab above already said which way
+            you are building, so the bar names the shelf and nothing else.
+          */
+          <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
+            {tab === "shapes" ? "Shapes" : "Community"}
+          </span>
         )}
       </div>
 
@@ -311,21 +478,29 @@ export function BuildPanel({
           tunable={tunable}
           options={previewOpts}
           onOption={(key, value) =>
-            setPreviewOpts((prev) => ({ ...prev, [key]: value }))
+            setPreviewOpts((prev) => ({
+              ...prev,
+              [key]: value,
+            }))
           }
-          src={previewSrc(preview, previewOpts, previewRefs)}
+          src={previewSrc(
+            preview,
+            previewOpts,
+            previewRefs,
+          )}
           frameKey={`${preview.shelf}:${preview.id}:${JSON.stringify(
             previewOpts,
           )}:${previewRefs.map((r) => r.schemaId + r.label).join("|")}`}
           frameRef={previewFrame}
-          onDragStart={(e) => {
+          onDragStart={(e, box) => {
             e.dataTransfer.setData(DRAG_TYPE, "1");
             e.dataTransfer.effectAllowed = "copy";
             setDragged(true);
             setHint(false);
             // What lands is what was being looked at — including its size, so
-            // the box is measured as the hand takes it.
-            const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            // the frame is measured as the hand takes it. The frame, not the
+            // box around it: the box also holds the grab bar, and a tile
+            // twenty-two pixels taller than the preview is not what was shown.
             onDragStateChange({
               kind: preview.def.kind,
               options: previewOpts,
@@ -337,44 +512,101 @@ export function BuildPanel({
           }}
           onDragEnd={() => onDragStateChange(null)}
         />
+      ) : group ? (
+        <GroupPane
+          group={group}
+          onDragStart={(e) => grabGroup(e, group)}
+          onDragEnd={() => onDragStateChange(null)}
+        />
+      ) : tab === "community" ? (
+        <>
+          {/* ── Published: components, then wired groups ─────────────────── */}
+          <div className="dr-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-2 pb-2">
+            <Section
+              title="Components"
+              note="each brings its own data"
+            >
+              {published.map((c) => {
+                const def = COMPONENTS.find((d) => d.kind === c.kind);
+                if (!def) return null;
+                return (
+                  <Card
+                    key={c.id}
+                    kind={c.kind}
+                    title={c.name}
+                    body={c.blurb}
+                    meta={c.author}
+                    enabled
+                    accent
+                    open={isOpen("community", c.id)}
+                    onOpen={() =>
+                      show(
+                        {
+                          id: c.id,
+                          shelf: "community",
+                          def,
+                          name: c.name,
+                          refs: c.refs,
+                          layout: c.layout ?? DEFAULT_LAYOUT[c.kind],
+                          custom: c.custom,
+                        },
+                        withDefaults(def, c.options),
+                      )
+                    }
+                  />
+                );
+              })}
+            </Section>
+            <Section
+              title="Wired groups"
+              note="several tiles that answer each other, one drop"
+            >
+              {groups.map((g) => (
+                <GroupCard
+                  key={g.id}
+                  group={g}
+                  onOpen={() => showGroup(g)}
+                />
+              ))}
+            </Section>
+          </div>
+        </>
       ) : (
         <>
-      {/* ── The shelf, in three sections ─────────────────────────────── */}
-      <div className="dr-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-2 pb-2">
-        <Section
-          title="Components"
-          note="click one to see it on your data"
-        >
-          {offered.map((c) => {
-            const v = c.accepts(refs);
-            return (
-              <Card
-                key={c.kind}
-                kind={c.kind}
-                title={c.name}
-                body={v.ok ? c.blurb : v.why!}
-                enabled={v.ok}
-                open={isOpen("base", c.kind)}
-                onOpen={() =>
-                  show(
-                    {
-                      id: c.kind,
-                      shelf: "base",
-                      def: c,
-                      name: c.name,
-                      refs,
-                      layout: DEFAULT_LAYOUT[c.kind],
-                    },
-                    withDefaults(c),
-                  )
-                }
-              />
-            );
-          })}
-        </Section>
-
-      </div>
-
+          {/* ── The base shapes ──────────────────────────────────────────── */}
+          <div className="dr-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-2 pb-2">
+            <Section
+              title="Components"
+              note="click one to see it on your data"
+            >
+              {offered.map((c) => {
+                const v = c.accepts(refs);
+                return (
+                  <Card
+                    key={c.kind}
+                    kind={c.kind}
+                    title={c.name}
+                    body={v.ok ? c.blurb : v.why!}
+                    enabled={v.ok}
+                    open={isOpen("base", c.kind)}
+                    onOpen={() =>
+                      show(
+                        {
+                          id: c.kind,
+                          shelf: "base",
+                          def: c,
+                          name: c.name,
+                          refs,
+                          layout: DEFAULT_LAYOUT[c.kind],
+                        },
+                        withDefaults(c),
+                      )
+                    }
+                  />
+                );
+              })}
+            </Section>
+          </div>
         </>
       )}
 
@@ -390,8 +622,9 @@ export function BuildPanel({
         >
           <div className="flex items-start gap-2">
             <p className="text-[12px] leading-snug text-ink">
-              Drag the preview onto the screen to place it. The cards behind it
-              only open it.
+              Drag the ⠿ bar above the preview onto the
+              screen to place it. The cards behind it only
+              open it.
             </p>
             <button
               onClick={() => setHint(false)}
@@ -465,8 +698,13 @@ export function PreviewPane({
   src: string;
   frameKey: string;
   frameRef: RefObject<HTMLIFrameElement | null>;
-  /** Present when the preview is the drag handle — the create path. */
-  onDragStart?: (e: DragEvent) => void;
+  /**
+   * Present when there is a drop to make — the create path. The handle is the
+   * bar above the frame, so the widget's own rectangle is passed in rather
+   * than read off `e.currentTarget`: what lands is the size of the thing that
+   * was being looked at, and the bar is not that thing.
+   */
+  onDragStart?: (e: DragEvent, box: DOMRect) => void;
   onDragEnd?: () => void;
   /**
    * An editable stand-in for the read-only layer list, for the map in an
@@ -488,7 +726,10 @@ export function PreviewPane({
               <Select
                 value={options[o.key] ?? o.fallback}
                 onChange={(v) => onOption(o.key, v)}
-                options={o.choices.map((ch) => ({ value: ch.value, label: ch.label }))}
+                options={o.choices.map((ch) => ({
+                  value: ch.value,
+                  label: ch.label,
+                }))}
                 size="sm"
               />
             </label>
@@ -496,7 +737,9 @@ export function PreviewPane({
         </div>
       )}
 
-      {!live && <p className="text-[11.5px] text-muted">{why}</p>}
+      {!live && (
+        <p className="text-[11.5px] text-muted">{why}</p>
+      )}
 
       {/*
         Between the settings and the preview: what the component is actually
@@ -504,7 +747,7 @@ export function PreviewPane({
         and a short panel is a normal combination.
 
         A map's references are layers rather than series — nothing per-row to
-        colour or dash, since the measure's own scale paints the points and
+        color or dash, since the measure's own scale paints the points and
         visibility and order live on the map's own legend — so it gets the list
         in the map's words instead.
 
@@ -520,7 +763,9 @@ export function PreviewPane({
               refs={refs}
               kind={def.kind}
               options={options}
-              onChange={(series) => onOption("series", series)}
+              onChange={(series) =>
+                onOption("series", series)
+              }
             />
           )}
         </div>
@@ -528,34 +773,64 @@ export function PreviewPane({
 
       {live && (
         <div
-          // The widget itself is the handle when there is a drop to make: what
-          // you drag is what lands, so the accent border belongs to the thing
-          // being carried rather than to a chip pointing at it, and it is the
-          // *only* handle — the cards behind it place nothing. Editing a tile
-          // has no drop to make, so there the box is only the preview.
-          {...(onDragStart
-            ? {
-                draggable: true,
-                onDragStart,
-                onDragEnd,
-                title: "Drag onto the page to place exactly what you see",
-              }
-            : {})}
           // At the bottom of the pane, under the settings and the series that
           // shape it — the controls read top to bottom into the thing they
           // produce, and the handle you drag out sits nearest the screen it is
           // dragged onto. `mt-auto` keeps it pinned there when what is above
-          // runs short. A fixed height, not the rest of the pane: the shape's
-          // own preview height (the chart's worst-case budget, the ticker's
-          // tile height) plus the generated grid's gutter.
+          // runs short. A fixed height, not the rest of the pane: exactly the
+          // shape's own preview height (the chart's worst-case budget, the
+          // ticker's tile height), plus the grab bar when there is one. No
+          // gutter — `naked` takes the document's padding and the tile's
+          // alike, so the widget reaches all four edges and a box any taller
+          // would be a band of empty ground under it.
           className={cx(
-            "relative mt-auto shrink-0 overflow-hidden rounded-md bg-code",
+            "mt-auto flex shrink-0 flex-col overflow-hidden rounded-md bg-code",
             onDragStart
-              ? "cursor-grab border border-accent active:cursor-grabbing"
+              ? "border border-accent"
               : "border border-line",
           )}
-          style={{ height: previewLayout(def.kind).h + 16 }}
+          style={{
+            height:
+              previewLayout(def.kind).h +
+              (onDragStart ? GRAB_BAR : 0),
+          }}
         >
+          {/*
+            The grab bar, and the reason it is a bar.
+
+            What you drag is still what lands, so the accent border belongs to
+            the whole box — but the *handle* cannot be the widget itself.
+            Pointer events do not cross into an iframe, so the drag used to be
+            caught by a transparent sheet over the frame, and that sheet
+            swallowed everything else with it: a map could not be panned or
+            zoomed, a chart could not be hovered, and the one label in the
+            panel sat on top of the thing it was labelling.
+
+            A strip above the frame is outside the component entirely. It is
+            the only drag source, the frame below it is live, and the box is
+            grown by the bar's own height rather than lending it the widget's.
+          */}
+          {onDragStart && (
+            <div
+              draggable
+              onDragStart={(e) => {
+                const box =
+                  frameRef.current?.getBoundingClientRect();
+                // No frame, no footprint — and a drag carrying no payload is
+                // one that ends in nothing landing. Refuse it instead.
+                if (!box) return e.preventDefault();
+                onDragStart(e, box);
+              }}
+              onDragEnd={onDragEnd}
+              title="Drag onto the page to place exactly what you see"
+              className="flex shrink-0 cursor-grab items-center gap-1.5 border-b border-accent-line bg-accent-dim px-2 font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase select-none active:cursor-grabbing"
+              style={{ height: GRAB_BAR }}
+            >
+              <span aria-hidden="true">⠿</span>
+              drag to place
+            </div>
+          )}
+
           <iframe
             ref={frameRef}
             // Keyed by the spec so a settings change reloads the real thing
@@ -566,25 +841,9 @@ export function PreviewPane({
             key={frameKey}
             src={src}
             sandbox="allow-scripts"
-            className="h-full w-full border-0"
+            className="w-full min-h-0 flex-1 border-0"
             title="Component preview"
           />
-          {/*
-            Pointer events do not cross into an iframe, so a drag started over
-            the frame would never reach this wrapper. A transparent sheet
-            catches it — and carries the one label in the panel, because the
-            shelf behind it does not answer a drag and something has to say
-            where the gesture moved to. Only while dragging is on offer: the
-            sheet also swallows hovers, and an editor preview that cannot be
-            hovered is not previewing the chart it claims to.
-          */}
-          {onDragStart && (
-            <div className="absolute inset-0 flex items-start justify-start p-1.5">
-              <span className="pointer-events-none rounded border border-accent-line bg-surface/85 px-1.5 py-[2px] font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase backdrop-blur">
-                ⠿ drag onto the screen
-              </span>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -595,7 +854,7 @@ export function PreviewPane({
  * A map's references, listed as the layers they become.
  *
  * The series list is wrong here twice over: nothing per-row is choosable (the
- * measure's declared scale colours the points, so a colour picker would be
+ * measure's declared scale colors the points, so a color picker would be
  * overridden by the data), and "series" is not what anyone calls a set of
  * things on a map. Visibility and draw order are decided on the map itself —
  * its legend is the layer switch — so this list only says what will be there.
@@ -613,7 +872,9 @@ function MapLayers({ refs }: { refs: DataRef[] }) {
       </div>
 
       {refs.length === 0 ? (
-        <p className="mt-1.5 text-[11.5px] text-muted">Nothing selected yet.</p>
+        <p className="mt-1.5 text-[11.5px] text-muted">
+          Nothing selected yet.
+        </p>
       ) : (
         <ul className="mt-1.5 flex flex-col gap-1">
           {refs.map((r) => (
@@ -628,8 +889,138 @@ function MapLayers({ refs }: { refs: DataRef[] }) {
       )}
 
       <p className="mt-1.5 font-mono text-[9.5px] leading-snug text-faint">
-        visibility and draw order are set on the map itself, in its legend
+        visibility and draw order are set on the map itself,
+        in its legend
       </p>
+    </div>
+  );
+}
+
+/**
+ * A published group on the shelf: its shapes in stacking order, and who
+ * published it. Same footprint and gesture as a component card; the glyphs
+ * in a row are what say "several" at a glance.
+ */
+function GroupCard({
+  group,
+  onOpen,
+}: {
+  group: PublishedGroup;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      title={group.blurb}
+      className="min-w-0 cursor-pointer rounded-md border border-accent-line/60 bg-surface-2 px-2.5 py-2 text-left transition-colors outline-none hover:border-accent-line focus-visible:border-accent-line"
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="flex shrink-0 items-center gap-0.5">
+          {group.members.map((m, i) => (
+            <Glyph key={i} kind={m.kind} on />
+          ))}
+        </span>
+        <span className="truncate text-[12px] font-medium text-ink">
+          {group.name}
+        </span>
+      </div>
+      <p className="mt-1 line-clamp-2 text-[10.5px] leading-snug text-faint">
+        {group.blurb}
+      </p>
+      <p className="mt-0.5 truncate font-mono text-[9px] tracking-[0.08em] text-faint uppercase">
+        {group.author} · ⌁ {group.members.length}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * A published group, open in the shelf's place.
+ *
+ * Names rather than live previews, for the reason the wires strip gives:
+ * N frames compiling to read a list is N compiles, and what is being judged
+ * here is which components in what order. The whole list is the drag handle
+ * — a group lands as one piece, so there is one thing to pick up.
+ */
+function GroupPane({
+  group,
+  onDragStart,
+  onDragEnd,
+}: {
+  group: PublishedGroup;
+  onDragStart: (e: DragEvent) => void;
+  onDragEnd: () => void;
+}) {
+  // The tile the others point at, if anything points at anything.
+  const source =
+    group.members.find((m) => m.wireTo !== undefined)?.wireTo ?? -1;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pt-2.5 pb-3">
+      <p className="text-[11.5px] leading-snug text-muted">{group.blurb}</p>
+      <div
+        draggable
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        title="Drag onto the screen to place the whole group"
+        className="dr-scroll mt-auto flex min-h-0 cursor-grab flex-col overflow-y-auto rounded-md border border-accent bg-accent-dim select-none active:cursor-grabbing"
+      >
+        <span
+          className="sticky top-0 flex shrink-0 items-center gap-1.5 border-b border-accent-line bg-accent-dim px-2 font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase"
+          style={{ height: GRAB_BAR }}
+        >
+          <span aria-hidden="true">⠿</span>
+          drag to place
+        </span>
+        <span className="flex flex-col gap-1 p-2">
+          {group.members.map((m, i) => {
+            const def = COMPONENTS.find((d) => d.kind === m.kind);
+            const data =
+              m.refs.map((r) => r.label).join(" · ") || "no data";
+            const isSource = i === source;
+            return (
+              <span
+                key={i}
+                className={cx(
+                  "flex items-center gap-2 rounded border px-2 py-1.5",
+                  isSource
+                    ? "border-accent-line bg-surface"
+                    : "border-line bg-surface",
+                )}
+              >
+                <Glyph kind={m.kind} on={isSource} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-[12px] font-medium text-ink">
+                      {def?.name ?? m.kind}
+                    </span>
+                    {isSource && (
+                      <span className="shrink-0 rounded border border-accent-line px-1 font-mono text-[9px] tracking-[0.08em] text-accent uppercase">
+                        source
+                      </span>
+                    )}
+                    {m.wireTo !== undefined && (
+                      <span className="shrink-0 rounded border border-accent-line bg-accent-dim px-1 font-mono text-[9px] tracking-[0.08em] text-accent uppercase">
+                        ⌁ follows {m.wireTo + 1}
+                      </span>
+                    )}
+                  </span>
+                  <span className="block truncate text-[10.5px] text-muted">
+                    {data}
+                  </span>
+                </span>
+              </span>
+            );
+          })}
+        </span>
+      </div>
     </div>
   );
 }
@@ -659,7 +1050,9 @@ function Section({
         their content (`auto-rows-min`) so a short section does not stretch its
         cards over the space a longer one would have used.
       */}
-      <div className="mt-1.5 grid auto-rows-min grid-cols-2 gap-2">{children}</div>
+      <div className="mt-1.5 grid auto-rows-min grid-cols-2 gap-2">
+        {children}
+      </div>
     </div>
   );
 }
@@ -719,7 +1112,10 @@ function Card({
         enabled
           ? "cursor-pointer bg-surface-2 hover:border-accent-line focus-visible:border-accent-line"
           : "cursor-not-allowed border-dashed border-line bg-surface-2 opacity-45",
-        enabled && (accent ? "border-accent-line/60" : "border-line"),
+        enabled &&
+          (accent
+            ? "border-accent-line/60"
+            : "border-line"),
         // The open card stays lit while its preview is below, so the two read
         // as one thing rather than as a card and an unrelated widget.
         open && "border-accent bg-accent-dim",
@@ -757,8 +1153,16 @@ function Card({
 }
 
 /** A shape for a shape. Drawn rather than lettered so the row scans at a glance. */
-function Glyph({ kind, on }: { kind: ComponentKind; on: boolean }) {
-  const stroke = on ? "var(--color-accent)" : "var(--color-muted)";
+function Glyph({
+  kind,
+  on,
+}: {
+  kind: ComponentKind;
+  on: boolean;
+}) {
+  const stroke = on
+    ? "var(--color-accent)"
+    : "var(--color-muted)";
   return (
     <svg
       width="13"
@@ -787,7 +1191,13 @@ function Glyph({ kind, on }: { kind: ComponentKind; on: boolean }) {
             [10.5, 6],
             [12, 3],
           ].map(([x, y]) => (
-            <circle key={`${x}-${y}`} cx={x} cy={y} r="1.1" fill={stroke} />
+            <circle
+              key={`${x}-${y}`}
+              cx={x}
+              cy={y}
+              r="1.1"
+              fill={stroke}
+            />
           ))}
         </>
       )}
@@ -803,16 +1213,40 @@ function Glyph({ kind, on }: { kind: ComponentKind; on: boolean }) {
       )}
       {kind === "bar" && (
         <>
-          <path d="M2.5 11.5 V7" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
-          <path d="M7 11.5 V2.5" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
-          <path d="M11.5 11.5 V5" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+          <path
+            d="M2.5 11.5 V7"
+            stroke={stroke}
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          <path
+            d="M7 11.5 V2.5"
+            stroke={stroke}
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          <path
+            d="M11.5 11.5 V5"
+            stroke={stroke}
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
         </>
       )}
       {kind === "heatmap" && (
         <>
           {[2, 6.5, 11].flatMap((x) =>
             [2, 6.5, 11].map((y) => (
-              <rect key={`${x}-${y}`} x={x} y={y - 1} width="3" height="3" rx="0.5" fill={stroke} opacity={(x + y) / 20} />
+              <rect
+                key={`${x}-${y}`}
+                x={x}
+                y={y - 1}
+                width="3"
+                height="3"
+                rx="0.5"
+                fill={stroke}
+                opacity={(x + y) / 20}
+              />
             )),
           )}
         </>
@@ -854,6 +1288,23 @@ function Glyph({ kind, on }: { kind: ComponentKind; on: boolean }) {
           />
         </>
       )}
+      {kind === "picker" && (
+        <>
+          <circle
+            cx="6"
+            cy="6"
+            r="3.8"
+            stroke={stroke}
+            strokeWidth="1.3"
+          />
+          <path
+            d="M8.8 8.8 L12.5 12.5"
+            stroke={stroke}
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+        </>
+      )}
       {kind === "map" && (
         <>
           <path
@@ -862,7 +1313,11 @@ function Glyph({ kind, on }: { kind: ComponentKind; on: boolean }) {
             strokeWidth="1.2"
             strokeLinejoin="round"
           />
-          <path d="M5 2 V10.5 M9 3.5 V12" stroke={stroke} strokeWidth="1.1" />
+          <path
+            d="M5 2 V10.5 M9 3.5 V12"
+            stroke={stroke}
+            strokeWidth="1.1"
+          />
         </>
       )}
     </svg>

@@ -20,6 +20,9 @@ export async function GET(req: Request) {
   // and should not bill one anyway. The editor omits it and gets live data.
   const preview = params.get("preview") === "1";
   const bare = params.get("bare") === "1";
+  // The build and edit preview panes: the widget alone, no tile chrome and no
+  // keys or controls of its own.
+  const naked = params.get("naked") === "1";
 
   // Everything else is the script route's business — an inline `spec`, or the
   // `component`/`community` id it resolves one from — so it is forwarded whole
@@ -27,9 +30,10 @@ export async function GET(req: Request) {
   const inner = new URLSearchParams(params);
   inner.delete("preview");
   inner.delete("bare");
+  inner.delete("naked");
 
   return new Response(
-    buildDocument(`/api/workspace/preview/script?${inner.toString()}`, { preview, bare }),
+    buildDocument(`/api/workspace/preview/script?${inner.toString()}`, { preview, bare, naked }),
     { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
   );
 }

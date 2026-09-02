@@ -279,7 +279,15 @@ export async function editApp(input: {
       .join("\n");
 
     const { code, note } = extract(text);
-    if (!code) return { error: "The model returned no code block." };
+    if (!code) {
+      // The model answered in words — a question got an answer, not a file.
+      // That answer IS the result; reporting "no code block" threw it away
+      // and made every question the agent was asked read as a failure.
+      const prose = text.replace(/```[\s\S]*?```/g, "").trim();
+      return {
+        error: prose ? prose.slice(0, 600) : "The model returned no code block.",
+      };
+    }
     if (note) emit({ type: "note", text: note });
 
     emit({ type: "phase", phase: "compiling" });
@@ -393,7 +401,15 @@ shown to the user as a one-line note — one short sentence, no preamble.
       .join("\n");
 
     const { code, note } = extract(text);
-    if (!code) return { error: "The model returned no code block." };
+    if (!code) {
+      // The model answered in words — a question got an answer, not a file.
+      // That answer IS the result; reporting "no code block" threw it away
+      // and made every question the agent was asked read as a failure.
+      const prose = text.replace(/```[\s\S]*?```/g, "").trim();
+      return {
+        error: prose ? prose.slice(0, 600) : "The model returned no code block.",
+      };
+    }
 
     emit({ type: "phase", phase: "compiling" });
     const built = await compile(input.compileWith(code));

@@ -30,6 +30,22 @@ export const PREAMBLE = `import React, { useEffect, useMemo, useRef, useState } 
  */
 
 /**
+ * The build and edit preview panes, where the widget is the only thing worth
+ * showing.
+ *
+ * Stamped by buildDocument alongside \`__dryosBare\`, and read anywhere a
+ * section would otherwise draw something that is not the widget: the tile's
+ * title and padding, a map's legend, its layer switch, its scrubber, a chart's
+ * series key. All of those earn their place on a dashboard, where the tile is
+ * as big as somebody made it; in a pane a few hundred pixels tall they are the
+ * majority of the box, and what is being judged is what is left.
+ *
+ * Provenance is the one exception — the MOCK badge stays, because a preview
+ * that reads as real is the same lie a launched tile would be telling.
+ */
+const NAKED = typeof window !== "undefined" && window.__dryosNaked;
+
+/**
  * One request per selection, polled together and kept in step.
  *
  * \`cursor\` is a tile-local instant (the map's scrubber). When set, every query
@@ -85,7 +101,10 @@ function useSeries(queries, refreshMs, cursor) {
       clearInterval(id);
       window.removeEventListener("dryos:cursor", load);
     };
-  }, [cursor]);
+    // Stringified because a wired tile (see \`followSnippet\`) swaps its
+    // queries when another tile's selection changes — the array is a new
+    // object each render, and the string is what says whether it changed.
+  }, [cursor, JSON.stringify(queries)]);
 
   return { rows, error, loading };
 }
@@ -322,6 +341,9 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
   const [picked, setPicked] = useState(null);
   // Stamped by buildDocument for previews: looking, not arranging.
   const bare = typeof window !== "undefined" && window.__dryosBare;
+  // ...and the preview panes, where even the title is a line the widget could
+  // have had instead.
+  const naked = NAKED;
   /* A tile is picked by clicking it, and only while the page is being edited —
      outside edit mode there is no panel for the settings to appear in, and a
      click that opens nothing is worse than a click that does nothing. */
@@ -388,6 +410,12 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
     const grid = slot ? slot.parentElement : parentEl;
     // One column, in pixels, from the grid the tile actually sits in.
     const col = (grid.clientWidth - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS;
+    // The canvas's own floor, same as tileLanding reads for a placement — a
+    // resize is a drag like any other and the ground rule is the same: nothing
+    // lands (or grows) past ground that isn't there yet. Read once, at grab
+    // time, so a tile growing into the strip below it does not chase its own
+    // shadow as the canvas would only grow back on drop.
+    const floor = grid.getBoundingClientRect().height;
     const me = slot ? { x: Number(slot.dataset.x), y: Number(slot.dataset.y) } : null;
     const others = slot
       ? tileRects(grid).filter((t) => t.index !== Number(slot.dataset.slot))
@@ -412,6 +440,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       let w = Math.max(2, Math.min(GRID_COLS, start.w + Math.round((ev.clientX - start.x) / (col + GRID_GAP))));
       let h = Math.max(120, Math.min(900, Math.round((start.h + (ev.clientY - start.y)) / GRID_SNAP) * GRID_SNAP));
       if (me) {
+        h = Math.min(h, floor - me.y);
         others.forEach((o) => {
           if (o.y >= me.y && o.x < me.x + start.w && me.x < o.x + o.w) h = Math.min(h, o.y - GRID_GAP - me.y);
         });
@@ -475,7 +504,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         background: "var(--surface)",
         // A preview is one component inside a box that already has a border;
         // drawing the tile's own inside it reads as a frame around a frame.
-        border: bare
+        border: bare || naked
           ? "none"
           : "1px solid " +
             (dragging || picked === index
@@ -496,7 +525,10 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         gridColumn: "span " + size.w,
         height: size.h,
         overflow: "hidden",
-        padding: 12,
+        // Naked, the box is the widget: no gutter, because the pane's own
+        // border is already the edge and twelve pixels inside it is twelve
+        // pixels of chart.
+        padding: naked ? 0 : 12,
         position: "relative",
       };
 
@@ -522,13 +554,18 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       }}
     >
       {/*
-        The whole header is the handle, the way a window is dragged by its
-        title bar. Dragging by the body would fight every chart underneath it
+        Naked, there is no header at all — not the handle, not the title. The
+        pane above already names what is being previewed, so the tile repeating
+        it costs a line and says nothing new.
+
+        Otherwise the whole header is the handle, the way a window is dragged by
+        its title bar. Dragging by the body would fight every chart underneath it
         for the same gesture, and the ⠿ glyph alone was a target a few pixels
         wide that had to be aimed at. The glyph stays as the cue that the bar
         is grabbable; the buttons in the bar cancel the drag so they stay pure
         clicks.
       */}
+      {!naked && (
       <header
         draggable={!bare && !full}
         onDragStart={(e) => {
@@ -634,6 +671,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
           </button>
         )}
       </header>
+      )}
 
       {/*
         The fill flag is for shapes that draw into their whole box — a chart or a
@@ -846,14 +884,14 @@ function ChartTip({ active, payload, label, unit, units, tz }) {
       {payload.map((p) => (
         <div key={p.dataKey} style={{ color: "var(--ink)" }}>
           {/*
-            The line's own colour, which is its stroke.
+            The line's own color, which is its stroke.
 
             Reading the fill first drew every one of these white: a recharts
             Line carries fill "#fff" by default and never paints it, so the
             marker that is supposed to say which line this is said nothing at
             all. The one case where the stroke is not the identity is a stacked
-            area — there the stroke is the surface-coloured hairline between
-            segments and the fill is the colour — so that is the exception, not
+            area — there the stroke is the surface-colored hairline between
+            segments and the fill is the color — so that is the exception, not
             the rule.
           */}
           <span style={{ color: p.stroke && p.stroke !== "var(--surface)" ? p.stroke : p.fill }}>■ </span>
@@ -900,17 +938,22 @@ const RECHARTS_ALL = [
  * the index, and the index is what a resize, a remove or a drag reports itself
  * as. Both are rewritten to the slot the component is actually landing in.
  */
-function renameSection(code: string, index: number): string {
-  return code
-    .replace(
-      /^function\s+([A-Za-z0-9_]+?)\d*\s*\(/m,
-      (_m, base) => `function ${base}${index}(`,
-    )
-    // Only the outer frame's own tag — a refinement may reorder its props, but
-    // it is still the first `<Section` in the file.
-    .replace(/<Section\b[^>]*>/, (tag) =>
-      tag.replace(/\bindex=\{\d+\}/, `index={${index}}`),
-    );
+function renameSection(
+  code: string,
+  index: number,
+): string {
+  return (
+    code
+      .replace(
+        /^function\s+([A-Za-z0-9_]+?)\d*\s*\(/m,
+        (_m, base) => `function ${base}${index}(`,
+      )
+      // Only the outer frame's own tag — a refinement may reorder its props, but
+      // it is still the first `<Section` in the file.
+      .replace(/<Section\b[^>]*>/, (tag) =>
+        tag.replace(/\bindex=\{\d+\}/, `index={${index}}`),
+      )
+  );
 }
 
 export function composeApp(input: ComponentSpec[]): string {
@@ -919,7 +962,12 @@ export function composeApp(input: ComponentSpec[]): string {
   // gave it — same wrap, same rows — so nothing on anyone's screen moves the
   // first time this runs.
   const manifest = packLayout(input);
-  const placed = manifest.map((spec) => spec.layout as Required<NonNullable<ComponentSpec["layout"]>>);
+  const placed = manifest.map(
+    (spec) =>
+      spec.layout as Required<
+        NonNullable<ComponentSpec["layout"]>
+      >,
+  );
 
   const sections = manifest
     .map((spec, i) => {
@@ -932,19 +980,26 @@ export function composeApp(input: ComponentSpec[]): string {
         };
       }
       const def = componentDef(spec.kind);
-      return def?.emit(spec.refs, i, withDefaults(def, spec.options));
+      return def?.emit(
+        spec.refs,
+        i,
+        withDefaults(def, spec.options),
+      );
     })
     .filter((e): e is NonNullable<typeof e> => Boolean(e));
 
-  const imports = [...new Set(sections.flatMap((s) => s.imports))].sort();
+  const imports = [
+    ...new Set(sections.flatMap((s) => s.imports)),
+  ].sort();
   const recharts = imports.length
     ? `import { ${imports.join(", ")} } from "recharts";\n`
     : "";
 
   const names = manifest.map((spec, i) => {
     const base = spec.custom
-      ? (/^function\s+([A-Za-z0-9_]+?)\d*\s*\(/m.exec(spec.custom.code)?.[1] ??
-        spec.kind)
+      ? (/^function\s+([A-Za-z0-9_]+?)\d*\s*\(/m.exec(
+          spec.custom.code,
+        )?.[1] ?? spec.kind)
       : spec.kind;
     return `${base[0].toUpperCase()}${base.slice(1)}${i}`;
   });
@@ -1062,6 +1117,29 @@ export default function App() {
 `;
   }
 
+  /*
+    Both ends of a wire wear the pair's color, as an outline on the slot —
+    outside edit mode only, where the border is information rather than
+    chrome competing with the editing furniture. The color is stored on the
+    receiver (`wireColor`, a palette slot so it steps with the theme; absent
+    means accent) and computed here because only the whole manifest knows
+    which tile is somebody's source. Validated to an integer before it is
+    written into TSX — anything else falls back to the accent.
+  */
+  const wireBorders: Record<number, string> = {};
+  manifest.forEach((spec, i) => {
+    const f = Number(spec.options?.follow);
+    if (!Number.isInteger(f) || f < 0 || !manifest[f])
+      return;
+    const slot = Number(spec.options?.wireColor);
+    const color =
+      Number.isInteger(slot) && slot >= 1 && slot <= 8
+        ? `var(--s${slot})`
+        : "var(--accent)";
+    wireBorders[i] = color;
+    wireBorders[f] = color;
+  });
+
   return [
     PREAMBLE.replace(
       'import React, { useEffect, useMemo, useRef, useState } from "react";\n',
@@ -1072,6 +1150,11 @@ export default function App() {
     "",
     `export default function App() {`,
     `  const grid = useRef(null);`,
+    `  // Which tiles are wired to which, worn as an outline outside edit mode.`,
+    `  const WIRE_BORDERS = ${JSON.stringify(wireBorders)};`,
+    `  // The page's own copy of the mode — Sections hold theirs for their`,
+    `  // chrome, and the wire outlines are drawn by the slots out here.`,
+    `  const [edit, setEdit] = useState(false);`,
     `  // Stamped by buildDocument for thumbnails and previews: looking, not`,
     `  // arranging, so no room is kept below the last tile to drop into.`,
     `  const bare = typeof window !== "undefined" && window.__dryosBare;`,
@@ -1082,7 +1165,8 @@ export default function App() {
     `  // makes moving one tile move exactly one tile.`,
     `  const [pos, setPos] = useState([`,
     ...placed.map(
-      (l) => `    { x: ${l.x}, y: ${l.y}, w: ${l.w}, h: ${l.h} },`,
+      (l) =>
+        `    { x: ${l.x}, y: ${l.y}, w: ${l.w}, h: ${l.h} },`,
     ),
     `  ]);`,
     `  // The tile in flight — a ref, because it changes on every dragover event`,
@@ -1102,7 +1186,10 @@ export default function App() {
     `  // Memoised so the elements keep their identity: a ghost tracking the`,
     `  // cursor must not re-render a dozen charts to move itself one column.`,
     `  const tiles = useMemo(() => [`,
-    ...names.map((n, i) => `    <${n} key={${i}} w={pos[${i}].w} h={pos[${i}].h} />,`),
+    ...names.map(
+      (n, i) =>
+        `    <${n} key={${i}} w={pos[${i}].w} h={pos[${i}].h} />,`,
+    ),
     `  ], [pos]);`,
     ``,
     `  // What a drop would do, and the preview of it. Refs only, so it is safe`,
@@ -1148,6 +1235,7 @@ export default function App() {
     `      const m = e.data;`,
     `      if (!m || typeof m !== "object") return;`,
     `      if (m.__dryos === "restore") setHidden(new Set());`,
+    `      if (m.__dryos === "mode") setEdit(Boolean(m.edit));`,
     `      if (m.__dryos === "dragover" && grid.current) {`,
     `        setPlacing(false);`,
     `        const r = grid.current.getBoundingClientRect();`,
@@ -1260,6 +1348,12 @@ export default function App() {
     `            position: "absolute",`,
     `            top: pos[i].y,`,
     `            width: gridW(pos[i].w),`,
+    // An outline, not a border: it costs the tile no layout, and it follows
+    // the slot's own radius. Launched only — while editing, the pairing is
+    // the wires pane's job and the border would fight the selection ring.
+    `            outline: !edit && WIRE_BORDERS[i] ? "1.5px solid " + WIRE_BORDERS[i] : undefined,`,
+    `            outlineOffset: -1,`,
+    `            borderRadius: 8,`,
     `          }}`,
     `        >`,
     `          {tile}`,
@@ -1277,7 +1371,10 @@ export default function App() {
 }
 
 /** "a chart of Total LMP and Actual load" — what the revision records. */
-export function describeComponent(kind: string, refs: DataRef[]): string {
+export function describeComponent(
+  kind: string,
+  refs: DataRef[],
+): string {
   const names = refs.map((r) => r.label);
   const list =
     names.length <= 1

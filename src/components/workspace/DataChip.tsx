@@ -1,7 +1,11 @@
 "use client";
 
 import { cx } from "@/components/ui";
-import { creditChip, type Availability, type DataRef } from "@/lib/workspace/catalog";
+import {
+  creditChip,
+  type Availability,
+  type DataRef,
+} from "@/lib/workspace/catalog";
 
 /**
  * How data looks wherever it is shown.
@@ -41,7 +45,9 @@ export function AvailabilityBadge({
       <span
         className={cx(
           "h-1 w-1 rounded-full",
-          availability === "live" ? "dr-pulse bg-accent" : "bg-info",
+          availability === "live"
+            ? "dr-pulse bg-accent"
+            : "bg-info",
         )}
       />
       {availability}
@@ -50,9 +56,20 @@ export function AvailabilityBadge({
 }
 
 /** Cadence and price — the two things you want before you wire something up. */
-export function RefMeta({ refr, className }: { refr: DataRef; className?: string }) {
+export function RefMeta({
+  refr,
+  className,
+}: {
+  refr: DataRef;
+  className?: string;
+}) {
   return (
-    <span className={cx("font-mono text-[9.5px] text-faint", className)}>
+    <span
+      className={cx(
+        "font-mono text-[9.5px] text-faint",
+        className,
+      )}
+    >
       {refr.cadence} · {creditChip(refr.tokens)}/query
     </span>
   );
@@ -95,7 +112,7 @@ export function MetaBadges({
  * One box in the explorer. Clicking it selects the reference for a change.
  *
  * Selection is shown with a filled ground and a tick rather than only a border
- * colour, because the unselected states already use border colour to carry
+ * color, because the unselected states already use border color to carry
  * live-versus-mock, and stacking two meanings on one channel makes both
  * unreadable at this size.
  */
@@ -123,7 +140,11 @@ export function DataChip({
       )}
     >
       <span className="flex items-center gap-1.5">
-        {selected && <span className="shrink-0 text-[10px] text-accent">✓</span>}
+        {selected && (
+          <span className="shrink-0 text-[10px] text-accent">
+            ✓
+          </span>
+        )}
         <span
           className={cx(
             "truncate font-mono text-[11px]",
@@ -133,13 +154,18 @@ export function DataChip({
           {refr.label}
         </span>
         {refr.availability === "mock" && (
-          <AvailabilityBadge availability="mock" className="ml-auto" />
+          <AvailabilityBadge
+            availability="mock"
+            className="ml-auto"
+          />
         )}
       </span>
       {/* No path line: the card sits under a group header that already says
           it, and a fact printed twice at this size is just a taller card. */}
       {refr.sublabel && (
-        <span className="truncate font-mono text-[9.5px] text-faint">{refr.sublabel}</span>
+        <span className="truncate font-mono text-[9.5px] text-faint">
+          {refr.sublabel}
+        </span>
       )}
       <MetaBadges cadence={refr.cadence} />
     </button>
@@ -182,12 +208,16 @@ export function AttachedChip({
           onRemove ? "pr-1" : "pr-2",
           refr.availability === "live"
             ? "border-accent-line bg-accent-dim text-accent"
-            : // A mock never wears the colour that means "this is real".
+            : // A mock never wears the color that means "this is real".
               "border-dashed border-info-line bg-surface-2 text-info",
         )}
       >
-        <span className="font-mono text-[11px]">{refr.label}</span>
-        {refr.availability === "mock" && <AvailabilityBadge availability="mock" />}
+        <span className="font-mono text-[11px]">
+          {refr.label}
+        </span>
+        {refr.availability === "mock" && (
+          <AvailabilityBadge availability="mock" />
+        )}
         {onRemove && (
           <button
             onClick={onRemove}
@@ -219,8 +249,12 @@ export function AttachedChip({
       */}
       <span className="flex min-w-0 flex-col leading-tight">
         <span className="flex items-center gap-1.5">
-          <span className="truncate font-mono text-[11px] text-ink">{refr.label}</span>
-          {refr.availability === "mock" && <AvailabilityBadge availability="mock" />}
+          <span className="truncate font-mono text-[11px] text-ink">
+            {refr.label}
+          </span>
+          {refr.availability === "mock" && (
+            <AvailabilityBadge availability="mock" />
+          )}
         </span>
         <RefMeta refr={refr} />
       </span>
@@ -266,7 +300,9 @@ export function SelectionStrip({
 }) {
   if (selected.length === 0) return null;
   return (
-    <div className={cx("flex items-center gap-2", className)}>
+    <div
+      className={cx("flex items-center gap-2", className)}
+    >
       {label && (
         <span className="shrink-0 font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
           {label}

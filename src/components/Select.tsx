@@ -5,7 +5,7 @@ import { cx } from "@/components/ui";
 
 /**
  * The app's dropdown. A native <select> paints its menu in the OS's own
- * colours — a rounded near-white sheet over an ink-blue panel — and nothing
+ * colors — a rounded near-white sheet over an ink-blue panel — and nothing
  * in CSS reaches it. This is the account menu's idiom instead: a trigger
  * styled like every other input, a panel `absolute top-full` inside a
  * `relative` wrapper, closed by an outside click or Escape.
@@ -57,14 +57,24 @@ export function Select({
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+      if (
+        root.current &&
+        !root.current.contains(e.target as Node)
+      )
+        setOpen(false);
     };
     document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
+    return () =>
+      document.removeEventListener("mousedown", away);
   }, [open]);
 
   const openAt = () => {
-    setActive(Math.max(0, options.findIndex((o) => o.value === value)));
+    setActive(
+      Math.max(
+        0,
+        options.findIndex((o) => o.value === value),
+      ),
+    );
     setOpen(true);
   };
 
@@ -75,7 +85,12 @@ export function Select({
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!open) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
+      if (
+        e.key === "ArrowDown" ||
+        e.key === "ArrowUp" ||
+        e.key === "Enter" ||
+        e.key === " "
+      ) {
         e.preventDefault();
         openAt();
       }
@@ -95,7 +110,11 @@ export function Select({
   };
 
   return (
-    <div ref={root} className={cx("relative", className)} onKeyDown={onKeyDown}>
+    <div
+      ref={root}
+      className={cx("relative", className)}
+      onKeyDown={onKeyDown}
+    >
       <button
         type="button"
         aria-label={ariaLabel}
@@ -108,16 +127,27 @@ export function Select({
           mono && "font-mono",
         )}
       >
-        <span className="min-w-0 flex-1 truncate">{current?.label ?? value}</span>
+        <span className="min-w-0 flex-1 truncate">
+          {current?.label ?? value}
+        </span>
         {/* Drawn, not the ▾ glyph: fonts disagree about its size and weight. */}
         <svg
           width="8"
           height="5"
           viewBox="0 0 8 5"
           aria-hidden
-          className={cx("shrink-0 text-faint transition-transform", open && "rotate-180")}
+          className={cx(
+            "shrink-0 text-faint transition-transform",
+            open && "rotate-180",
+          )}
         >
-          <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+          <path
+            d="M1 1l3 3 3-3"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            fill="none"
+            strokeLinecap="round"
+          />
         </svg>
       </button>
 
@@ -139,13 +169,22 @@ export function Select({
               onClick={() => pick(o.value)}
               className={cx(
                 "flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left whitespace-nowrap transition-colors",
-                size === "sm" ? "text-[11px]" : "text-[12.5px]",
+                size === "sm"
+                  ? "text-[11px]"
+                  : "text-[12.5px]",
                 mono && "font-mono",
-                i === active ? "bg-surface-2 text-ink" : "text-muted",
+                i === active
+                  ? "bg-surface-2 text-ink"
+                  : "text-muted",
               )}
             >
               {/* The tick reserves its column even unticked, so labels align. */}
-              <span className={cx("w-3 shrink-0 text-[10px] text-accent", o.value !== value && "opacity-0")}>
+              <span
+                className={cx(
+                  "w-3 shrink-0 text-[10px] text-accent",
+                  o.value !== value && "opacity-0",
+                )}
+              >
                 ✓
               </span>
               {o.label}

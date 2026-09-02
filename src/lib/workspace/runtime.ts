@@ -472,13 +472,24 @@ export async function compile(source: string): Promise<CompileResult> {
  */
 export function buildDocument(
   scriptUrl: string,
-  opts?: { preview?: boolean; bare?: boolean },
+  opts?: { preview?: boolean; bare?: boolean; naked?: boolean },
 ) {
   const shim = opts?.preview ? PREVIEW_SHIM : RUNTIME_SHIM;
   // A preview is for looking, not arranging: `bare` strips the tile chrome —
   // drag handle, resize corner, remove, configure, full-screen — so the
   // component fills its box and offers nothing that would not work here.
-  const bare = opts?.bare ? "<script>window.__dryosBare=true;</script>" : "";
+  //
+  // `naked` goes one step further, and only for the build and edit preview
+  // panes: the tile's own title, padding and border go too, along with the
+  // component's own keys and controls — legends, layer switches, scrubbers.
+  // The pane is a few hundred pixels tall and every one of those spent on
+  // chrome is a pixel the thing being judged does not get. It implies `bare`,
+  // because everything `bare` strips is a superset of nothing here.
+  const naked = Boolean(opts?.naked);
+  const bare =
+    opts?.bare || naked
+      ? `<script>window.__dryosBare=true;${naked ? "window.__dryosNaked=true;" : ""}</script>`
+      : "";
 
   // The one credential an app is handed, and only because of what it is: a
   // Mapbox public token is meant to be read by the browser drawing the map, and
@@ -493,7 +504,11 @@ export function buildDocument(
   // than one parameter is otherwise a run of would-be entity references.
   const src = scriptUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body><div id="root"></div>${bare}<script>${THEME_SHIM}</script><script>${shim}</script>${grant}<script src="${src}"></script></body></html>`;
+  // The document's own gutter goes with the tile's: naked, the widget is meant
+  // to reach the edges of the pane it is framed in.
+  const nakedCss = naked ? "#root{padding:0;min-height:0}" : "";
+
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}${nakedCss}</style></head><body><div id="root"></div>${bare}<script>${THEME_SHIM}</script><script>${shim}</script>${grant}<script src="${src}"></script></body></html>`;
 }
 
 /** Shown in place of the app when a revision will not build. */

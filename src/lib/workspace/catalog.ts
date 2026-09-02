@@ -27,14 +27,19 @@ export interface Variable {
   availability: Availability;
   description: string;
   /** Shape of the synthetic series. Absent on live variables — those are read. */
-  mock?: { base: number; swing: number; noise: number; floor?: number };
+  mock?: {
+    base: number;
+    swing: number;
+    noise: number;
+    floor?: number;
+  };
   /**
-   * Absolute colour breakpoints, so a colour means a value rather than a rank.
+   * Absolute color breakpoints, so a color means a value rather than a rank.
    *
-   * A map coloured from the min and max of whatever it just fetched restretches
+   * A map colored from the min and max of whatever it just fetched restretches
    * on every refresh: the same red marks $103 on a calm afternoon and $40 an
-   * hour later, which makes the colour uninterpretable and hides the thing you
-   * opened the map for. Declared stops fix a price to a colour for good.
+   * hour later, which makes the color uninterpretable and hides the thing you
+   * opened the map for. Declared stops fix a price to a color for good.
    *
    * Linear ramps also fail this data in a second way. Across one interval of
    * ERCOT prices, p1 is $16.68 and p99 is $50.33 while min and max span $136 —
@@ -77,7 +82,11 @@ export interface Schema {
    * ("1,118 entities"), so no stream has to invent a noun. Kept where it
    * exists for prose surfaces that still read it.
    */
-  entities: { count: number; label?: string; sample: string[] };
+  entities: {
+    count: number;
+    label?: string;
+    sample: string[];
+  };
   /**
    * The row column that names an entity, present when the stream is small
    * enough to fan out — a stream-level reference then means "all of it", and
@@ -208,18 +217,22 @@ export const SCHEMAS: Schema[] = [
     blurb:
       "Locational marginal prices from the latest SCED run, every ERCOT settlement point. " +
       "Collected from ERCOT MIS, reconciled against the source file.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 1) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 1),
+    },
     variables: [
       {
         key: "lmp_total",
         label: "Total LMP",
         unit: "$/MWh",
         availability: "live",
-        description: "The settled price. The only price field ERCOT populates.",
+        description:
+          "The settled price. The only price field ERCOT populates.",
         // Set from the distribution, not by eye — see the Variable.scale note.
         // p50 sits near $28 and p90 near $68 over a fortnight, >$100 is 4% of
         // readings and >$500 is half a percent. So the ramp is dense through
-        // the ordinary range and keeps its loudest colours for the exceptions,
+        // the ordinary range and keeps its loudest colors for the exceptions,
         // which is the whole point: a node at $100 has to be visible at a
         // glance, and it cannot be if $40 is already orange.
         scale: [
@@ -261,18 +274,22 @@ export const SCHEMAS: Schema[] = [
       "Hourly cleared prices from the day-ahead market for every ERCOT electrical bus, " +
       "posted once for the following day. Collected from ERCOT MIS (NP4-183), " +
       "reconciled against the source file.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "lmp",
         label: "Cleared price",
         unit: "$/MWh",
         availability: "live",
-        description: "Hourly day-ahead clearing price for the bus.",
+        description:
+          "Hourly day-ahead clearing price for the bus.",
         // Set from the distribution, not by eye — see the Variable.scale note.
         // p50 sits near $28 and p90 near $68 over a fortnight, >$100 is 4% of
         // readings and >$500 is half a percent. So the ramp is dense through
-        // the ordinary range and keeps its loudest colours for the exceptions,
+        // the ordinary range and keeps its loudest colors for the exceptions,
         // which is the whole point: a node at $100 has to be visible at a
         // glance, and it cannot be if $40 is already orange.
         scale: [
@@ -297,7 +314,10 @@ export const SCHEMAS: Schema[] = [
     availability: "live",
     // Hourly rows, but ERCOT posts the whole prior day each morning — the
     // cadence a chart should assume is the row cadence, not the publish one.
-    cadence: { label: "hourly, posted next day", seconds: 3_600 },
+    cadence: {
+      label: "hourly, posted next day",
+      seconds: 3_600,
+    },
     tokens: 0.5,
     entities: {
       count: 9,
@@ -310,16 +330,25 @@ export const SCHEMAS: Schema[] = [
       "Metered demand by weather zone, hourly, with ERCOT's own system total as " +
       "its own row. The denominator for scarcity. Collected from ERCOT MIS " +
       "(NP6-345), reconciled against the source file.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "load_mw",
         label: "Actual load",
         unit: "MW",
         availability: "live",
-        description: "Hourly average metered demand for the zone.",
+        description:
+          "Hourly average metered demand for the zone.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 9_400, swing: 3_100, noise: 220, floor: 0 },
+        mock: {
+          base: 9_400,
+          swing: 3_100,
+          noise: 220,
+          floor: 0,
+        },
       },
     ],
   },
@@ -329,7 +358,10 @@ export const SCHEMAS: Schema[] = [
     name: "Seven-day load forecast",
     dataset: "ercot-load-forecast-weather-zone",
     availability: "live",
-    cadence: { label: "hourly, 7 days ahead", seconds: 3_600 },
+    cadence: {
+      label: "hourly, 7 days ahead",
+      seconds: 3_600,
+    },
     tokens: 0.5,
     entities: {
       count: 9,
@@ -343,16 +375,25 @@ export const SCHEMAS: Schema[] = [
       "days out. Served as the newest view of each hour; every revision is " +
       "kept. Collected from ERCOT MIS (NP3-561), reconciled against the source " +
       "file.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "load_mw",
         label: "Forecast load",
         unit: "MW",
         availability: "live",
-        description: "Forecast hourly average load for the zone.",
+        description:
+          "Forecast hourly average load for the zone.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 9_400, swing: 3_000, noise: 90, floor: 0 },
+        mock: {
+          base: 9_400,
+          swing: 3_000,
+          noise: 90,
+          floor: 0,
+        },
       },
     ],
   },
@@ -375,7 +416,10 @@ export const SCHEMAS: Schema[] = [
       "actually setting the price. Collected from ERCOT's dashboard feed, which " +
       "retains two days — the history exists because this collector keeps " +
       "running.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "gen_mw",
@@ -386,7 +430,12 @@ export const SCHEMAS: Schema[] = [
           "Generation for the fuel type over the interval. Storage runs " +
           "negative while charging.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 6_200, swing: 4_800, noise: 300, floor: 0 },
+        mock: {
+          base: 6_200,
+          swing: 4_800,
+          noise: 300,
+          floor: 0,
+        },
       },
     ],
   },
@@ -411,14 +460,18 @@ export const SCHEMAS: Schema[] = [
     mockLocations: true,
     blurb:
       "The 15-minute price settlement actually uses, every ERCOT settlement point — the SCED LMP plus price adders. Collected from ERCOT MIS (NP6-905).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "spp",
         label: "Settlement price",
         unit: "$/MWh",
         availability: "live",
-        description: "The 15-minute settlement point price.",
+        description:
+          "The 15-minute settlement point price.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 30, swing: 12, noise: 3 },
       },
@@ -440,14 +493,18 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "Day-ahead hourly settlement point prices for every settlement point, posted once after the DAM run. Collected from ERCOT MIS (NP4-190).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "spp",
         label: "Cleared price",
         unit: "$/MWh",
         availability: "live",
-        description: "Hourly day-ahead settlement point price.",
+        description:
+          "Hourly day-ahead settlement point price.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 34, swing: 15, noise: 4 },
       },
@@ -471,14 +528,18 @@ export const SCHEMAS: Schema[] = [
     entityColumn: "bus",
     blurb:
       "Bus-level prices under the settlement points: ~19,000 electrical buses from every SCED run. The heaviest feed ERCOT publishes. Collected from ERCOT MIS (NP6-787).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "lmp",
         label: "Bus LMP",
         unit: "$/MWh",
         availability: "live",
-        description: "Capped bus-level price — the one settlement uses.",
+        description:
+          "Capped bus-level price — the one settlement uses.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 29, swing: 12, noise: 3.5 },
       },
@@ -490,7 +551,10 @@ export const SCHEMAS: Schema[] = [
     name: "Indicative LMPs (RTD look-ahead)",
     dataset: "ercot-indicative-lmp",
     availability: "live",
-    cadence: { label: "every 5 min, look-ahead", seconds: 300 },
+    cadence: {
+      label: "every 5 min, look-ahead",
+      seconds: 300,
+    },
     tokens: 1,
     entities: {
       count: 1118,
@@ -502,14 +566,18 @@ export const SCHEMAS: Schema[] = [
     mockLocations: true,
     blurb:
       "Where real-time prices are about to go: RTD's forward intervals for every settlement point, republished each run with every vintage kept. Collected from ERCOT MIS (NP6-970).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "lmp",
         label: "Indicative LMP",
         unit: "$/MWh",
         availability: "live",
-        description: "Forecast price for the forward interval.",
+        description:
+          "Forecast price for the forward interval.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 29, swing: 12, noise: 4 },
       },
@@ -530,14 +598,18 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "The system-wide marginal energy price from every SCED run — one number for what energy is worth in ERCOT right now. Collected from ERCOT MIS (NP6-322).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "system_lambda",
         label: "System lambda",
         unit: "$/MWh",
         availability: "live",
-        description: "Capped system-wide marginal energy price.",
+        description:
+          "Capped system-wide marginal energy price.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 27, swing: 11, noise: 3 },
       },
@@ -559,7 +631,10 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "The day-ahead hourly system-wide marginal energy price, posted once after the DAM run. Collected from ERCOT MIS (NP4-523).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "system_lambda",
@@ -588,14 +663,18 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "Every binding transmission constraint in the day-ahead market with its limit, cleared flow and shadow price — why nodal prices diverge from the lambda. Collected from ERCOT MIS (NP4-191).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "shadow_price",
         label: "Shadow price",
         unit: "$/MW",
         availability: "live",
-        description: "Marginal value of one more MW of headroom on the constraint.",
+        description:
+          "Marginal value of one more MW of headroom on the constraint.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 90, swing: 80, noise: 20, floor: 0 },
       },
@@ -606,7 +685,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "The binding limit, MW.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 400, swing: 250, noise: 10, floor: 0 },
+        mock: {
+          base: 400,
+          swing: 250,
+          noise: 10,
+          floor: 0,
+        },
       },
     ],
   },
@@ -626,14 +710,18 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "Cleared day-ahead purchase volumes per settlement point and hour — the quantity side of the DAM. Collected from ERCOT MIS (NP4-192).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "energy_mwh",
         label: "Energy bought",
         unit: "MWh",
         availability: "live",
-        description: "Total DAM energy bought at the point in the hour.",
+        description:
+          "Total DAM energy bought at the point in the hour.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 90, swing: 70, noise: 15, floor: 0 },
       },
@@ -655,14 +743,18 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "Cleared day-ahead sale volumes per settlement point and hour — the supply side of the DAM. Collected from ERCOT MIS (NP4-193).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "energy_mwh",
         label: "Energy sold",
         unit: "MWh",
         availability: "live",
-        description: "Total DAM energy sold at the point in the hour.",
+        description:
+          "Total DAM energy sold at the point in the hour.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 110, swing: 80, noise: 15, floor: 0 },
       },
@@ -685,7 +777,10 @@ export const SCHEMAS: Schema[] = [
     entityKey: "as_type",
     blurb:
       "Day-ahead hourly clearing prices for each ancillary service product. Collected from ERCOT MIS (NP4-188).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "mcpc",
@@ -714,14 +809,18 @@ export const SCHEMAS: Schema[] = [
     entityKey: "as_type",
     blurb:
       "Real-time capacity clearing prices per product from every SCED run — the RTC-era companion to the energy LMP. Collected from ERCOT MIS (NP6-332).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "mcpc",
         label: "Clearing price",
         unit: "$/MW",
         availability: "live",
-        description: "Capped real-time MCPC for the product.",
+        description:
+          "Capped real-time MCPC for the product.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 4, swing: 4, noise: 1, floor: 0 },
       },
@@ -743,14 +842,18 @@ export const SCHEMAS: Schema[] = [
     entityKey: "as_type",
     blurb:
       "The 15-minute settlement clearing price for each ancillary product — what real-time capacity settlement actually uses. Collected from ERCOT MIS (NP6-331).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "mcpc",
         label: "Settlement price",
         unit: "$/MW",
         availability: "live",
-        description: "15-minute settlement MCPC for the product.",
+        description:
+          "15-minute settlement MCPC for the product.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 4, swing: 4, noise: 1, floor: 0 },
       },
@@ -773,16 +876,25 @@ export const SCHEMAS: Schema[] = [
     entityKey: "as_type",
     blurb:
       "How much of each service ERCOT plans to procure, per hour, seven days out — republished daily with every revision kept. Collected from ERCOT MIS (NP4-33).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "quantity_mw",
         label: "Planned quantity",
         unit: "MW",
         availability: "live",
-        description: "Capacity ERCOT plans to procure for the product and hour.",
+        description:
+          "Capacity ERCOT plans to procure for the product and hour.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 1800, swing: 900, noise: 100, floor: 0 },
+        mock: {
+          base: 1800,
+          swing: 900,
+          noise: 100,
+          floor: 0,
+        },
       },
     ],
   },
@@ -792,7 +904,10 @@ export const SCHEMAS: Schema[] = [
     name: "Actual load by forecast zone",
     dataset: "ercot-actual-load-forecast-zone",
     availability: "live",
-    cadence: { label: "hourly, posted next day", seconds: 3600 },
+    cadence: {
+      label: "hourly, posted next day",
+      seconds: 3600,
+    },
     tokens: 0.5,
     entities: {
       count: 5,
@@ -803,16 +918,25 @@ export const SCHEMAS: Schema[] = [
     entityOmit: ["TOTAL"],
     blurb:
       "Metered demand by the four forecast zones plus the system total, hourly. Collected from ERCOT MIS (NP6-346).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "load_mw",
         label: "Actual load",
         unit: "MW",
         availability: "live",
-        description: "Hourly average metered demand for the zone.",
+        description:
+          "Hourly average metered demand for the zone.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 15000, swing: 5000, noise: 300, floor: 0 },
+        mock: {
+          base: 15000,
+          swing: 5000,
+          noise: 300,
+          floor: 0,
+        },
       },
     ],
   },
@@ -822,7 +946,10 @@ export const SCHEMAS: Schema[] = [
     name: "Seven-day forecast by forecast zone",
     dataset: "ercot-load-forecast-forecast-zone",
     availability: "live",
-    cadence: { label: "hourly, 7 days ahead", seconds: 3600 },
+    cadence: {
+      label: "hourly, 7 days ahead",
+      seconds: 3600,
+    },
     tokens: 0.5,
     entities: {
       count: 5,
@@ -833,16 +960,25 @@ export const SCHEMAS: Schema[] = [
     entityOmit: ["TOTAL"],
     blurb:
       "ERCOT's hourly-refreshed load forecast for the four forecast zones and the system, seven days out — every revision kept. Collected from ERCOT MIS (NP3-560).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "load_mw",
         label: "Forecast load",
         unit: "MW",
         availability: "live",
-        description: "Forecast hourly average load for the zone.",
+        description:
+          "Forecast hourly average load for the zone.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 15000, swing: 5000, noise: 150, floor: 0 },
+        mock: {
+          base: 15000,
+          swing: 5000,
+          noise: 150,
+          floor: 0,
+        },
       },
     ],
   },
@@ -852,7 +988,10 @@ export const SCHEMAS: Schema[] = [
     name: "System-wide demand",
     dataset: "ercot-system-demand",
     availability: "live",
-    cadence: { label: "15-min, posted hourly", seconds: 3600 },
+    cadence: {
+      label: "15-min, posted hourly",
+      seconds: 3600,
+    },
     intervalSeconds: 900,
     tokens: 0.25,
     entities: {
@@ -862,16 +1001,25 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "System-wide actual demand at 15-minute resolution — the one-line answer to how much Texas is using. Collected from ERCOT MIS (NP6-235).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "demand_mw",
         label: "Demand",
         unit: "MW",
         availability: "live",
-        description: "System-wide 15-minute average demand.",
+        description:
+          "System-wide 15-minute average demand.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 58000, swing: 14000, noise: 600, floor: 0 },
+        mock: {
+          base: 58000,
+          swing: 14000,
+          noise: 600,
+          floor: 0,
+        },
       },
     ],
   },
@@ -890,7 +1038,10 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "The grid-conditions headline: 5-minute demand against available committed capacity, from ERCOT's own dashboard feed — which retains two days, so the history exists because the collector keeps running.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "demand_mw",
@@ -899,7 +1050,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "System demand over the interval.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 58000, swing: 14000, noise: 600, floor: 0 },
+        mock: {
+          base: 58000,
+          swing: 14000,
+          noise: 600,
+          floor: 0,
+        },
       },
       {
         key: "capacity_mw",
@@ -908,7 +1064,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "Total available committed capacity.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 78000, swing: 10000, noise: 500, floor: 0 },
+        mock: {
+          base: 78000,
+          swing: 10000,
+          noise: 500,
+          floor: 0,
+        },
       },
     ],
   },
@@ -918,7 +1079,10 @@ export const SCHEMAS: Schema[] = [
     name: "Wind: actual and forecast",
     dataset: "ercot-wind-hourly",
     availability: "live",
-    cadence: { label: "hourly, rolling week", seconds: 3600 },
+    cadence: {
+      label: "hourly, rolling week",
+      seconds: 3600,
+    },
     tokens: 0.5,
     entities: {
       count: 4,
@@ -929,7 +1093,10 @@ export const SCHEMAS: Schema[] = [
     entityOmit: ["SYSTEM"],
     blurb:
       "Hourly averaged actual wind generation and ERCOT's own forecasts, system-wide and by load zone, refreshed hourly. Collected from ERCOT MIS (NP4-732).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "gen_mw",
@@ -938,7 +1105,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "Hourly averaged actual wind output.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 9000, swing: 7000, noise: 700, floor: 0 },
+        mock: {
+          base: 9000,
+          swing: 7000,
+          noise: 700,
+          floor: 0,
+        },
       },
       {
         key: "forecast_stf_mw",
@@ -947,7 +1119,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "ERCOT's STWPF forecast for the hour.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 9000, swing: 7000, noise: 400, floor: 0 },
+        mock: {
+          base: 9000,
+          swing: 7000,
+          noise: 400,
+          floor: 0,
+        },
       },
     ],
   },
@@ -957,7 +1134,10 @@ export const SCHEMAS: Schema[] = [
     name: "Wind by geographical region",
     dataset: "ercot-wind-hourly-geo",
     availability: "live",
-    cadence: { label: "hourly, rolling week", seconds: 3600 },
+    cadence: {
+      label: "hourly, rolling week",
+      seconds: 3600,
+    },
     tokens: 0.5,
     entities: {
       count: 6,
@@ -968,16 +1148,25 @@ export const SCHEMAS: Schema[] = [
     entityOmit: ["SYSTEM"],
     blurb:
       "Hourly averaged actual wind generation and forecasts by geographical region — Panhandle, Coastal, South, West, North. Collected from ERCOT MIS (NP4-742).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "gen_mw",
         label: "Actual generation",
         unit: "MW",
         availability: "live",
-        description: "Hourly averaged actual wind output for the region.",
+        description:
+          "Hourly averaged actual wind output for the region.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 3000, swing: 2500, noise: 300, floor: 0 },
+        mock: {
+          base: 3000,
+          swing: 2500,
+          noise: 300,
+          floor: 0,
+        },
       },
       {
         key: "forecast_stf_mw",
@@ -986,7 +1175,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "ERCOT's STWPF forecast for the hour.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 3000, swing: 2500, noise: 150, floor: 0 },
+        mock: {
+          base: 3000,
+          swing: 2500,
+          noise: 150,
+          floor: 0,
+        },
       },
     ],
   },
@@ -996,7 +1190,10 @@ export const SCHEMAS: Schema[] = [
     name: "Solar: actual and forecast",
     dataset: "ercot-solar-hourly",
     availability: "live",
-    cadence: { label: "hourly, rolling week", seconds: 3600 },
+    cadence: {
+      label: "hourly, rolling week",
+      seconds: 3600,
+    },
     tokens: 0.5,
     entities: {
       count: 1,
@@ -1005,7 +1202,10 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "Hourly averaged actual solar generation and ERCOT's own forecasts, system-wide, refreshed hourly with a rolling week of horizon. Collected from ERCOT MIS (NP4-737).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "gen_mw",
@@ -1014,7 +1214,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "Hourly averaged actual solar output.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 12000, swing: 12000, noise: 800, floor: 0 },
+        mock: {
+          base: 12000,
+          swing: 12000,
+          noise: 800,
+          floor: 0,
+        },
       },
       {
         key: "forecast_stf_mw",
@@ -1023,7 +1228,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "ERCOT's STPPF forecast for the hour.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 12000, swing: 12000, noise: 400, floor: 0 },
+        mock: {
+          base: 12000,
+          swing: 12000,
+          noise: 400,
+          floor: 0,
+        },
       },
     ],
   },
@@ -1033,7 +1243,10 @@ export const SCHEMAS: Schema[] = [
     name: "Solar by geographical region",
     dataset: "ercot-solar-hourly-geo",
     availability: "live",
-    cadence: { label: "hourly, rolling week", seconds: 3600 },
+    cadence: {
+      label: "hourly, rolling week",
+      seconds: 3600,
+    },
     tokens: 0.5,
     entities: {
       count: 7,
@@ -1044,16 +1257,25 @@ export const SCHEMAS: Schema[] = [
     entityOmit: ["SYSTEM"],
     blurb:
       "Hourly averaged actual solar generation and forecasts by geographical region — CenterWest through FarEast. Collected from ERCOT MIS (NP4-745).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "gen_mw",
         label: "Actual generation",
         unit: "MW",
         availability: "live",
-        description: "Hourly averaged actual solar output for the region.",
+        description:
+          "Hourly averaged actual solar output for the region.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 2500, swing: 2500, noise: 250, floor: 0 },
+        mock: {
+          base: 2500,
+          swing: 2500,
+          noise: 250,
+          floor: 0,
+        },
       },
       {
         key: "forecast_stf_mw",
@@ -1062,7 +1284,12 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "ERCOT's STPPF forecast for the hour.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 2500, swing: 2500, noise: 120, floor: 0 },
+        mock: {
+          base: 2500,
+          swing: 2500,
+          noise: 120,
+          floor: 0,
+        },
       },
     ],
   },
@@ -1083,7 +1310,10 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "The scarcity-pricing feed: reliability deployment price adders, deployments and online reserve limits from every SCED run. Collected from ERCOT MIS (NP6-323).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "system_lambda",
@@ -1099,7 +1329,8 @@ export const SCHEMAS: Schema[] = [
         label: "Reliability adder",
         unit: "$/MWh",
         availability: "live",
-        description: "Real-time reliability deployment price adder.",
+        description:
+          "Real-time reliability deployment price adder.",
         // Preview-only — see the note on the real-time schema.
         mock: { base: 1, swing: 1, noise: 0.5, floor: 0 },
       },
@@ -1108,9 +1339,15 @@ export const SCHEMAS: Schema[] = [
         label: "Online HSL",
         unit: "MW",
         availability: "live",
-        description: "Aggregate high sustained limit of online resources.",
+        description:
+          "Aggregate high sustained limit of online resources.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 95000, swing: 15000, noise: 1000, floor: 0 },
+        mock: {
+          base: 95000,
+          swing: 15000,
+          noise: 1000,
+          floor: 0,
+        },
       },
     ],
   },
@@ -1129,25 +1366,40 @@ export const SCHEMAS: Schema[] = [
     },
     blurb:
       "ERCOT's own hour-by-hour view of whether it has enough capacity, 168 hours out, refreshed hourly with every revision kept. Collected from ERCOT MIS (NP3-763).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "avail_cap_gen",
         label: "Available capacity",
         unit: "MW",
         availability: "live",
-        description: "Available generation capacity for the hour.",
+        description:
+          "Available generation capacity for the hour.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 90000, swing: 15000, noise: 1500, floor: 0 },
+        mock: {
+          base: 90000,
+          swing: 15000,
+          noise: 1500,
+          floor: 0,
+        },
       },
       {
         key: "avail_cap_reserve",
         label: "Available reserve",
         unit: "MW",
         availability: "live",
-        description: "Capacity available as reserve for the hour.",
+        description:
+          "Capacity available as reserve for the hour.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 15000, swing: 6000, noise: 800, floor: 0 },
+        mock: {
+          base: 15000,
+          swing: 6000,
+          noise: 800,
+          floor: 0,
+        },
       },
     ],
   },
@@ -1167,25 +1419,40 @@ export const SCHEMAS: Schema[] = [
     entityKey: "zone",
     blurb:
       "Capacity on outage by forecast zone, hour by hour for the coming week — total, intermittent and not-yet-commercial. Collected from ERCOT MIS (NP3-233).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "total_resource_mw",
         label: "Capacity on outage",
         unit: "MW",
         availability: "live",
-        description: "Total resource capacity on outage in the zone.",
+        description:
+          "Total resource capacity on outage in the zone.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 2000, swing: 1200, noise: 150, floor: 0 },
+        mock: {
+          base: 2000,
+          swing: 1200,
+          noise: 150,
+          floor: 0,
+        },
       },
       {
         key: "total_irr_mw",
         label: "Intermittent on outage",
         unit: "MW",
         availability: "live",
-        description: "Intermittent renewable capacity on outage.",
+        description:
+          "Intermittent renewable capacity on outage.",
         // Preview-only — see the note on the real-time schema.
-        mock: { base: 1200, swing: 900, noise: 100, floor: 0 },
+        mock: {
+          base: 1200,
+          swing: 900,
+          noise: 100,
+          floor: 0,
+        },
       },
     ],
   },
@@ -1195,7 +1462,10 @@ export const SCHEMAS: Schema[] = [
     name: "Temperature forecast by weather zone",
     dataset: "ercot-temperature-forecast",
     availability: "live",
-    cadence: { label: "daily, rolling window", seconds: 86400 },
+    cadence: {
+      label: "daily, rolling window",
+      seconds: 86400,
+    },
     intervalSeconds: 3_600,
     tokens: 0.25,
     entities: {
@@ -1206,7 +1476,10 @@ export const SCHEMAS: Schema[] = [
     entityKey: "zone",
     blurb:
       "The hourly temperature forecast ERCOT plans against, per weather zone, published daily with every revision kept. Collected from ERCOT MIS (NP4-722).",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 29) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 29),
+    },
     variables: [
       {
         key: "temperature_f",
@@ -1229,7 +1502,10 @@ export const SCHEMAS: Schema[] = [
     name: "Surface observations",
     dataset: "noaa-station-observations",
     availability: "live",
-    cadence: { label: "hourly, plus specials", seconds: 3_600 },
+    cadence: {
+      label: "hourly, plus specials",
+      seconds: 3_600,
+    },
     tokens: 0.5,
     entities: {
       count: 25,
@@ -1243,7 +1519,10 @@ export const SCHEMAS: Schema[] = [
       "and visibility from 25 airport stations across the eight ERCOT weather " +
       "zones. Filed hourly and again whenever conditions change. Collected " +
       "from the NWS API, reconciled against live responses.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 31) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 31),
+    },
     variables: [
       {
         key: "temperature_c",
@@ -1258,7 +1537,8 @@ export const SCHEMAS: Schema[] = [
         label: "Dew point",
         unit: "°C",
         availability: "live",
-        description: "Dew point — how much moisture the air is holding.",
+        description:
+          "Dew point — how much moisture the air is holding.",
         mock: { base: 19, swing: 5, noise: 1 },
       },
       {
@@ -1266,7 +1546,8 @@ export const SCHEMAS: Schema[] = [
         label: "Relative humidity",
         unit: "%",
         availability: "live",
-        description: "Relative humidity, derived from temperature and dew point.",
+        description:
+          "Relative humidity, derived from temperature and dew point.",
         mock: { base: 62, swing: 25, noise: 4, floor: 0 },
       },
       {
@@ -1274,7 +1555,8 @@ export const SCHEMAS: Schema[] = [
         label: "Wind speed",
         unit: "m/s",
         availability: "live",
-        description: "Wind speed at the standard 10 m observing height.",
+        description:
+          "Wind speed at the standard 10 m observing height.",
         mock: { base: 4, swing: 3, noise: 0.8, floor: 0 },
       },
       {
@@ -1282,7 +1564,8 @@ export const SCHEMAS: Schema[] = [
         label: "Pressure",
         unit: "hPa",
         availability: "live",
-        description: "Barometric pressure at station level.",
+        description:
+          "Barometric pressure at station level.",
         mock: { base: 1013, swing: 8, noise: 1 },
       },
     ],
@@ -1293,7 +1576,10 @@ export const SCHEMAS: Schema[] = [
     name: "Hourly forecast by weather zone",
     dataset: "openmeteo-zone-forecast",
     availability: "live",
-    cadence: { label: "hourly, 7 days ahead", seconds: 3_600 },
+    cadence: {
+      label: "hourly, 7 days ahead",
+      seconds: 3_600,
+    },
     tokens: 0.5,
     entities: {
       count: 8,
@@ -1308,7 +1594,10 @@ export const SCHEMAS: Schema[] = [
       "predict wind and solar output and that no NOAA endpoint publishes. " +
       "Served as the newest view of each hour; every issue is kept. " +
       "Data by Open-Meteo, CC-BY-4.0.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 31) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 31),
+    },
     variables: [
       {
         key: "temperature_c",
@@ -1336,7 +1625,12 @@ export const SCHEMAS: Schema[] = [
         description:
           "Forecast global horizontal irradiance — what predicts solar output. " +
           "Zero overnight, by definition.",
-        mock: { base: 380, swing: 380, noise: 30, floor: 0 },
+        mock: {
+          base: 380,
+          swing: 380,
+          noise: 30,
+          floor: 0,
+        },
       },
       {
         key: "cloud_cover_pct",
@@ -1372,7 +1666,10 @@ export const SCHEMAS: Schema[] = [
     name: "NWS forecast by weather zone",
     dataset: "noaa-gridpoint-forecast",
     availability: "live",
-    cadence: { label: "reissued through the day", seconds: 3_600 },
+    cadence: {
+      label: "reissued through the day",
+      seconds: 3_600,
+    },
     intervalSeconds: 3_600,
     tokens: 0.5,
     entities: {
@@ -1388,7 +1685,10 @@ export const SCHEMAS: Schema[] = [
       "stream so the two are directly comparable. Carries gusts, chance of " +
       "precipitation and expected accumulation. Each forecast office issues " +
       "on its own schedule and every issue is kept.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 31) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 31),
+    },
     variables: [
       {
         key: "temperature_c",
@@ -1403,7 +1703,8 @@ export const SCHEMAS: Schema[] = [
         label: "Gust",
         unit: "m/s",
         availability: "live",
-        description: "Forecast peak gust — the column the Open-Meteo stream does not carry.",
+        description:
+          "Forecast peak gust — the column the Open-Meteo stream does not carry.",
         mock: { base: 8, swing: 5, noise: 1.2, floor: 0 },
       },
       {
@@ -1424,7 +1725,12 @@ export const SCHEMAS: Schema[] = [
         description:
           "Accumulation over the run it was published for, repeated on each " +
           "hour of that run — so summing it over a day counts each figure six times.",
-        mock: { base: 0.4, swing: 0.8, noise: 0.2, floor: 0 },
+        mock: {
+          base: 0.4,
+          swing: 0.8,
+          noise: 0.2,
+          floor: 0,
+        },
       },
       {
         key: "sky_cover_pct",
@@ -1469,7 +1775,10 @@ export const SCHEMAS: Schema[] = [
     // A field, and a vector one: the cells are a grid rather than named
     // places, and each carries a direction as well as a speed.
     field: true,
-    vector: { speed: "wind_speed_100m_ms", direction: "wind_direction_100m_deg" },
+    vector: {
+      speed: "wind_speed_100m_ms",
+      direction: "wind_direction_100m_deg",
+    },
     // Deliberately no entityKey. 168 cells is a surface, not a fan-out — one
     // line per cell is 168 lines and answers nothing.
     blurb:
@@ -1478,14 +1787,18 @@ export const SCHEMAS: Schema[] = [
       "The grid runs past the state line on purpose: a particle advected to " +
       "the edge of its data dies there, and thinning flow along a border " +
       "reads as weather when it is not. Data by Open-Meteo, CC-BY-4.0.",
-    maintainer: { name: "Dryos", since: Date.UTC(2026, 7, 31) },
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 7, 31),
+    },
     variables: [
       {
         key: "wind_speed_100m_ms",
         label: "Wind speed",
         unit: "m/s",
         availability: "live",
-        description: "Forecast wind speed at 100 m — turbine hub height.",
+        description:
+          "Forecast wind speed at 100 m — turbine hub height.",
         mock: { base: 7, swing: 4, noise: 1, floor: 0 },
       },
       {
@@ -1496,23 +1809,34 @@ export const SCHEMAS: Schema[] = [
         description:
           "The compass bearing the wind blows from, at 100 m. The direction " +
           "the air travels is the opposite of this.",
-        mock: { base: 180, swing: 120, noise: 15, floor: 0 },
+        mock: {
+          base: 180,
+          swing: 120,
+          noise: 15,
+          floor: 0,
+        },
       },
     ],
   },
 ];
 
 /** The one schema with a collector behind it. */
-export const LIVE_SCHEMA = SCHEMAS.find((s) => s.availability === "live")!;
+export const LIVE_SCHEMA = SCHEMAS.find(
+  (s) => s.availability === "live",
+)!;
 
 export function schemaById(id: string): Schema | undefined {
   return SCHEMAS.find((s) => s.id === id);
 }
 
 /** Resolve either a schema id or a dataset slug — apps reference both. */
-export function schemaFor(ref: string | undefined): Schema | undefined {
+export function schemaFor(
+  ref: string | undefined,
+): Schema | undefined {
   if (!ref) return undefined;
-  return SCHEMAS.find((s) => s.id === ref || s.dataset === ref);
+  return SCHEMAS.find(
+    (s) => s.id === ref || s.dataset === ref,
+  );
 }
 
 /** "Energy › Power › Real-time" — the label that replaced the slug. */
@@ -1626,7 +1950,9 @@ export function makeRef(
     tokens: schema.tokens,
     snippet: querySnippet(
       schema,
-      ref.kind === "entity" || ref.kind === "query" ? ref.label : undefined,
+      ref.kind === "entity" || ref.kind === "query"
+        ? ref.label
+        : undefined,
     ),
     ...ref,
   } as DataRef;
@@ -1724,7 +2050,10 @@ export function domainOf(schema: Schema): string {
  */
 export function sourceTzOf(schema: Schema): string {
   return (
-    schema.sourceTz ?? (domainOf(schema) === "Energy" ? "America/Chicago" : "UTC")
+    schema.sourceTz ??
+    (domainOf(schema) === "Energy"
+      ? "America/Chicago"
+      : "UTC")
   );
 }
 
@@ -1751,9 +2080,25 @@ export function domains(): string[] {
  * that. Domain is a heading in the list, never a gate on it.
  */
 export type MapTreatment =
-  | { how: "surface"; vector: boolean; placed: number; total: number; invented: false }
-  | { how: "motion"; placed: number; total: number; invented: false }
-  | { how: "pins"; placed: number; total: number; invented: boolean };
+  | {
+      how: "surface";
+      vector: boolean;
+      placed: number;
+      total: number;
+      invented: false;
+    }
+  | {
+      how: "motion";
+      placed: number;
+      total: number;
+      invented: false;
+    }
+  | {
+      how: "pins";
+      placed: number;
+      total: number;
+      invented: boolean;
+    };
 
 /**
  * The most entities one layer can draw, which is the delivery route's own cap.
@@ -1767,17 +2112,46 @@ export type MapTreatment =
  */
 export const DRAW_CAP = 10_000;
 
-export function mapTreatment(schema: Schema): MapTreatment | null {
+export function mapTreatment(
+  schema: Schema,
+): MapTreatment | null {
   const total = schema.entities.count;
-  if (schema.field) return { how: "surface", vector: Boolean(schema.vector), placed: total, total, invented: false };
-  if (schema.motion) return { how: "motion", placed: total, total, invented: false };
+  if (schema.field)
+    return {
+      how: "surface",
+      vector: Boolean(schema.vector),
+      placed: total,
+      total,
+      invented: false,
+    };
+  if (schema.motion)
+    return {
+      how: "motion",
+      placed: total,
+      total,
+      invented: false,
+    };
   // Rows carry their own coordinates, or one is invented per entity — either
   // way every entity has a position, and the only limit left is how many rows
   // a single query will return.
-  if (schema.located) return { how: "pins", placed: Math.min(total, DRAW_CAP), total, invented: false };
-  if (schema.mockLocations) return { how: "pins", placed: Math.min(total, DRAW_CAP), total, invented: true };
+  if (schema.located)
+    return {
+      how: "pins",
+      placed: Math.min(total, DRAW_CAP),
+      total,
+      invented: false,
+    };
+  if (schema.mockLocations)
+    return {
+      how: "pins",
+      placed: Math.min(total, DRAW_CAP),
+      total,
+      invented: true,
+    };
   const placed = placeableNodes(schema).length;
-  return placed ? { how: "pins", placed, total, invented: false } : null;
+  return placed
+    ? { how: "pins", placed, total, invented: false }
+    : null;
 }
 
 /**
@@ -1794,15 +2168,20 @@ export function placeableNodes(schema: Schema): string[] {
   if (!sample.length) return [];
   const stem = sample[0].slice(0, 3);
   return Object.keys(ERCOT_POINTS).filter(
-    (k) => sample.includes(k) || (stem.length === 3 && k.startsWith(stem)),
+    (k) =>
+      sample.includes(k) ||
+      (stem.length === 3 && k.startsWith(stem)),
   );
 }
 
 /** "1,118 placed · invented" — what the picker says under a layer's name. */
 export function coverageLabel(t: MapTreatment): string {
-  if (t.how === "surface") return t.vector ? "vector field" : "scalar field";
+  if (t.how === "surface")
+    return t.vector ? "vector field" : "scalar field";
   if (t.how === "motion") return "tracked positions";
-  const capped = t.placed < t.total && (t.invented || t.placed === DRAW_CAP);
+  const capped =
+    t.placed < t.total &&
+    (t.invented || t.placed === DRAW_CAP);
   // Three different shortfalls, and they are not interchangeable. Capped means
   // the query stops early. "Known locations" means the coordinates run out.
   // Saying "8 of 1,118" when the truth is "10,000 of 19,312, because that is
@@ -1813,8 +2192,10 @@ export function coverageLabel(t: MapTreatment): string {
       t.invented ? " · invented positions" : ""
     }`;
   }
-  if (t.invented) return `${t.total.toLocaleString()} entities · invented positions`;
-  if (t.placed >= t.total) return `${t.total.toLocaleString()} placed`;
+  if (t.invented)
+    return `${t.total.toLocaleString()} entities · invented positions`;
+  if (t.placed >= t.total)
+    return `${t.total.toLocaleString()} placed`;
   return `${t.placed} of ${t.total.toLocaleString()} have known locations`;
 }
 
@@ -1822,17 +2203,25 @@ export function coverageLabel(t: MapTreatment): string {
 export function categories(domain?: string): string[] {
   return [
     ...new Set(
-      SCHEMAS.filter((s) => !domain || domainOf(s) === domain).map(categoryOf),
+      SCHEMAS.filter(
+        (s) => !domain || domainOf(s) === domain,
+      ).map(categoryOf),
     ),
   ];
 }
 
 /** What a domain costs to browse: how much of it is real. */
-export function domainSummary(domain: string): { total: number; live: number } {
-  const inDomain = SCHEMAS.filter((s) => domainOf(s) === domain);
+export function domainSummary(domain: string): {
+  total: number;
+  live: number;
+} {
+  const inDomain = SCHEMAS.filter(
+    (s) => domainOf(s) === domain,
+  );
   return {
     total: inDomain.length,
-    live: inDomain.filter((s) => s.availability === "live").length,
+    live: inDomain.filter((s) => s.availability === "live")
+      .length,
   };
 }
 
@@ -1884,7 +2273,8 @@ export function streamRef(
   subset?: { label: string; entities: string[] },
 ): DataRef {
   const v =
-    schema.variables.find((x) => x.key === varKey) ?? schema.variables[0];
+    schema.variables.find((x) => x.key === varKey) ??
+    schema.variables[0];
   const target = schema.dataset ?? schema.id;
   const entities = subset
     ? [...subset.entities].sort()
@@ -1893,7 +2283,9 @@ export function streamRef(
     kind: "schema",
     schemaId: schema.id,
     path: pathLabel(schema),
-    label: subset ? `${schema.name} · ${subset.label}` : schema.name,
+    label: subset
+      ? `${schema.name} · ${subset.label}`
+      : schema.name,
     sublabel: `${v?.key ?? "value"} · ${
       entities
         ? `${entities.length} of ${entityCountLabel(schema)}`
@@ -1906,13 +2298,20 @@ export function streamRef(
     snippet: entities
       ? `dryos.query({ dataset: ${JSON.stringify(target)}, node: ${JSON.stringify(entities)}, start: "-24h" })`
       : querySnippet(schema),
-    ...(entities && subset ? { subset: { label: subset.label, entities } } : {}),
+    ...(entities && subset
+      ? { subset: { label: subset.label, entities } }
+      : {}),
   };
 }
 
-export function entityRef(schema: Schema, node: string, varKey?: string): DataRef {
+export function entityRef(
+  schema: Schema,
+  node: string,
+  varKey?: string,
+): DataRef {
   const v =
-    schema.variables.find((x) => x.key === varKey) ?? schema.variables[0];
+    schema.variables.find((x) => x.key === varKey) ??
+    schema.variables[0];
   return {
     kind: "entity",
     schemaId: schema.id,
@@ -1945,5 +2344,7 @@ export function entityCountLabel(schema: Schema): string {
  */
 export function blurbLead(schema: Schema): string {
   const dot = schema.blurb.indexOf(". ");
-  return dot === -1 ? schema.blurb : schema.blurb.slice(0, dot + 1);
+  return dot === -1
+    ? schema.blurb
+    : schema.blurb.slice(0, dot + 1);
 }

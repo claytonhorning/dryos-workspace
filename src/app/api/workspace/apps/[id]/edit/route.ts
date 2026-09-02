@@ -42,7 +42,7 @@ export async function POST(
   if (!app)
     return NextResponse.json({ error: "No such screen." }, { status: 404 });
 
-  const { intent, refs, component, options, custom, layout, replaceAt, model, effort } =
+  const { intent, refs, component, options, custom, layout, replaceAt, model, effort, group } =
     (await req.json()) as {
       intent?: string;
       refs?: DataRef[];
@@ -57,7 +57,95 @@ export async function POST(
       /** The composer's picks — validated in models.ts, not here. */
       model?: string;
       effort?: string;
+      /**
+       * Several tiles landing together as one drop, stacked top to bottom in
+       * list order, wired before they exist: `wireTo` is a group-relative
+       * index, resolved to the absolute manifest slot here — the client
+       * cannot know where the group will sit.
+       */
+      group?: {
+        component: ComponentKind;
+        options?: Record<string, string>;
+        custom?: { name: string; code: string };
+        refs?: DataRef[];
+        layout: { w: number; h: number };
+        wireTo?: number;
+      }[];
     };
+
+  /* ── A wired group: one drop, one compose, one revision ─────────────── */
+  if (group?.length) {
+    if (!app.manifest) {
+      return NextResponse.json(
+        { error: "Wired groups need a composed page — this one was rewritten by the model." },
+        { status: 400 },
+      );
+    }
+    for (const m of group) {
+      const d = componentDef(m.component);
+      if (!d) {
+        return NextResponse.json({ error: `No such component: ${m.component}.` }, { status: 400 });
+      }
+      if (!m.custom) {
+        const verdict = d.accepts(m.refs ?? []);
+        if (!verdict.ok) {
+          return NextResponse.json(
+            { error: `${d.name}: ${verdict.why ?? "that will not render."}` },
+            { status: 400 },
+          );
+        }
+      }
+    }
+    return ndjsonStream(async (send) => {
+      send({ type: "phase", phase: "composing" });
+      const manifest = packLayout(app.manifest!);
+      const base = manifest.length;
+      const anchor =
+        typeof layout?.x === "number" && typeof layout?.y === "number"
+          ? { x: layout.x, y: layout.y }
+          : { x: 0, y: below(manifest) + (manifest.length ? GRID.gap : 0) };
+      let down = 0;
+      for (const m of group) {
+        const opts = { ...(m.options ?? {}) };
+        if (m.wireTo != null && group[m.wireTo]) {
+          opts.follow = String(base + m.wireTo);
+        }
+        manifest.push({
+          kind: m.component,
+          refs: m.refs ?? [],
+          options: opts,
+          custom: m.custom,
+          layout: {
+            x: Math.max(0, Math.min(anchor.x, GRID.cols - m.layout.w)),
+            y: anchor.y + down,
+            w: m.layout.w,
+            h: m.layout.h,
+          },
+        });
+        down += m.layout.h + GRID.gap;
+      }
+      const source = composeApp(manifest);
+
+      send({ type: "phase", phase: "compiling" });
+      const built = await compile(source);
+      if (!built.js) {
+        send({ type: "failed", message: `The group did not compile: ${built.error}` });
+        return;
+      }
+      const wires = group.filter((m) => m.wireTo != null).length;
+      const updated = await addRevision(id, {
+        intent: `Added ${group.length} tiles as one${wires ? `, ${wires} wired` : ""}`,
+        refs: group.flatMap((m) => m.refs ?? []).length
+          ? group.flatMap((m) => m.refs ?? [])
+          : undefined,
+        manifest,
+        source,
+        author: "you",
+        note: "Built from typed components — no model was used.",
+      });
+      send({ type: "done", app: updated, composed: true });
+    });
+  }
 
   const said = intent?.trim() ?? "";
   const def = component ? componentDef(component) : undefined;

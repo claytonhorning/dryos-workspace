@@ -19,7 +19,7 @@ import {
 } from "@/components/workspace/BuildPanel";
 import { ComponentEditor } from "@/components/workspace/ComponentEditor";
 import { ChatDock } from "@/components/workspace/ChatDock";
-import { CommunityStrip } from "@/components/workspace/CommunityStrip";
+import { WiresStrip } from "@/components/workspace/WiresStrip";
 import { FeedsPanel } from "@/components/workspace/FeedsPanel";
 import {
   componentDef,
@@ -207,7 +207,12 @@ export default function AppPage() {
   const [attached, setAttached] = useState<DataRef[]>([]);
   const [dragging, setDragging] = useState<TrayPayload | null>(null);
   const [editing, setEditing] = useState<EditorStart | null>(null);
-  const [savedTick, setSavedTick] = useState(0);
+  /**
+   * Bumped when a staged group lands on the screen. The wires pane clears the
+   * draft on it: once the group is a wired record in the list, the draft that
+   * made it standing beside its own result is the same thing listed twice.
+   */
+  const [placedTick, setPlacedTick] = useState(0);
   /*
     Edit mode is the URL, not a copy of it.
 
@@ -224,6 +229,15 @@ export default function AppPage() {
    * and each ends in the way on: the explorer's own footer, then the shelf.
    */
   const [stage, setStage] = useState<"data" | "build">("data");
+  /**
+   * The two ways into the build panel. **From data** is the explorer and
+   * then the shapes — choose what, then choose how. **Community** is what
+   * other people published, and it comes first in the reading order because
+   * a published component or group already carries its data: asking someone
+   * to pick a stream before they can see a shelf that ignores the pick is a
+   * question with no bearing on the answer.
+   */
+  const [shelf, setShelf] = useState<"data" | "community">("data");
   const [pending, setPending] = useState(false);
   /**
    * The panel's width, draggable at its left edge. Judging a preview in a
@@ -385,18 +399,35 @@ export default function AppPage() {
         const res = await fetch(`/api/workspace/apps/${id}/edit`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            component: payload.kind,
-            options: payload.options,
-            custom: payload.custom,
-            // The place comes with the size: the ghost the frame drew is what
-            // the tile becomes, so there is nothing left for the server to
-            // decide about where it goes. Released where it does not fit there
-            // was no ghost, and no place is the honest thing to send — the
-            // server puts it under everything instead of on top of something.
-            layout: at ? { ...payload.layout, x: at.x, y: at.y } : payload.layout,
-            refs: payload.refs ?? attached,
-          }),
+          body: JSON.stringify(
+            payload.group
+              ? {
+                  // A staged group lands whole: the members are the tiles,
+                  // and the anchor is where the ghost's top-left was.
+                  group: payload.group.map((m) => ({
+                    component: m.kind,
+                    options: m.options,
+                    custom: m.custom,
+                    refs: m.refs,
+                    layout: m.layout,
+                    wireTo: m.wireTo,
+                  })),
+                  layout: at ? { ...payload.layout, x: at.x, y: at.y } : undefined,
+                }
+              : {
+                  component: payload.kind,
+                  options: payload.options,
+                  custom: payload.custom,
+                  // The place comes with the size: the ghost the frame drew is
+                  // what the tile becomes, so there is nothing left for the
+                  // server to decide about where it goes. Released where it
+                  // does not fit there was no ghost, and no place is the
+                  // honest thing to send — the server puts it under everything
+                  // instead of on top of something.
+                  layout: at ? { ...payload.layout, x: at.x, y: at.y } : payload.layout,
+                  refs: payload.refs ?? attached,
+                },
+          ),
         });
         if (!res.ok && !res.headers.get("content-type")?.includes("ndjson")) {
           const d = await res.json().catch(() => ({}));
@@ -408,10 +439,15 @@ export default function AppPage() {
             case "done":
               setApp(e.app as App);
               markSaved();
+              if (payload.group) setPlacedTick((n) => n + 1);
               // A placement reports nothing, either path. The tile is on the
               // page — that is the report — and the save mark in the bar
               // says it was written. A banner announcing what you can already
               // see is one more thing to read and then dismiss.
+              //
+              // The panel goes back to the beginning: a landed drop ends the
+              // build it was part of, and the next thing starts from data.
+              setStage("data");
               break;
             case "failed":
             case "error":
@@ -517,9 +553,11 @@ export default function AppPage() {
     The live preview of whatever is in flight, for the canvas to float at the
     ghost's own rectangle — the incoming component where the drop will put
     it, not a dashed box standing in for it. Stable for the length of a drag,
-    so the frame mounts once and only moves.
+    so the frame mounts once and only moves. Not for a staged group: the
+    preview route composes one tile, and a wrong preview at the right place is
+    worse than the dashed footprint.
   */
-  const dropPreviewUrl = dragging
+  const dropPreviewUrl = dragging && !dragging.group
     ? `/api/workspace/preview?bare=1&theme=${theme}&tz=${encodeURIComponent(tzPref)}&spec=${encodeURIComponent(
         JSON.stringify({
           kind: dragging.kind,
@@ -530,6 +568,24 @@ export default function AppPage() {
         }),
       )}`
     : undefined;
+
+  /*
+    Done ends the selection with the mode.
+
+    A selected tile is a sentence about the panel — the accent ring says "this
+    is the one the panel is talking about" — and pressing Done takes the panel
+    away while leaving the ring painted on a screen that is meant to carry no
+    chrome at all. Edit mode is the URL, so this follows it rather than being
+    cleared at the Done control, which lives in the navbar and cannot reach
+    here. Everything editing-only goes together: the selection, the editor
+    open on it, and any copy staged over the canvas waiting to be picked up.
+  */
+  useEffect(() => {
+    if (asideOpen) return;
+    setReplaceIndex(null);
+    setEditing(null);
+    setDupe(null);
+  }, [asideOpen]);
 
   // Escape puts the staged copy away — but not mid-drag: the browser's own
   // Escape cancels the drag, and unmounting the source there would kill the
@@ -548,7 +604,6 @@ export default function AppPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ spec, name: spec.custom?.name ?? spec.kind }),
     });
-    setSavedTick((n) => n + 1);
     markSaved();
   }, []);
 
@@ -707,6 +762,12 @@ export default function AppPage() {
               dropping={Boolean(dragging)}
               dropSize={dragging?.layout}
               dropPreview={dropPreviewUrl}
+              dropCard={dragging?.group?.map((m) => ({
+                kind: componentDef(m.kind)?.name ?? m.kind,
+                data:
+                  (m.refs ?? []).map((r) => r.label).join(" · ") ||
+                  (m.custom?.name ?? ""),
+              }))}
               onDropAt={place}
               placing={pending}
               onResize={resize}
@@ -719,7 +780,11 @@ export default function AppPage() {
               // there is a panel to configure it in — and which tile that
               // panel is currently about.
               editing={asideOpen}
-              selected={replaceIndex}
+              // Derived rather than read straight off the state the effect
+              // above clears: that clear lands after paint, so the frame
+              // would keep the ring for a frame and a message round trip
+              // after Done — which is exactly the moment it has to go.
+              selected={asideOpen ? replaceIndex : null}
               cursor={cursor}
               onCursor={moveCursor}
             />
@@ -807,16 +872,32 @@ export default function AppPage() {
           )}
 
           {/*
-            The community shelf, taking every pixel the letterboxed canvas
-            leaves. A page starts better from what somebody already decided
-            than from bare data — click a card and it runs on live data right
-            there, and the running preview is the drag handle onto the screen.
+            The strip under the canvas: the groups of tiles wired together on
+            this page. Connecting goes down the same replace-in-slot path the
+            tile editor's Save uses, so a wire is composed, compiled and
+            recorded like any other change.
           */}
           {asideOpen && (
             <div className="min-h-0 flex-1">
-              <CommunityStrip
+              <WiresStrip
                 onDragStateChange={beginDrag}
-                reloadKey={savedTick}
+                placedTick={placedTick}
+                manifest={app.manifest}
+                carrying={dragging}
+                onStaged={() => setStage("data")}
+                onConnect={async (t, from, color) => {
+                  const spec = app.manifest?.[t];
+                  if (!spec) return;
+                  const options = { ...(spec.options ?? {}) };
+                  if (from === null) {
+                    delete options.follow;
+                    delete options.wireColor;
+                  } else {
+                    options.follow = String(from);
+                    if (color) options.wireColor = color;
+                  }
+                  await placeSpec({ ...spec, options }, t);
+                }}
               />
             </div>
           )}
@@ -1054,7 +1135,52 @@ export default function AppPage() {
                     </div>
                   )}
 
-                  {stage === "data" ? (
+                  {/*
+                    The panel's own tabs, above whichever stage is showing.
+                    An underline at the bottom of the row, the idiom the
+                    workspace nav uses for its pages.
+                  */}
+                  <div className="flex shrink-0 items-stretch gap-3 border-b border-line px-1">
+                    {(
+                      [
+                        { id: "data", label: "From data" },
+                        { id: "community", label: "Community" },
+                      ] as const
+                    ).map((t) => {
+                      const on = shelf === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setShelf(t.id)}
+                          aria-pressed={on}
+                          className={cx(
+                            "-mb-px border-b-2 px-1 pt-1 pb-1.5 font-mono text-[10px] tracking-[0.14em] uppercase transition-colors",
+                            on
+                              ? "border-accent text-ink"
+                              : "border-transparent text-faint hover:text-ink",
+                          )}
+                        >
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {shelf === "community" ? (
+                    /*
+                      Published components and wired groups, each with its
+                      own data. No explorer and no selection strip: the pick
+                      would change nothing here.
+                    */
+                    <div className="min-h-0 flex-1">
+                      <BuildPanel
+                        shelf="community"
+                        refs={attached}
+                        onDragStateChange={beginDrag}
+                        manifest={app.manifest}
+                      />
+                    </div>
+                  ) : stage === "data" ? (
                     /*
                       The explorer is the whole stage now. The bar that used to
                       sit under it held the selection, the count and the way on
@@ -1099,8 +1225,10 @@ export default function AppPage() {
                       </div>
                       <div className="min-h-0 flex-1">
                         <BuildPanel
+                          shelf="shapes"
                           refs={attached}
                           onDragStateChange={beginDrag}
+                          manifest={app.manifest}
                         />
                       </div>
                     </>

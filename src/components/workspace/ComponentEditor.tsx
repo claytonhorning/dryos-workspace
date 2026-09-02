@@ -151,7 +151,7 @@ export function ComponentEditor({
   const previewFrame = usePreviewHost();
   // Preview-only layout: span the grid and fill the box. `spec` itself keeps
   // the small default, because it is also what a save places.
-  const previewUrl = `/api/workspace/preview?bare=1&theme=${theme}&tz=${encodeURIComponent(tzPref)}&spec=${encodeURIComponent(
+  const previewUrl = `/api/workspace/preview?bare=1&naked=1&theme=${theme}&tz=${encodeURIComponent(tzPref)}&spec=${encodeURIComponent(
     JSON.stringify({ ...spec, layout: previewLayout(def.kind) }),
   )}`;
 
@@ -242,7 +242,9 @@ export function ComponentEditor({
           tile that is already on the screen asks: copy it, keep the change,
           or take the tile off. Duplicate alone at the left — it acts on the
           canvas, not on this tile — and the tile's own pair at the right,
-          secondary beside primary, the way a dialog ends.
+          the way a dialog ends. Remove wears `danger` like every other
+          control that takes something away: it is the one act here that is
+          not undone by pressing the other button.
         */}
         <div className="flex items-center gap-2 border-t border-line px-3 py-2.5">
           {onDelete ? (
@@ -253,7 +255,7 @@ export function ComponentEditor({
                 </Button>
               )}
               <div className="ml-auto flex items-center gap-2">
-                <Button size="sm" onClick={onDelete}>
+                <Button tone="danger" size="sm" onClick={onDelete}>
                   Remove
                 </Button>
                 <Button tone="primary" size="sm" onClick={() => onAdd(spec)}>

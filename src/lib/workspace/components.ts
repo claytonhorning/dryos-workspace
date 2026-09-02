@@ -5,7 +5,11 @@ import {
   schemaFor,
   sourceTzOf,
 } from "./catalog";
-import { ERCOT_POINTS, ERCOT_VIEW, hasGeography } from "./geo";
+import {
+  ERCOT_POINTS,
+  ERCOT_VIEW,
+  hasGeography,
+} from "./geo";
 import { MOCK_POINT_SOURCE } from "./geoMock";
 import { schemaById } from "./catalog";
 import { SERIES_PALETTE } from "./palette";
@@ -36,7 +40,8 @@ export type ComponentKind =
   | "heatmap"
   | "ticker"
   | "table"
-  | "map";
+  | "map"
+  | "picker";
 
 export interface ComponentSpec {
   kind: ComponentKind;
@@ -99,7 +104,10 @@ export interface ComponentDef {
   blurb: string;
   options: Option[];
   /** Whether this shape can render the chosen references, and why not. */
-  accepts: (refs: DataRef[]) => { ok: boolean; why?: string };
+  accepts: (refs: DataRef[]) => {
+    ok: boolean;
+    why?: string;
+  };
   /**
    * Whether this shape is on the table for the selection at all.
    *
@@ -122,7 +130,7 @@ export interface ComponentDef {
  * Chosen values on top of the defaults, so a generator can read `o.key` flatly.
  *
  * Anything not declared as an `Option` is carried through rather than dropped.
- * Per-series colour and line style live in `series` as one JSON string: they
+ * Per-series color and line style live in `series` as one JSON string: they
  * are settings, but their choices come from the selection rather than from the
  * shape, so they are not a list this can render a select from — and a filter
  * that only kept declared keys silently threw them away between the panel and
@@ -132,8 +140,11 @@ export function withDefaults(
   def: ComponentDef,
   options?: Record<string, string>,
 ): Record<string, string> {
-  const out: Record<string, string> = { ...(options ?? {}) };
-  for (const o of def.options) out[o.key] = options?.[o.key] ?? o.fallback;
+  const out: Record<string, string> = {
+    ...(options ?? {}),
+  };
+  for (const o of def.options)
+    out[o.key] = options?.[o.key] ?? o.fallback;
   return out;
 }
 
@@ -163,11 +174,13 @@ function column(ref: DataRef): string {
 function unit(ref: DataRef): string {
   const schema = schemaFor(ref.schemaId);
   const key = column(ref);
-  return schema?.variables.find((v) => v.key === key)?.unit ?? "";
+  return (
+    schema?.variables.find((v) => v.key === key)?.unit ?? ""
+  );
 }
 
 /**
- * The declared colour stops for a selection's measure, if it has any.
+ * The declared color stops for a selection's measure, if it has any.
  *
  * Read off the first reference, because a map's point layer draws one measure —
  * the same reference the unit and the column already come from. A selection
@@ -178,7 +191,10 @@ function pointScale(refs: DataRef[]) {
   if (!first) return null;
   const schema = schemaFor(first.schemaId);
   const key = column(first);
-  return schema?.variables.find((v) => v.key === key)?.scale ?? null;
+  return (
+    schema?.variables.find((v) => v.key === key)?.scale ??
+    null
+  );
 }
 
 /** The entity a reference is about, when it names one. */
@@ -196,12 +212,17 @@ function node(ref: DataRef): string | null {
  * settled price as the step function it actually is. Same-cadence selections
  * emit nothing.
  */
-function slowFill(refs: DataRef[], s: { key: string }[]): string {
+function slowFill(
+  refs: DataRef[],
+  s: { key: string }[],
+): string {
   // Grain, not cadence: "slower" here is about how far apart the rows are, not
   // about when the file arrived.
   const grains = refs.map(grainOf);
   const finest = Math.min(...grains);
-  const slow = s.filter((_, i) => grains[i] > finest).map((x) => x.key);
+  const slow = s
+    .filter((_, i) => grains[i] > finest)
+    .map((x) => x.key);
   if (!slow.length) return "";
   return `
     // A slower series holds its value between publishes — the hourly price is
@@ -217,7 +238,9 @@ function slowFill(refs: DataRef[], s: { key: string }[]): string {
 
 /** Poll no faster than the schema publishes. Never below fifteen seconds. */
 function refreshMs(refs: DataRef[]): number {
-  const fastest = Math.min(...refs.map((r) => r.cadenceSeconds));
+  const fastest = Math.min(
+    ...refs.map((r) => r.cadenceSeconds),
+  );
   return Math.max(15_000, Math.min(fastest, 900) * 1000);
 }
 
@@ -227,17 +250,24 @@ function series(refs: DataRef[]) {
     const n = node(r);
     // An entity-picked ref is already named by its entity; repeating it as
     // "HB_NORTH · HB_NORTH" would be a stutter.
-    const base = n && n !== r.label ? `${r.label} · ${n}` : r.label;
+    const base =
+      n && n !== r.label ? `${r.label} · ${n}` : r.label;
     // Two streams can price the same entity — RT and DAM both quote
     // HB_NORTH — and a tooltip with two identical labels compares nothing.
     const stream = schemaFor(r.schemaId)?.name;
     return {
       key: `s${i}`,
       dataset: target(r),
-      node: n ?? schemaFor(r.schemaId)?.entities.sample[0] ?? "",
+      node:
+        n ??
+        schemaFor(r.schemaId)?.entities.sample[0] ??
+        "",
       column: column(r),
       unit: unit(r),
-      label: streams.size > 1 && stream ? `${base} — ${stream}` : base,
+      label:
+        streams.size > 1 && stream
+          ? `${base} — ${stream}`
+          : base,
       // The two halves of the label, separately: the panel lists series in a
       // row too narrow for "HB_HOUSTON — ERCOT real-time LMP" to survive
       // truncation with the part that distinguishes intact.
@@ -251,21 +281,23 @@ function series(refs: DataRef[]) {
 /*
   The eight series slots, as the variable names the frame defines them under.
   One length, one order, written from `palette.ts` so the panel that offers a
-  colour and the generator that emits one can never disagree about how many
-  there are. Fixed is the point: a colour follows the entity it was assigned
+  color and the generator that emits one can never disagree about how many
+  there are. Fixed is the point: a color follows the entity it was assigned
   to at selection time, never its rank, and the sequence itself is what was
-  validated for colour-vision safety. Never cycle past the end — `accepts`
+  validated for color-vision safety. Never cycle past the end — `accepts`
   caps every shape at eight or fewer first. (This replaces the old four-slot
   list whose fourth entry was `var(--stale)`, a token no palette defined — the
   fourth series has been drawing in black since the day it shipped.)
 */
-const PALETTE = SERIES_PALETTE.dark.map((_, i) => `var(--s${i + 1})`);
+const PALETTE = SERIES_PALETTE.dark.map(
+  (_, i) => `var(--s${i + 1})`,
+);
 
 /**
  * How a line is drawn, and the dash it means.
  *
  * Three, because they are the three a reader can tell apart at 1.6px on a
- * tile. Style is not decoration here: it is the second channel after colour,
+ * tile. Style is not decoration here: it is the second channel after color,
  * so a dashed line stays a dashed line when the chart is printed, screenshotted
  * into a deck, or read by someone who cannot separate two of the hues.
  */
@@ -276,11 +308,11 @@ export const SERIES_LINES = [
 ];
 
 /**
- * One series' overrides: `c` a colour, `d` a line style, `a` a y-axis.
+ * One series' overrides: `c` a color, `d` a line style, `a` a y-axis.
  *
- * A colour is either a palette slot — a number, which follows the theme, since
+ * A color is either a palette slot — a number, which follows the theme, since
  * each mode has its own stepping — or a literal `#rrggbb` somebody picked, which
- * does not. That is the trade for arbitrary colour and it is the caller's to
+ * does not. That is the trade for arbitrary color and it is the caller's to
  * make; the panel says so where it is made.
  *
  * `a` is "l" or "r". Anything else — absent included — is the left axis, and
@@ -295,15 +327,20 @@ export interface SeriesStyle {
 }
 
 /**
- * A literal colour, if that is what this is.
+ * A literal color, if that is what this is.
  *
  * Six-digit hex and nothing else. It is not a validation nicety: the value is
  * interpolated straight into generated TSX as a string literal, so anything
  * that reaches `paint` unchecked would be writing code. Everything that fails
  * here falls back to a palette slot.
  */
-export function seriesHex(c: number | string | undefined): string | null {
-  return typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) ? c : null;
+export function seriesHex(
+  c: number | string | undefined,
+): string | null {
+  return typeof c === "string" &&
+    /^#[0-9a-fA-F]{6}$/.test(c)
+    ? c
+    : null;
 }
 
 /** The overrides in `options.series`, which is JSON and may be anything. */
@@ -312,7 +349,9 @@ export function readSeries(
 ): Record<string, SeriesStyle> {
   try {
     const v = JSON.parse(options?.series ?? "{}");
-    return v && typeof v === "object" ? (v as Record<string, SeriesStyle>) : {};
+    return v && typeof v === "object"
+      ? (v as Record<string, SeriesStyle>)
+      : {};
   } catch {
     return {};
   }
@@ -327,7 +366,14 @@ export function readSeries(
  */
 export function seriesSlots(
   refs: DataRef[],
-): { key: string; label: string; short: string; stream?: string }[] | null {
+):
+  | {
+      key: string;
+      label: string;
+      short: string;
+      stream?: string;
+    }[]
+  | null {
   if (refs.length === 0) return [];
   if (refs.length === 1 && fanoutOf(refs[0])) return null;
   return series(refs).map((x) => ({
@@ -347,9 +393,11 @@ export function seriesControls(kind: ComponentKind): {
   // Only the chart has a second y-axis to offer: a scatter's two axes are the
   // two series, a bar has one measure by definition, and a stack sums — the
   // panel additionally hides the control for the stacked shape.
-  if (kind === "chart") return { color: true, line: true, axis: true };
-  if (kind === "distribution") return { color: true, line: true, axis: false };
-  // A bar is a colour and a length, and a scatter is a cloud of dots; neither
+  if (kind === "chart")
+    return { color: true, line: true, axis: true };
+  if (kind === "distribution")
+    return { color: true, line: true, axis: false };
+  // A bar is a color and a length, and a scatter is a cloud of dots; neither
   // has a stroke to dash.
   if (kind === "bar" || kind === "scatter") {
     return { color: true, line: false, axis: false };
@@ -358,7 +406,7 @@ export function seriesControls(kind: ComponentKind): {
 }
 
 /**
- * The colour and dash one series draws with.
+ * The color and dash one series draws with.
  *
  * The default is still the slot the series' position earns, so a chart nobody
  * has touched looks exactly as it did — an override only exists where somebody
@@ -371,9 +419,12 @@ function paint(
 ): { color: string; dash: string } {
   const pick = styles[key] ?? {};
   const slot = typeof pick.c === "number" ? pick.c : n;
-  const line = SERIES_LINES.find((l) => l.value === pick.d) ?? SERIES_LINES[0];
+  const line =
+    SERIES_LINES.find((l) => l.value === pick.d) ??
+    SERIES_LINES[0];
   return {
-    color: seriesHex(pick.c) ?? PALETTE[slot % PALETTE.length],
+    color:
+      seriesHex(pick.c) ?? PALETTE[slot % PALETTE.length],
     dash: line.dash,
   };
 }
@@ -381,6 +432,100 @@ function paint(
 /** `strokeDasharray={...}` when there is a dash to draw, nothing when there is not. */
 function dashProp(dash: string): string {
   return dash ? `strokeDasharray="${dash}" ` : "";
+}
+
+/*
+  Wires: one tile's selection retargeting another's queries.
+
+  The channel is a window event inside the frame — `dryos:pick`, carrying the
+  source tile's index and the entity that was clicked — the same idiom as the
+  page's time cursor. The link is stored on the *receiver* as a ride-along
+  option (`follow`, a tile index as a string), which is the same trick the
+  per-series styles use: it travels through the preview URL, the drag payload
+  and the manifest without any route learning a new field, and it replays
+  like every other option. The map is the only source today; charts and
+  tickers are the receivers.
+*/
+
+/** The ride-along `follow` option: the tile index whose selection to follow. */
+function followOf(
+  o: Record<string, string>,
+): number | null {
+  const n = Number(o.follow);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/**
+ * Whether a wire can land on this spec at all — the other half of `followOf`,
+ * for the host's wiring panel. A fan-out discovers its own entities, a spread
+ * is a derived series, and frozen source was not generated with the listener,
+ * so a wire to any of them would silently do nothing — greying is honest.
+ */
+export function followable(spec: ComponentSpec): boolean {
+  if (spec.kind !== "chart" && spec.kind !== "ticker")
+    return false;
+  if (spec.custom) return false;
+  const refs = spec.refs ?? [];
+  if (refs.length === 0) return false;
+  if (
+    spec.kind === "chart" &&
+    spec.options?.combine === "spread"
+  )
+    return false;
+  if (refs.length === 1 && fanoutOf(refs[0])) return false;
+  return true;
+}
+
+/**
+ * Whether a tile can be the *source* of a wire — whether it emits picks.
+ *
+ * The map does, by clicking a node; the search does, by choosing one out of
+ * the stream's own entities, which is what a screen without a map (or with a
+ * thousand nodes too dense to hit) needs instead. Frozen custom source was
+ * not generated with the emitter, so a wire from it would silently do
+ * nothing.
+ */
+export function emitsPicks(spec: {
+  kind: ComponentKind;
+  custom?: { name: string; code: string };
+}): boolean {
+  if (spec.custom) return false;
+  return spec.kind === "map" || spec.kind === "picker";
+}
+
+/**
+ * The receiver's half of a wire, as generated code: listen for the source
+ * tile's picks and retarget every query's node at the picked entity. Emits
+ * the plain `const queries = …` when there is no wire, so the caller's call
+ * to `useSeries(queries, …)` is the same either way.
+ */
+function followSnippet(
+  follow: number | null,
+  queriesJson: string,
+): string {
+  if (follow === null)
+    return `  const queries = ${queriesJson};`;
+  return `  // Wired: tile ${follow}'s selected entity retargets these queries.
+  const FOLLOW = ${follow};
+  const [picked, setPicked] = useState(null);
+  useEffect(() => {
+    const h = (e) => {
+      const d = e.detail;
+      // A null entity is a source clearing its selection, which is a pick
+      // like any other: the tile goes back to the series it was composed
+      // with rather than holding the last thing anybody clicked.
+      if (d && d.source === FOLLOW) setPicked(d.entity || null);
+    };
+    window.addEventListener("dryos:pick", h);
+    return () => window.removeEventListener("dryos:pick", h);
+  }, []);
+  const queries = useMemo(
+    () => {
+      const base = ${queriesJson};
+      return picked ? base.map((q) => ({ ...q, node: picked })) : base;
+    },
+    [picked],
+  );`;
 }
 
 /** One unit across the selection, or null when they mix. */
@@ -393,9 +538,15 @@ function uniformUnit(refs: DataRef[]): string | null {
  * What a tile is called. Up to three series, their labels fit in a title;
  * past that the stream's own name says it better than a five-label pile-up.
  */
-function titleFor(refs: DataRef[], s: { label: string }[]): string {
+function titleFor(
+  refs: DataRef[],
+  s: { label: string }[],
+): string {
   if (refs.length > 3) {
-    return schemaFor(refs[0].schemaId)?.name ?? s.map((x) => x.label).join(" · ");
+    return (
+      schemaFor(refs[0].schemaId)?.name ??
+      s.map((x) => x.label).join(" · ")
+    );
   }
   return s.map((x) => x.label).join(" · ");
 }
@@ -414,7 +565,8 @@ function titleFor(refs: DataRef[], s: { label: string }[]): string {
 function fanoutOf(
   ref: DataRef,
 ): { key: string; omit: string[]; only?: string[] } | null {
-  if (ref.kind === "entity" || ref.kind === "query") return null;
+  if (ref.kind === "entity" || ref.kind === "query")
+    return null;
   const schema = schemaFor(ref.schemaId);
   if (!schema) return null;
   /*
@@ -431,13 +583,17 @@ function fanoutOf(
   */
   if (ref.subset?.entities.length) {
     return {
-      key: schema.entityColumn ?? schema.entityKey ?? "node",
+      key:
+        schema.entityColumn ?? schema.entityKey ?? "node",
       omit: schema.entityOmit ?? [],
       only: ref.subset.entities,
     };
   }
   if (!schema.entityKey) return null;
-  return { key: schema.entityKey, omit: schema.entityOmit ?? [] };
+  return {
+    key: schema.entityKey,
+    omit: schema.entityOmit ?? [],
+  };
 }
 
 const WINDOW_SECONDS: Record<string, number> = {
@@ -469,11 +625,13 @@ function grainOf(ref: DataRef): number {
 
 /**
  * What "source time" means for this component: its first reference's stream,
- * the same first-ref rule the unit and the colour scale already follow. The
+ * the same first-ref rule the unit and the color scale already follow. The
  * navbar's timezone choice resolves against it at runtime (`useTz`).
  */
 function sourceTz(refs: DataRef[]): string {
-  const schema = refs[0] ? schemaFor(refs[0].schemaId) : undefined;
+  const schema = refs[0]
+    ? schemaFor(refs[0].schemaId)
+    : undefined;
   return schema ? sourceTzOf(schema) : "UTC";
 }
 
@@ -487,7 +645,10 @@ function fanoutLimit(
   // A subset fans out over a known count, so the budget is exact; the open
   // fan-out keeps the old ten-entity heuristic.
   const per = entities && entities > 0 ? entities : 10;
-  return Math.min(10_000, Math.ceil(span / Math.max(grainSecs, 60)) * per);
+  return Math.min(
+    10_000,
+    Math.ceil(span / Math.max(grainSecs, 60)) * per,
+  );
 }
 
 /** Rendered beside anything drawn from a schema with no collector. */
@@ -497,14 +658,29 @@ function mockTag(any: boolean): string {
     : "";
 }
 
+/*
+ * A wired tile used to wear an accent chip — "⌁ wired to the map" — the way
+ * the MOCK badge is worn. It is gone: the pair's own border already says the
+ * two tiles answer each other, the title carries the picked node the moment
+ * there is one, and a caption repeating both was the only chrome on a screen
+ * meant to carry none. A drawn line between the tiles was refused for the
+ * same reason, and stays refused.
+ */
+
 /* ── The shapes ───────────────────────────────────────────────────────── */
 
 const chart: ComponentDef = {
   kind: "chart",
   name: "Chart",
-  blurb: "A time series per selection, hoverable, on one set of axes.",
+  blurb:
+    "A time series per selection, hoverable, on one set of axes.",
   options: [
-    { key: "window", label: "Window", choices: WINDOWS, fallback: "-24h" },
+    {
+      key: "window",
+      label: "Window",
+      choices: WINDOWS,
+      fallback: "-24h",
+    },
     {
       key: "shape",
       label: "Shape",
@@ -545,7 +721,10 @@ const chart: ComponentDef = {
     refs.length === 0
       ? { ok: false, why: "Pick a series." }
       : refs.length > 8
-        ? { ok: false, why: "Eight series is the most one chart reads well." }
+        ? {
+            ok: false,
+            why: "Eight series is the most one chart reads well.",
+          }
         : refs.length > 4 && uniformUnit(refs) === null
           ? {
               ok: false,
@@ -557,33 +736,48 @@ const chart: ComponentDef = {
     const anyMock = s.some((x) => x.mock);
     const name = `Chart${i}`;
     // Whatever the panel painted. A fan-out has none of this: its series are
-    // discovered from the rows, so their colours are assigned in there.
+    // discovered from the rows, so their colors are assigned in there.
     const styles = readSeries(o);
     const stacked = o.shape === "stacked";
     const area = o.shape === "area";
-    const Wrap = stacked || area ? "AreaChart" : "LineChart";
-    const fan = refs.length === 1 ? fanoutOf(refs[0]) : null;
+    const Wrap =
+      stacked || area ? "AreaChart" : "LineChart";
+    const fan =
+      refs.length === 1 ? fanoutOf(refs[0]) : null;
     // The spread only means anything for exactly two series; any other count
     // quietly draws them separately rather than failing a shape that renders.
-    const spread = o.combine === "spread" && !fan && s.length === 2;
+    const spread =
+      o.combine === "spread" && !fan && s.length === 2;
     const title = spread
       ? `${s[0].label} − ${s[1].label}`
       : fan
         ? // A subset chip already names itself ("… · Hubs"); the whole stream
           // goes by the stream's name.
-          (refs[0].subset ? refs[0].label : (schemaFor(refs[0].schemaId)?.name ?? s[0].label))
+          refs[0].subset
+          ? refs[0].label
+          : (schemaFor(refs[0].schemaId)?.name ??
+            s[0].label)
         : titleFor(refs, s);
     // A day of a five-minute feed is 288 rows; a week is 2,016 — and a
     // fanned-out stream multiplies that by its entities. The limit follows
     // the window instead of quietly truncating the long one.
     const limit = fan
-      ? fanoutLimit(o.window, grainOf(refs[0]), fan.only?.length)
+      ? fanoutLimit(
+          o.window,
+          grainOf(refs[0]),
+          fan.only?.length,
+        )
       : o.window === "-7d"
         ? 2000
         : 500;
     // A fanned-out chart is always several series, whatever its shape, so it
     // always carries the legend.
     const legend = stacked || fan;
+
+    // A wire retargets per-node queries at the picked entity; a fan-out
+    // discovers its own entities and a spread is a derived pair, so neither
+    // can follow one.
+    const follow = fan || spread ? null : followOf(o);
 
     /*
       A second y-axis, when any series was sent to it. Only for overlapping
@@ -593,7 +787,8 @@ const chart: ComponentDef = {
       *against* the first, and with nothing on the left it is the same chart
       wearing its axis on the other side.
     */
-    const axisOf = (key: string) => (styles[key]?.a === "r" ? "r" : "l");
+    const axisOf = (key: string) =>
+      styles[key]?.a === "r" ? "r" : "l";
     const dual =
       !stacked &&
       !fan &&
@@ -604,8 +799,11 @@ const chart: ComponentDef = {
     // reason to split axes, and the header saying only the left one was a lie
     // about half the chart. The tooltip gets the per-series map for the same
     // reason.
-    const leftUnit = s.find((x) => axisOf(x.key) === "l")?.unit ?? s[0].unit;
-    const rightUnit = s.find((x) => axisOf(x.key) === "r")?.unit ?? "";
+    const leftUnit =
+      s.find((x) => axisOf(x.key) === "l")?.unit ??
+      s[0].unit;
+    const rightUnit =
+      s.find((x) => axisOf(x.key) === "r")?.unit ?? "";
     const headerUnit =
       dual && rightUnit && rightUnit !== leftUnit
         ? `${leftUnit} · ${rightUnit}`
@@ -625,7 +823,12 @@ const chart: ComponentDef = {
             limit,
           },
         ]
-      : s.map((x) => ({ dataset: x.dataset, node: x.node, start: o.window, limit }));
+      : s.map((x) => ({
+          dataset: x.dataset,
+          node: x.node,
+          start: o.window,
+          limit,
+        }));
 
     const setup = fan
       ? `
@@ -637,7 +840,7 @@ const chart: ComponentDef = {
   /*
     Pivot: one point per interval, one key per entity, discovered from the
     rows rather than declared — an entity the source adds next year appears
-    without this page being recomposed. Colour slots go by alphabetical
+    without this page being recomposed. color slots go by alphabetical
     entity name, so a reload never repaints anyone; past eight entities the
     eight largest keep the chart and the rest wait for a second tile.
   */
@@ -697,15 +900,19 @@ ${
     ? `
   const SERIES = ${JSON.stringify(
     // A stack has no stroke of its own — the hairline between segments is the
-    // surface colour — so a stacked series takes the colour and ignores the
+    // surface color — so a stacked series takes the color and ignores the
     // line style rather than drawing a dash nobody asked for.
-    s.map((x, n) => ({ key: x.key, label: x.label, color: paint(styles, x.key, n).color })),
+    s.map((x, n) => ({
+      key: x.key,
+      label: x.label,
+      color: paint(styles, x.key, n).color,
+    })),
   )};`
     : ""
 }`;
 
     // Stack order is decided from the data: the biggest series goes to the
-    // bottom. Colours ride with the series, never with the position.
+    // bottom. colors ride with the series, never with the position.
     const orderMemo =
       stacked || fan
         ? `
@@ -720,9 +927,9 @@ ${
     const marks =
       stacked || fan
         ? stacked
-          ? // The surface-coloured stroke is the gap between stacked
+          ? // The surface-colored stroke is the gap between stacked
             // segments, so adjacent fills never touch — identity is never
-            // colour alone.
+            // color alone.
             `{ordered.map((sr) => (
             <Area key={sr.key} type="monotone" stackId="a" dataKey={sr.key} name={sr.label} stroke="var(--surface)" strokeWidth={1} fill={sr.color} fillOpacity={0.85} dot={false} isAnimationActive={false} connectNulls />
           ))}`
@@ -737,11 +944,18 @@ ${
               return `<${area ? "Area" : "Line"} type="monotone" dataKey="sd" name=${JSON.stringify(title)} stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
             })()
           : s
-            .map((x, n) => {
-              const p = paint(styles, x.key, n);
-              return `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} ${dual ? `yAxisId="${axisOf(x.key)}" ` : ""}stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
-            })
-            .join("\n          ");
+              .map((x, n) => {
+                const p = paint(styles, x.key, n);
+                // A wired chart's series is whatever was picked, so its label
+                // follows the pick — a legend reading the composed-in node
+                // beside the picked node's line compares nothing.
+                const label =
+                  follow !== null
+                    ? `{picked ?? ${JSON.stringify(x.label)}}`
+                    : JSON.stringify(x.label);
+                return `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${label} ${dual ? `yAxisId="${axisOf(x.key)}" ` : ""}stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
+              })
+              .join("\n          ");
 
     return {
       imports: [
@@ -757,10 +971,8 @@ ${
       ],
       code: `function ${name}({ w, h }) {
   const SOURCE_TZ = ${JSON.stringify(sourceTz(refs))};
-  const { rows, error, loading } = useSeries(
-    ${JSON.stringify(queries, null, 2).replace(/\n/g, "\n    ")},
-    ${refreshMs(refs)},
-  );
+${followSnippet(follow, JSON.stringify(queries, null, 2).replace(/\n/g, "\n      "))}
+  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
 ${setup}
 ${orderMemo}
   /*
@@ -824,7 +1036,13 @@ ${orderMemo}
     return { ticks, labels, tall };
   }, [merged, plotW, tz]);
   return (
-    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(title)} unit=${JSON.stringify(headerUnit)} loading={loading} error={error}>
+    <Section index={${i}} w={w} h={h} fill title=${
+      follow !== null
+        ? `{picked ? picked + ${JSON.stringify(
+            ` — ${schemaFor(refs[0]?.schemaId)?.name ?? ""}`,
+          )} : ${JSON.stringify(title)}}`
+        : JSON.stringify(title)
+    } unit=${JSON.stringify(headerUnit)} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div ref={plotBox} style={{ inset: 0, position: "absolute" }}>
       <ResponsiveContainer width="100%" height="100%">
         <${Wrap} data={merged} margin={{ top: 4, right: ${dual ? -12 : 8}, bottom: 0, left: -12 }}>
@@ -856,7 +1074,7 @@ ${
           <Tooltip content={<ChartTip unit=${JSON.stringify(leftUnit)}${tipUnits} tz={tz} />} />
 ${
   legend
-    ? `          <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />
+    ? `          {!NAKED && <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />}
           `
     : "          "
 }${marks}
@@ -888,9 +1106,15 @@ ${
 const scatter: ComponentDef = {
   kind: "scatter",
   name: "Scatter",
-  blurb: "Two series against each other — how they move together.",
+  blurb:
+    "Two series against each other — how they move together.",
   options: [
-    { key: "window", label: "Window", choices: WINDOWS, fallback: "-24h" },
+    {
+      key: "window",
+      label: "Window",
+      choices: WINDOWS,
+      fallback: "-24h",
+    },
     {
       key: "fit",
       label: "Fit",
@@ -904,7 +1128,9 @@ const scatter: ComponentDef = {
   // Exactly two: an x and a y. A third series has no axis left to sit on, and
   // one has nothing to be plotted against.
   accepts: (refs) =>
-    refs.length === 2 && !fanoutOf(refs[0]) && !fanoutOf(refs[1])
+    refs.length === 2 &&
+    !fanoutOf(refs[0]) &&
+    !fanoutOf(refs[1])
       ? { ok: true }
       : {
           ok: false,
@@ -1081,9 +1307,15 @@ ${
 const distribution: ComponentDef = {
   kind: "distribution",
   name: "Distribution",
-  blurb: "How often a value occurs — duration curve or histogram.",
+  blurb:
+    "How often a value occurs — duration curve or histogram.",
   options: [
-    { key: "window", label: "Window", choices: WINDOWS, fallback: "-24h" },
+    {
+      key: "window",
+      label: "Window",
+      choices: WINDOWS,
+      fallback: "-24h",
+    },
     {
       key: "view",
       label: "View",
@@ -1109,14 +1341,20 @@ const distribution: ComponentDef = {
     refs.length === 0
       ? { ok: false, why: "Pick a series." }
       : refs.length > 4
-        ? { ok: false, why: "Four distributions is the most one axis reads." }
+        ? {
+            ok: false,
+            why: "Four distributions is the most one axis reads.",
+          }
         : refs.length === 1 && fanoutOf(refs[0])
           ? {
               ok: false,
               why: "A whole stream fans out to more curves than this reads — pick the entities.",
             }
           : uniformUnit(refs) === null
-            ? { ok: false, why: "One unit at a time: these mix units." }
+            ? {
+                ok: false,
+                why: "One unit at a time: these mix units.",
+              }
             : { ok: true },
   emit(refs, i, o) {
     const s = series(refs);
@@ -1144,7 +1382,9 @@ const distribution: ComponentDef = {
       })
       .join("\n          ");
 
-    const columns = JSON.stringify(s.map((x) => ({ key: x.key, column: x.column })));
+    const columns = JSON.stringify(
+      s.map((x) => ({ key: x.key, column: x.column })),
+    );
 
     return {
       imports: [
@@ -1246,7 +1486,7 @@ ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
           />
           <YAxis tickFormatter={axisNum} tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={46} />
           <Tooltip content={<DistTip />} />
-${s.length > 1 ? '          <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />\n' : ""}          ${marks}
+${s.length > 1 ? '          {!NAKED && <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />}\n' : ""}          ${marks}
         </${duration || !bars ? "LineChart" : "BarChart"}>
       </ResponsiveContainer>
       </div>
@@ -1286,23 +1526,36 @@ const bar: ComponentDef = {
     refs.length === 0
       ? { ok: false, why: "Pick some series." }
       : refs.length === 1 && !fanoutOf(refs[0])
-        ? { ok: false, why: "One value is a ticker — add a second series to compare." }
+        ? {
+            ok: false,
+            why: "One value is a ticker — add a second series to compare.",
+          }
         : refs.length > 8
-          ? { ok: false, why: "Eight bars is the most one chart compares well." }
+          ? {
+              ok: false,
+              why: "Eight bars is the most one chart compares well.",
+            }
           : uniformUnit(refs) === null
-            ? { ok: false, why: "Bars compare one unit; these mix units." }
+            ? {
+                ok: false,
+                why: "Bars compare one unit; these mix units.",
+              }
             : { ok: true },
   // Beside a single selection a bar is not a rejected bar, it is a ticker —
   // unless the selection is a whole stream, which fans out into a bar per
   // entity and is exactly what this shape is for.
-  offered: (refs) => refs.length !== 1 || fanoutOf(refs[0]) !== null,
+  offered: (refs) =>
+    refs.length !== 1 || fanoutOf(refs[0]) !== null,
   emit(refs, i, o) {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
     const name = `Bar${i}`;
-    const fan = refs.length === 1 ? fanoutOf(refs[0]) : null;
+    const fan =
+      refs.length === 1 ? fanoutOf(refs[0]) : null;
     const title = fan
-      ? (refs[0].subset ? refs[0].label : (schemaFor(refs[0].schemaId)?.name ?? s[0].label))
+      ? refs[0].subset
+        ? refs[0].label
+        : (schemaFor(refs[0].schemaId)?.name ?? s[0].label)
       : titleFor(refs, s);
     const horizontal = o.orient === "h";
 
@@ -1314,10 +1567,16 @@ const bar: ComponentDef = {
           {
             dataset: s[0].dataset,
             ...(fan.only ? { node: fan.only } : {}),
-            limit: fan.only ? Math.max(24, fan.only.length * 2) : 24,
+            limit: fan.only
+              ? Math.max(24, fan.only.length * 2)
+              : 24,
           },
         ]
-      : s.map((x) => ({ dataset: x.dataset, node: x.node, limit: 1 }));
+      : s.map((x) => ({
+          dataset: x.dataset,
+          node: x.node,
+          limit: 1,
+        }));
 
     const dataMemo = fan
       ? `
@@ -1327,7 +1586,7 @@ const bar: ComponentDef = {
   const COLUMN = ${JSON.stringify(s[0].column)};
 
   // Rows arrive newest-first, so the first row per entity is its latest
-  // value. Colour slots go by alphabetical entity name — stable across
+  // value. color slots go by alphabetical entity name — stable across
   // reloads and untouched by the sort below.
   const data = React.useMemo(() => {
     const latest = new Map();
@@ -1351,7 +1610,7 @@ const bar: ComponentDef = {
     return out;
   }, [rows]);`
       : `
-  // The entity is the bar's name; colour was assigned at selection time and
+  // The entity is the bar's name; color was assigned at selection time and
   // rides with the entity through any sort, never with its rank.
   const SERIES = ${JSON.stringify(
     s.map((x, n) => ({
@@ -1435,11 +1694,11 @@ ${
   },
 };
 
-
 const heatmap: ComponentDef = {
   kind: "heatmap",
   name: "Heatmap",
-  blurb: "Time gridded against itself — where in the day, or where in the hour, a series lives.",
+  blurb:
+    "Time gridded against itself — where in the day, or where in the hour, a series lives.",
   options: [
     {
       /*
@@ -1492,13 +1751,22 @@ const heatmap: ComponentDef = {
     refs.length === 0
       ? { ok: false, why: "Pick a series." }
       : refs.length > 1
-        ? { ok: false, why: "A heatmap grids one series against time." }
+        ? {
+            ok: false,
+            why: "A heatmap grids one series against time.",
+          }
         : fanoutOf(refs[0])
-          ? { ok: false, why: "Pick a single entity, not the whole stream." }
+          ? {
+              ok: false,
+              why: "Pick a single entity, not the whole stream.",
+            }
           : // Grain, not cadence: the day-ahead market publishes once a day and
             // is still twenty-four hourly readings, which is a grid.
             grainOf(refs[0]) > 3600
-            ? { ok: false, why: "Needs intraday readings — a daily series has no hours to grid." }
+            ? {
+                ok: false,
+                why: "Needs intraday readings — a daily series has no hours to grid.",
+              }
             : { ok: true },
   // Beside several series a heatmap is not a rejected heatmap; the selection
   // has simply moved past it, the same way it moves past the ticker.
@@ -1519,17 +1787,32 @@ const heatmap: ComponentDef = {
       is not two series.
     */
     const asked: "hour" | "day" =
-      o.grid === "auto" ? (grain < 3600 ? "hour" : "day") : o.grid === "hour" ? "hour" : "day";
-    const mode: "hour" | "day" = asked === "hour" && grain >= 3600 ? "day" : asked;
+      o.grid === "auto"
+        ? grain < 3600
+          ? "hour"
+          : "day"
+        : o.grid === "hour"
+          ? "hour"
+          : "day";
+    const mode: "hour" | "day" =
+      asked === "hour" && grain >= 3600 ? "day" : asked;
     const cellSeconds = mode === "hour" ? grain : 3600;
     const rowSeconds = mode === "hour" ? 3600 : 86_400;
     // Twelve five-minute slots in an hour, twenty-four hours in a day: one
     // expression, because the grid is always a row divided by its cell.
-    const cols = Math.max(1, Math.round(rowSeconds / cellSeconds));
+    const cols = Math.max(
+      1,
+      Math.round(rowSeconds / cellSeconds),
+    );
     // Half a day of hours and a fortnight of days are about the same amount of
     // grid, and both land inside a tile at its arriving size rather than
     // scrolling half of themselves out of sight.
-    const span = o.span === "auto" ? (mode === "hour" ? "-12h" : "-14d") : o.span;
+    const span =
+      o.span === "auto"
+        ? mode === "hour"
+          ? "-12h"
+          : "-14d"
+        : o.span;
     const spanSeconds = SPAN_SECONDS[span] ?? 1_209_600;
     /*
       Rows, not publishes: a fortnight of the day-ahead market is 336 hourly
@@ -1538,7 +1821,10 @@ const heatmap: ComponentDef = {
       whose newest rows are in the future — the query has a start and no end, so
       tomorrow's prices arrive first and would otherwise eat into the window.
     */
-    const limit = Math.min(10_000, Math.ceil(spanSeconds / Math.max(grain, 60)) + 48);
+    const limit = Math.min(
+      10_000,
+      Math.ceil(spanSeconds / Math.max(grain, 60)) + 48,
+    );
     // The most rows the span can hold, plus the two partials at either edge.
     const maxRows = Math.ceil(spanSeconds / rowSeconds) + 2;
     const cellLabel =
@@ -1642,7 +1928,7 @@ const heatmap: ComponentDef = {
 
   /*
     Ours, not the browser's. title= waits about a second before it appears,
-    draws in the OS's colours — near-white on a dark grid — and can only say one
+    draws in the OS's colors — near-white on a dark grid — and can only say one
     flat line. On a chart whose whole point is "which hour", a hint you wait for
     and then squint at is not a hint.
 
@@ -1829,22 +2115,27 @@ const ticker: ComponentDef = {
     const s = series(refs);
     const name = `Ticker${i}`;
     const day = o.compare === "day";
+    const follow =
+      refs.length === 1 && fanoutOf(refs[0])
+        ? null
+        : followOf(o);
     return {
       imports: [],
       code: `function ${name}({ w, h }) {
-  const { rows, error, loading } = useSeries(
-    ${JSON.stringify(
-      s.map((x) => ({
-        dataset: x.dataset,
-        node: x.node,
-        start: "-2h",
-        limit: 2,
-      })),
-      null,
-      2,
-    ).replace(/\n/g, "\n    ")},
-    ${refreshMs(refs)},
-  );
+${followSnippet(
+  follow,
+  JSON.stringify(
+    s.map((x) => ({
+      dataset: x.dataset,
+      node: x.node,
+      start: "-2h",
+      limit: 2,
+    })),
+    null,
+    2,
+  ).replace(/\n/g, "\n      "),
+)}
+  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
 
   const cells = ${JSON.stringify(
     s.map((x) => ({
@@ -1866,7 +2157,11 @@ const ticker: ComponentDef = {
         {cells.map((c) => (
           <div key={c.label} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, padding: "10px 12px" }}>
             <div style={{ alignItems: "center", display: "flex", gap: 5 }}>
-              <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".1em", textTransform: "uppercase" }}>{c.label}</span>
+              <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".1em", textTransform: "uppercase" }}>{${
+                follow !== null
+                  ? "picked ?? c.label"
+                  : "c.label"
+              }}</span>
               {c.mock && (
                 <span style={{ border: "1px dashed var(--info)", borderRadius: 3, color: "var(--info)", fontFamily: "var(--mono)", fontSize: 8.5, padding: "0 3px", textTransform: "uppercase" }}>mock</span>
               )}
@@ -1893,7 +2188,12 @@ const table: ComponentDef = {
   name: "Table",
   blurb: "The most recent intervals as rows, newest first.",
   options: [
-    { key: "window", label: "Window", choices: WINDOWS, fallback: "-6h" },
+    {
+      key: "window",
+      label: "Window",
+      choices: WINDOWS,
+      fallback: "-6h",
+    },
     {
       key: "rows",
       label: "Rows",
@@ -1906,7 +2206,9 @@ const table: ComponentDef = {
     },
   ],
   accepts: (refs) =>
-    refs.length === 0 ? { ok: false, why: "Pick a series." } : { ok: true },
+    refs.length === 0
+      ? { ok: false, why: "Pick a series." }
+      : { ok: true },
   emit(refs, i, o) {
     const s = series(refs);
     const name = `Table${i}`;
@@ -1983,7 +2285,7 @@ const map: ComponentDef = {
   kind: "map",
   name: "Map",
   blurb:
-    "Selections placed on Texas, sized and coloured by their newest value.",
+    "Selections placed on Texas, sized and colored by their newest value.",
   options: [
     {
       key: "style",
@@ -1992,7 +2294,10 @@ const map: ComponentDef = {
         { value: "auto", label: "Match theme" },
         { value: "dark-v11", label: "Dark" },
         { value: "light-v11", label: "Light" },
-        { value: "satellite-streets-v12", label: "Satellite" },
+        {
+          value: "satellite-streets-v12",
+          label: "Satellite",
+        },
       ],
       fallback: "auto",
     },
@@ -2037,22 +2342,35 @@ const map: ComponentDef = {
       hub, so the map greyed out for exactly the streams the invented
       positions were built for.)
     */
-    const hasField = refs.some((r) => schemaById(r.schemaId)?.field);
-    const hasMotion = refs.some((r) => schemaById(r.schemaId)?.motion);
+    const hasField = refs.some(
+      (r) => schemaById(r.schemaId)?.field,
+    );
+    const hasMotion = refs.some(
+      (r) => schemaById(r.schemaId)?.motion,
+    );
     const hasLocated = refs.some(
-      (r) => schemaById(r.schemaId)?.located || schemaById(r.schemaId)?.mockLocations,
+      (r) =>
+        schemaById(r.schemaId)?.located ||
+        schemaById(r.schemaId)?.mockLocations,
     );
 
-    if (refs.length === 0) return { ok: false, why: "Pick a series." };
-    if (hasField || hasMotion || hasLocated) return { ok: true };
+    if (refs.length === 0)
+      return { ok: false, why: "Pick a series." };
+    if (hasField || hasMotion || hasLocated)
+      return { ok: true };
 
     const nodes = refs.flatMap((r) => {
       const n = node(r);
-      return n ? [n] : (schemaFor(r.schemaId)?.entities.sample ?? []);
+      return n
+        ? [n]
+        : (schemaFor(r.schemaId)?.entities.sample ?? []);
     });
     return hasGeography(nodes)
       ? { ok: true }
-      : { ok: false, why: "None of those have a known location." };
+      : {
+          ok: false,
+          why: "None of those have a known location.",
+        };
   },
 
   emit(refs, i, o) {
@@ -2060,10 +2378,16 @@ const map: ComponentDef = {
 
     // Two kinds of reference, two treatments. A gridded schema becomes a
     // surface; everything else stays a labelled pin.
-    const fieldRef = refs.find((r) => schemaById(r.schemaId)?.field);
-    const motionRef = refs.find((r) => schemaById(r.schemaId)?.motion);
+    const fieldRef = refs.find(
+      (r) => schemaById(r.schemaId)?.field,
+    );
+    const motionRef = refs.find(
+      (r) => schemaById(r.schemaId)?.motion,
+    );
     const pointRefs = refs.filter(
-      (r) => !schemaById(r.schemaId)?.field && !schemaById(r.schemaId)?.motion,
+      (r) =>
+        !schemaById(r.schemaId)?.field &&
+        !schemaById(r.schemaId)?.motion,
     );
     const s = series(pointRefs.length ? pointRefs : refs);
 
@@ -2076,14 +2400,20 @@ const map: ComponentDef = {
       different component — so the located ref wins the layer outright.
     */
     const locatedRef = pointRefs.find(
-      (r) => schemaById(r.schemaId)?.located || schemaById(r.schemaId)?.mockLocations,
+      (r) =>
+        schemaById(r.schemaId)?.located ||
+        schemaById(r.schemaId)?.mockLocations,
     );
-    const locatedSchema = locatedRef ? schemaById(locatedRef.schemaId) : undefined;
+    const locatedSchema = locatedRef
+      ? schemaById(locatedRef.schemaId)
+      : undefined;
     // Declared, then the fan-out key, then `node`. Day-ahead rows say `bus`,
     // and a placement path that assumed one column drew one stream and silently
     // nothing for the other.
     const locatedEntity =
-      locatedSchema?.entityColumn ?? locatedSchema?.entityKey ?? "node";
+      locatedSchema?.entityColumn ??
+      locatedSchema?.entityKey ??
+      "node";
     /*
       Invented geography, carried through rather than decided once and forgotten.
 
@@ -2101,51 +2431,72 @@ const map: ComponentDef = {
       A Mapbox DOM marker is a real element, and a thousand of them is a
       thousand nodes the browser lays out and repositions on every frame of a
       pan — unusable long before the settlement points run out. A large set goes
-      into a GL circle layer instead: same points, same colour scale, one draw.
+      into a GL circle layer instead: same points, same color scale, one draw.
       What it gives up is the label baked into each marker, which is what the
       hover readout is for.
     */
     const dense =
-      (locatedRef?.subset?.entities.length ?? locatedSchema?.entities.count ?? 0) >
-      200;
+      (locatedRef?.subset?.entities.length ??
+        locatedSchema?.entities.count ??
+        0) > 200;
 
-    const nodes = locatedRef ? [] : [
-      ...new Set(
-        pointRefs.flatMap((r) => {
-          const n = node(r);
-          if (n) return [n];
-          // A subset chip names its entities outright; only the open
-          // whole-stream chip falls back to guessing from the samples.
-          if (r.subset) return r.subset.entities;
-          const sample = schemaFor(r.schemaId)?.entities.sample ?? [];
-          return Object.keys(ERCOT_POINTS).filter(
-            (k) =>
-              sample.includes(k) ||
-              k.startsWith(sample[0]?.slice(0, 3) ?? "\u00a7"),
-          );
-        }),
-      ),
-    ].filter((n) => n in ERCOT_POINTS);
+    const nodes = locatedRef
+      ? []
+      : [
+          ...new Set(
+            pointRefs.flatMap((r) => {
+              const n = node(r);
+              if (n) return [n];
+              // A subset chip names its entities outright; only the open
+              // whole-stream chip falls back to guessing from the samples.
+              if (r.subset) return r.subset.entities;
+              const sample =
+                schemaFor(r.schemaId)?.entities.sample ??
+                [];
+              return Object.keys(ERCOT_POINTS).filter(
+                (k) =>
+                  sample.includes(k) ||
+                  k.startsWith(
+                    sample[0]?.slice(0, 3) ?? "\u00a7",
+                  ),
+              );
+            }),
+          ),
+        ].filter((n) => n in ERCOT_POINTS);
 
-    const points = Object.fromEntries(nodes.map((n) => [n, ERCOT_POINTS[n]]));
-    const anyMock = refs.some((r) => r.availability === "mock");
+    const points = Object.fromEntries(
+      nodes.map((n) => [n, ERCOT_POINTS[n]]),
+    );
+    const anyMock = refs.some(
+      (r) => r.availability === "mock",
+    );
 
-    const fieldSchema = fieldRef ? schemaById(fieldRef.schemaId) : undefined;
+    const fieldSchema = fieldRef
+      ? schemaById(fieldRef.schemaId)
+      : undefined;
     const fieldColumn = fieldRef ? column(fieldRef) : "";
     const fieldUnit = fieldRef ? unit(fieldRef) : "";
-    const fieldDataset = fieldSchema?.dataset ?? fieldSchema?.id ?? "";
+    const fieldDataset =
+      fieldSchema?.dataset ?? fieldSchema?.id ?? "";
     // Particles need both halves of the vector, so they are only drawn for a
     // schema that declares which columns those are. Asked for on a scalar
     // field, the mode degrades to a heatmap — there is nothing to advect
     // through, and refusing outright would leave an empty tile.
     const vector = fieldSchema?.vector;
-    const fieldMode = o.field === "particles" && !vector ? "heatmap" : o.field;
+    const fieldMode =
+      o.field === "particles" && !vector
+        ? "heatmap"
+        : o.field;
     // Cells are named by the schema's own entity column, not by `node`.
     const fieldEntity = fieldSchema?.entityKey ?? "cell";
-    const showField = Boolean(fieldRef) && fieldMode !== "off";
+    const showField =
+      Boolean(fieldRef) && fieldMode !== "off";
 
-    const motionSchema = motionRef ? schemaById(motionRef.schemaId) : undefined;
-    const motionDataset = motionSchema?.dataset ?? motionSchema?.id ?? "";
+    const motionSchema = motionRef
+      ? schemaById(motionRef.schemaId)
+      : undefined;
+    const motionDataset =
+      motionSchema?.dataset ?? motionSchema?.id ?? "";
     const trails = o.trails !== "off";
     // Enough readings back to draw a tail without hauling a history nobody sees.
     const motionLimit = trails ? 14 : 1;
@@ -2162,7 +2513,7 @@ const map: ComponentDef = {
   const UNIT = ${JSON.stringify(s[0]?.unit ?? "")};
   const STYLE = ${JSON.stringify(o.style)};
   const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label, invented, dense }) : "null"};
-  // Absolute colour stops for the point layer's measure, when its variable
+  // Absolute color stops for the point layer's measure, when its variable
   // declares them. Null falls back to percentiles of whatever is on screen.
   const SCALE = ${JSON.stringify(pointScale(pointRefs.length ? pointRefs : refs))};
 ${locatedRef && invented ? MOCK_POINT_SOURCE : ""}
@@ -2215,8 +2566,20 @@ ${
           : ""
       }end: "-0m", limit: ${
         locatedRef.subset
-          ? Math.min(DRAW_CAP, Math.max(30, locatedRef.subset.entities.length * 2))
-          : Math.min(DRAW_CAP, Math.max(60, (locatedSchema?.entities.count ?? 50) * 2))
+          ? Math.min(
+              DRAW_CAP,
+              Math.max(
+                30,
+                locatedRef.subset.entities.length * 2,
+              ),
+            )
+          : Math.min(
+              DRAW_CAP,
+              Math.max(
+                60,
+                (locatedSchema?.entities.count ?? 50) * 2,
+              ),
+            )
       } },`
     : nodes.length
       ? `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 },`
@@ -2298,7 +2661,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   /*
     The legend, which is also the layer switch.
 
-    A multi-layer map needs a legend whatever else is true — a colour ramp
+    A multi-layer map needs a legend whatever else is true — a color ramp
     nobody can read and pins whose size means something undocumented are a
     picture, not a chart. So this is *content*, and that is what lets it sit on
     a launched screen at all: the rule that a screen on a wall carries no chrome
@@ -2313,31 +2676,47 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     revision. Hiding a layer to see what is beneath it is looking, not editing,
     which is the reasoning full screen already follows.
   */
-  const LAYERS = ${JSON.stringify(
-    [
-      ...(locatedRef || nodes.length
-        ? [{
+  const LAYERS = ${JSON.stringify([
+    ...(locatedRef || nodes.length
+      ? [
+          {
             id: "points",
             label: s[0]?.label ?? "Points",
             unit: s[0]?.unit ?? "",
             swatch: "#d9a441",
             note: invented ? "invented positions" : "",
-          }]
-        : []),
-      ...(showField
-        ? [{
+          },
+        ]
+      : []),
+    ...(showField
+      ? [
+          {
             id: "field",
             label: fieldRef!.label,
             unit: fieldUnit,
-            swatch: fieldMode === "particles" ? "#7dd3fc" : "#2b6cb0",
-            note: fieldMode === "particles" ? "particles" : "surface",
-          }]
-        : []),
-      ...(motionRef
-        ? [{ id: "motion", label: motionRef.label, unit: "", swatch: "#6f8768", note: "tracked" }]
-        : []),
-    ],
-  )};
+            swatch:
+              fieldMode === "particles"
+                ? "#7dd3fc"
+                : "#2b6cb0",
+            note:
+              fieldMode === "particles"
+                ? "particles"
+                : "surface",
+          },
+        ]
+      : []),
+    ...(motionRef
+      ? [
+          {
+            id: "motion",
+            label: motionRef.label,
+            unit: "",
+            swatch: "#6f8768",
+            note: "tracked",
+          },
+        ]
+      : []),
+  ])};
   const [hidden, setHidden] = React.useState({});
   const shown = (id) => !hidden[id];
 
@@ -2778,9 +3157,33 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       });
     };
     const off = () => setProbe(null);
+    /*
+      A click on a node is a selection, announced to the page: any tile wired
+      to this map (its \`follow\` option naming this tile's index) retargets
+      its queries at the picked entity. Same nearest-row matching as the
+      hover, for the same reason — and it works for both the marker path and
+      the dense GL path, because \`placed\` is the one source both draw from.
+    */
+    const pick = (e) => {
+      const p = placedRef.current;
+      const bounds = m.getBounds();
+      const perPx = (bounds.getEast() - bounds.getWest()) / Math.max(1, m.getCanvas().clientWidth);
+      const reach = perPx * 10;
+      let best = null, bestD = Infinity;
+      for (const id in p) {
+        const dx = (p[id].lon - e.lngLat.lng) * Math.cos((e.lngLat.lat * Math.PI) / 180);
+        const dy = p[id].lat - e.lngLat.lat;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = id; }
+      }
+      if (best && Math.sqrt(bestD) <= reach) {
+        window.dispatchEvent(new CustomEvent("dryos:pick", { detail: { source: ${i}, entity: best } }));
+      }
+    };
     m.on("mousemove", move);
     m.on("mouseout", off);
-    return () => { m.off("mousemove", move); m.off("mouseout", off); setProbe(null); };
+    m.on("click", pick);
+    return () => { m.off("mousemove", move); m.off("mouseout", off); m.off("click", pick); setProbe(null); };
     // Not placed: the point branch hit-tests what the map has rendered rather
     // than reading the row set, so it needs no data in scope — and adding data
     // here would rebind the handler on every poll, with a cleanup that clears
@@ -2820,7 +3223,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     };
     fit();
 
-    const colour = (spd) => {
+    const color = (spd) => {
       const t = flow.hi === flow.lo ? 0.5 : (spd - flow.lo) / (flow.hi - flow.lo);
       return t > 0.66 ? "#c4703a" : t > 0.33 ? "#d9a441" : "#7dd3fc";
     };
@@ -2850,7 +3253,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           const n = Math.hypot(f.u, f.v) || 1;
           // Screen y grows downward, so the northward component is negated.
           const dx = (f.u / n) * len, dy = (-f.v / n) * len;
-          g.strokeStyle = colour(f.spd);
+          g.strokeStyle = color(f.spd);
           g.beginPath();
           g.moveTo(a.x - dx / 2, a.y - dy / 2);
           g.lineTo(a.x + dx / 2, a.y + dy / 2);
@@ -2895,7 +3298,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         const t = flow.hi === flow.lo ? 0.5 : (f.spd - flow.lo) / (flow.hi - flow.lo);
         g.globalAlpha = 0.55 + 0.45 * t;
         g.lineWidth = 1.0 + 1.5 * t;
-        g.strokeStyle = colour(f.spd);
+        g.strokeStyle = color(f.spd);
         g.beginPath();
         g.moveTo(a.x, a.y);
         g.lineTo(b.x, b.y);
@@ -2936,7 +3339,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     hundred aeroplanes cost nothing, and overlap is allowed because two
     aeroplanes near each other is information rather than clutter.
 
-    Colour is by barometric altitude, which is the convention — low is warm and
+    color is by barometric altitude, which is the convention — low is warm and
     near an airport, high is cool and in the cruise. Mapbox will only tint an
     icon that is a signed distance field, so instead there is one image per
     band and a \`match\` picks between them.
@@ -3141,15 +3544,15 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     const values = ids.map((n) => placed[n].value).filter((v) => typeof v === "number");
     if (!values.length) return;
     /*
-      The colour ramp, and why it is not min-to-max.
+      The color ramp, and why it is not min-to-max.
 
       Min and max are set by two readings out of a thousand, and price data is
       heavy-tailed: across one ERCOT interval p1 is about $17 and p99 about $50
       while the extremes span $136, so a linear ramp puts 98% of nodes inside a
-      quarter of the colour range and paints them all the same. The congestion
+      quarter of the color range and paints them all the same. The congestion
       you opened the map to find is the part that gets squeezed out.
 
-      A declared scale (SCALE) fixes values to colours absolutely, so a colour
+      A declared scale (SCALE) fixes values to colors absolutely, so a color
       survives a refresh and $100 looks like $100 whatever else is on screen.
       Without one, percentiles are the fallback — still relative, but no longer
       collapsible by a single outlier.
@@ -3163,7 +3566,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       : [pct(0.05), "#2b6cb0", pct(0.5), "#7dd3fc", pct(0.8), "#e8ff3d", pct(0.95), "#fb8b5c", pct(1), "#f4666b"];
 
     /*
-      One mark, one channel: every node is the same dot and colour carries the
+      One mark, one channel: every node is the same dot and color carries the
       value on its own.
 
       Size varying with value made the map read as two overlapping claims —
@@ -3173,8 +3576,8 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       leaves the geography saying only where nodes are, which is all it knows.
 
       Opacity is constant for the same reason and one more: the legend shows
-      solid colours, so a node drawn at half opacity over a dark basemap is
-      simply not the colour in the key. Fading the ordinary majority made the
+      solid colors, so a node drawn at half opacity over a dark basemap is
+      simply not the color in the key. Fading the ordinary majority made the
       only thing decoding the map slightly wrong about most of it.
     */
 
@@ -3289,7 +3692,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
 
   return (
     <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(motionRef ? "Live traffic" : fieldRef ? `${fieldRef.label} field` : `${s[0]?.label ?? "Map"} by location`)} unit={FIELD ? FIELD.unit : UNIT} loading={loading && !ready} error={error}>
-      <div ref={host} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, inset: 0, position: "absolute" }} />
+      <div ref={host} style={{ background: "var(--surface-2)", border: NAKED ? "none" : "1px solid var(--line)", borderRadius: NAKED ? 0 : 6, inset: 0, position: "absolute" }} />
       {/* Over the map, under the markers, and deaf to the pointer — the map
           below still pans and zooms as if nothing were on top of it. */}
       <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
@@ -3300,7 +3703,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
              has its own panel. ───────────────────────────────────────────── */}
       {/* Gone entirely when nothing is on, rather than an empty bordered box
           keying nothing. The layer panel is where you turn things back on. */}
-      {ordered.some((L) => shown(L.id)) ? (
+      {!NAKED && ordered.some((L) => shown(L.id)) ? (
         <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 3, left: 4, padding: "5px 7px", position: "absolute", top: 4, zIndex: 3 }}>
           {ordered.filter((L) => shown(L.id)).map((L) => (
             <div key={L.id} style={{ alignItems: "center", display: "flex", gap: 6 }}>
@@ -3337,7 +3740,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
 
       {/* ── Layers, top right. Visibility and draw order — the two things you
              change while reading rather than while building. ─────────────── */}
-      {LAYERS.length > 1 || (LAYERS.length === 1 && LAYERS[0].id !== "points") ? (
+      {!NAKED && (LAYERS.length > 1 || (LAYERS.length === 1 && LAYERS[0].id !== "points")) ? (
         <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, minWidth: 132, padding: "4px 5px", position: "absolute", right: 4, top: 4, zIndex: 3 }}>
           <div style={{ color: "var(--faint)", fontSize: 8.5, letterSpacing: ".1em", padding: "0 2px 3px", textTransform: "uppercase" }}>
             Layers
@@ -3379,6 +3782,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
 
       {/* ── Time, along the bottom. Full width because a scale is easier to
              land on the further it runs, and this one covers three days. ── */}
+      {!NAKED && (
       <div style={{ background: "var(--bg)", borderRadius: 5, bottom: 22, left: 4, padding: "4px 8px 2px", position: "absolute", right: 4, zIndex: 3 }}>
         <div style={{ alignItems: "center", display: "flex", gap: 8 }}>
           <button
@@ -3424,6 +3828,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           </div>
         ) : null}
       </div>
+      )}
       {probe ? (
         <div
           style={{
@@ -3492,7 +3897,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         </div>
       ) : null}
 
-      {field && (
+      {field && !NAKED && (
         <div style={{ alignItems: "center", background: "var(--bg)", borderRadius: 4, bottom: 4, display: "flex", gap: 6, left: 4, padding: "3px 6px", position: "absolute", zIndex: 2 }}>
           <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9 }}>
             {field.lo.toFixed(0)}
@@ -3504,7 +3909,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         </div>
       )}
 
-      {flights && (
+      {flights && !NAKED && (
         <div style={{ alignItems: "center", background: "var(--bg)", borderRadius: 4, display: "flex", gap: 7, padding: "3px 7px", position: "absolute", right: 4, top: 4, zIndex: 2 }}>
           <span style={{ color: "var(--ink)", fontFamily: "var(--mono)", fontSize: 10 }}>
             {flights.count} aircraft
@@ -3533,20 +3938,265 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           "these are not where this says they are" is not something a reader
           should have to infer from the word "approximate". A centroid is
           approximate. A published coordinate needs no caveat at all.
+
+          It is the one thing `NAKED` keeps, because a preview that reads as
+          real is the same lie a launched tile would be telling. With the
+          scrubber gone it moves up into the corner the legend vacated —
+          bottom-right out there is Mapbox's own attribution button.
         */
         invented || anyMock
-          ? `<p style={{ background: "var(--color-info-dim)", border: "1px dashed var(--color-info-line)", borderRadius: 4, bottom: 22, color: "var(--color-info)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".08em", margin: 0, padding: "2px 6px", position: "absolute", right: 4, textTransform: "uppercase", zIndex: 2 }}>
+          ? `<p style={{ background: "var(--color-info-dim)", border: "1px dashed var(--color-info-line)", borderRadius: 4, bottom: NAKED ? "auto" : 22, top: NAKED ? 4 : "auto", color: "var(--color-info)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".08em", margin: 0, padding: "2px 6px", position: "absolute", right: 4, textTransform: "uppercase", zIndex: 2 }}>
         ${anyMock ? "Mock data · invented positions" : "Mock positions · not published"}
       </p>`
           : locatedRef || !nodes.length
             ? ""
-            : `<p style={{ background: "var(--bg)", borderRadius: 4, bottom: 4, color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px", position: "absolute", right: 4, zIndex: 2 }}>
+            : `<p style={{ background: "var(--bg)", borderRadius: 4, bottom: NAKED ? "auto" : 4, top: NAKED ? 4 : "auto", color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px", position: "absolute", right: 4, zIndex: 2 }}>
         Approximate zone centroids
       </p>`
       }
     </Section>
   );
 }`,
+    };
+  },
+};
+
+/**
+ * Which column names an entity in this stream, and which names not to offer.
+ *
+ * Deliberately not `fanoutOf`. That one answers "is a stream-level chip a
+ * chart of everything", which the big streams say no to on purpose — 1,118
+ * settlement points is not a chart. It is exactly a search, though, so this
+ * reads the map's own fallback chain (`entityColumn`, then `entityKey`, then
+ * `node`) and asks only whether there is more than one name to choose
+ * between.
+ */
+function searchable(
+  ref: DataRef,
+): { key: string; omit: string[]; only?: string[] } | null {
+  if (ref.kind === "entity" || ref.kind === "query") return null;
+  const schema = schemaFor(ref.schemaId);
+  if (!schema) return null;
+  const key =
+    schema.entityColumn ?? schema.entityKey ?? "node";
+  if (ref.subset?.entities.length)
+    return {
+      key,
+      omit: schema.entityOmit ?? [],
+      only: ref.subset.entities,
+    };
+  return schema.entities.count > 1
+    ? { key, omit: schema.entityOmit ?? [] }
+    : null;
+}
+
+/**
+ * A search over one stream's entities, driving the tiles wired to it.
+ *
+ * The map was the only source a wire could have, which made "click a node"
+ * the only way to retarget a chart — fine for three dozen hubs on a map,
+ * useless for a screen with no room for one and worse for 1,118 settlement
+ * points three pixels across. Typing a name is the other half of the same
+ * gesture, and it is the half that scales.
+ *
+ * **The list is the stream's own answer, not a declaration.** It queries the
+ * newest interval without an entity filter and reads the names off the rows —
+ * the same discovery a fan-out does — so an entity the source adds next year
+ * appears in the search without this page being recomposed, and a name that
+ * has gone quiet stops being offered.
+ */
+const picker: ComponentDef = {
+  kind: "picker",
+  name: "Node search",
+  blurb:
+    "Search one stream's entities and pick one; every tile wired to it retargets.",
+  options: [
+    {
+      key: "sort",
+      label: "Order",
+      choices: [
+        { value: "name", label: "A to Z" },
+        { value: "value", label: "Largest value first" },
+      ],
+      fallback: "name",
+    },
+    {
+      key: "clear",
+      label: "Allow clearing",
+      choices: [
+        { value: "yes", label: "Yes — back to the default" },
+        { value: "no", label: "No" },
+      ],
+      fallback: "yes",
+    },
+  ],
+  /*
+    One stream, and a stream with entities in it. An entity-level chip is one
+    name, which is a search with a single answer; two streams is two lists,
+    and a pick out of one of them means nothing to the other.
+  */
+  accepts: (refs) => {
+    if (refs.length !== 1)
+      return {
+        ok: false,
+        why:
+          refs.length === 0
+            ? "Pick one stream."
+            : "A search reads one stream's entities.",
+      };
+    return searchable(refs[0])
+      ? { ok: true }
+      : {
+          ok: false,
+          why: "This selection is a single series — there is nothing to search between.",
+        };
+  },
+  // Anywhere it cannot search it is not a rejected search, it is an answer to
+  // a question nobody asked.
+  offered: (refs) =>
+    refs.length === 1 && searchable(refs[0]) !== null,
+  emit(refs, i, o) {
+    const fan = searchable(refs[0])!;
+    const s = series(refs);
+    const name = `Picker${i}`;
+    const schema = schemaFor(refs[0].schemaId);
+    /*
+      One interval's worth of rows, bounded at now for the same reason the map
+      is: a forecast's newest row is days out, and a search listing next
+      Sunday's names would be wrong in a way nobody would catch by reading it.
+    */
+    const limit = Math.min(
+      DRAW_CAP,
+      fan.only
+        ? Math.max(30, fan.only.length * 2)
+        : Math.max(60, (schema?.entities.count ?? 50) * 2),
+    );
+    const title = schema?.name ?? s[0]?.label ?? "Search";
+    return {
+      imports: [],
+      code: `function ${name}({ w, h }) {
+  const queries = ${JSON.stringify([
+    {
+      dataset: s[0].dataset,
+      ...(fan.only ? { node: fan.only } : {}),
+      end: "-0m",
+      limit,
+    },
+  ])};
+  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
+
+  const ENTITY = ${JSON.stringify(fan.key)};
+  const OMIT = ${JSON.stringify(fan.omit)};
+  const ONLY = ${JSON.stringify(fan.only ?? null)};
+  const COLUMN = ${JSON.stringify(s[0].column)};
+  const BY_VALUE = ${o.sort === "value"};
+  const CLEARABLE = ${o.clear !== "no"};
+
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(null);
+
+  /*
+    The names, read off the rows rather than declared, newest first so the
+    value beside each is the current one. Typing filters this list locally —
+    a keystroke that costs a query is a search that stutters at exactly the
+    speed somebody types.
+  */
+  const items = useMemo(() => {
+    const best = new Map();
+    (rows[0] || []).forEach((r) => {
+      const e = r[ENTITY];
+      if (e == null) return;
+      const n = String(e);
+      if (OMIT.indexOf(n) !== -1) return;
+      if (ONLY && ONLY.indexOf(n) === -1) return;
+      if (!best.has(n)) best.set(n, r[COLUMN]);
+    });
+    const list = [...best].map(([n, v]) => ({ name: n, value: v }));
+    list.sort((a, b) =>
+      BY_VALUE
+        ? (Number(b.value) || 0) - (Number(a.value) || 0)
+        : a.name.localeCompare(b.name),
+    );
+    return list;
+  }, [rows]);
+
+  const hits = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    const list = t
+      ? items.filter((x) => x.name.toLowerCase().indexOf(t) !== -1)
+      : items;
+    return list.slice(0, 300);
+  }, [items, q]);
+
+  /* The wire's own channel, the same one a map click travels on. */
+  function send(n) {
+    setSel(n);
+    window.dispatchEvent(new CustomEvent("dryos:pick", { detail: { source: ${i}, entity: n } }));
+  }
+
+  return (
+    <Section index={${i}} w={w} h={h} title=${JSON.stringify(title)} loading={loading} error={error}>
+      <div style={{ background: "var(--surface)", paddingBottom: 6, position: "sticky", top: 0, zIndex: 2 }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={"Search " + items.length + " …"}
+          style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, color: "var(--ink)", fontFamily: "inherit", fontSize: 12, outline: "none", padding: "6px 8px", width: "100%" }}
+        />
+        {sel && (
+          <div style={{ alignItems: "center", display: "flex", gap: 6, marginTop: 6 }}>
+            <span style={{ border: "1px solid var(--accent)", borderRadius: 4, color: "var(--accent)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".08em", padding: "1px 5px", textTransform: "uppercase" }}>⌁ {sel}</span>
+            {CLEARABLE && (
+              <button
+                onClick={() => { setSel(null); window.dispatchEvent(new CustomEvent("dryos:pick", { detail: { source: ${i}, entity: null } })); }}
+                style={{ background: "transparent", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 11, padding: 0 }}
+              >
+                clear
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {hits.map((x) => (
+          <button
+            key={x.name}
+            onClick={() => send(x.name)}
+            style={{
+              alignItems: "center",
+              background: x.name === sel ? "var(--accent-dim)" : "transparent",
+              border: "1px solid " + (x.name === sel ? "var(--accent)" : "transparent"),
+              borderRadius: 5,
+              color: "var(--ink)",
+              cursor: "pointer",
+              display: "flex",
+              fontFamily: "inherit",
+              fontSize: 12,
+              gap: 8,
+              padding: "4px 6px",
+              textAlign: "left",
+              width: "100%",
+            }}
+          >
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.name}</span>
+            {x.value != null && (
+              <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10.5 }}>
+                {Number(x.value).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </span>
+            )}
+          </button>
+        ))}
+        {hits.length === 0 && !loading && (
+          <p style={{ color: "var(--faint)", fontSize: 11.5, margin: "6px 2px" }}>
+            {items.length === 0 ? "No entities in the newest interval." : "Nothing matches that."}
+          </p>
+        )}
+      </div>
+    </Section>
+  );
+}
+`,
     };
   },
 };
@@ -3560,9 +4210,12 @@ export const COMPONENTS: ComponentDef[] = [
   ticker,
   table,
   map,
+  picker,
 ];
 
-export function componentDef(kind: ComponentKind): ComponentDef | undefined {
+export function componentDef(
+  kind: ComponentKind,
+): ComponentDef | undefined {
   return COMPONENTS.find((c) => c.kind === kind);
 }
 
@@ -3585,19 +4238,35 @@ export const DEFAULT_LAYOUT: Record<
   ticker: { w: 3, h: 150 },
   table: { w: 6, h: 260 },
   map: { w: 6, h: 300 },
+  picker: { w: 3, h: 260 },
 };
 
 /** The canvas: twelve columns, a 12px gutter, and 10px of vertical travel. */
-export const GRID = { cols: 12, gap: 12, snap: 10 } as const;
+export const GRID = {
+  cols: 12,
+  gap: 12,
+  snap: 10,
+} as const;
 
 /** A tile's rectangle once it has one: columns across, pixels down. */
-export type Placed = { x: number; y: number; w: number; h: number };
+export type Placed = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
 
-const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+const clamp = (n: number, lo: number, hi: number) =>
+  Math.max(lo, Math.min(hi, n));
 
 /** Do two tiles share any ground? Half-open on both axes. */
 export function overlaps(a: Placed, b: Placed): boolean {
-  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  return (
+    a.x < b.x + b.w &&
+    b.x < a.x + a.w &&
+    a.y < b.y + b.h &&
+    b.y < a.y + a.h
+  );
 }
 
 /** The first free pixel below everything already on the canvas. */
@@ -3620,7 +4289,9 @@ export function below(manifest: ComponentSpec[]): number {
  * after this change, which is the only acceptable migration for someone's
  * screen.
  */
-export function packLayout(manifest: ComponentSpec[]): ComponentSpec[] {
+export function packLayout(
+  manifest: ComponentSpec[],
+): ComponentSpec[] {
   const size = manifest.map((spec) => ({
     w: clamp(Math.round(spec.layout?.w ?? 6), 1, GRID.cols),
     h: Math.max(120, Math.round(spec.layout?.h ?? 240)),
@@ -3631,14 +4302,17 @@ export function packLayout(manifest: ComponentSpec[]): ComponentSpec[] {
   // somewhere is the one the others have to be laid around — not the reverse.
   const at: (Placed | null)[] = manifest.map((spec, i) => {
     const { x, y } = spec.layout ?? {};
-    if (typeof x !== "number" || typeof y !== "number") return null;
+    if (typeof x !== "number" || typeof y !== "number")
+      return null;
     return {
       x: clamp(Math.round(x), 0, GRID.cols - size[i].w),
       y: Math.max(0, Math.round(y)),
       ...size[i],
     };
   });
-  const taken: Placed[] = at.filter((p): p is Placed => p !== null);
+  const taken: Placed[] = at.filter(
+    (p): p is Placed => p !== null,
+  );
 
   // The old grid's own rule for the rest: fill the row, wrap when the span no
   // longer fits, and start the next row below the tallest tile in this one.
@@ -3654,12 +4328,16 @@ export function packLayout(manifest: ComponentSpec[]): ComponentSpec[] {
       rowH = 0;
     }
     const box: Placed = { x: col, y: top, w, h };
-    while (taken.some((t) => overlaps(box, t))) box.y += GRID.snap;
+    while (taken.some((t) => overlaps(box, t)))
+      box.y += GRID.snap;
     col += w;
     rowH = Math.max(rowH, h);
     taken.push(box);
     at[i] = box;
   });
 
-  return manifest.map((spec, i) => ({ ...spec, layout: at[i]! }));
+  return manifest.map((spec, i) => ({
+    ...spec,
+    layout: at[i]!,
+  }));
 }

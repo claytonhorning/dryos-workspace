@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { deleteSaved, listSaved, saveComponent } from "@/lib/workspace/library";
-import { communityComponents } from "@/lib/workspace/community";
+import { communityComponents, communityGroups } from "@/lib/workspace/community";
 import type { ComponentSpec } from "@/lib/workspace/components";
 
 export const dynamic = "force-dynamic";
 
 /**
- * The two shelves that are not the base shapes: what you saved, and what was
- * published. They travel together because the build panel lists them together,
+ * The shelves that are not the base shapes: what you saved, and what was
+ * published — components and wired groups. They travel together because the build panel lists them together,
  * and separating them into two round trips would only make the shelf arrive in
  * two pieces.
  */
@@ -15,6 +15,7 @@ export async function GET() {
   return NextResponse.json({
     components: await listSaved(),
     community: communityComponents(),
+    groups: communityGroups(),
   });
 }
 

@@ -1,9 +1,19 @@
 import type { ServingTier } from "./tiers";
 import type { VerticalId } from "./verticals";
 
-export type SourceBasis = "iso_public" | "public_government" | "tos_reviewed" | "licensed";
+export type SourceBasis =
+  | "iso_public"
+  | "public_government"
+  | "tos_reviewed"
+  | "licensed";
 
-export type Cadence = "5min" | "15min" | "hourly" | "daily" | "weekly" | "monthly";
+export type Cadence =
+  | "5min"
+  | "15min"
+  | "hourly"
+  | "daily"
+  | "weekly"
+  | "monthly";
 
 export type FieldType =
   | "string"
@@ -32,7 +42,11 @@ export interface SchemaField {
  */
 export type DatasetStatus = "pending" | "live";
 
-export type HealthStatus = "healthy" | "degraded" | "stale" | "failing";
+export type HealthStatus =
+  | "healthy"
+  | "degraded"
+  | "stale"
+  | "failing";
 
 /**
  * Telemetry is absent until a collector actually runs.
@@ -100,7 +114,7 @@ export interface PreviewInterval {
   nodes: number;
   /** Seconds from interval to the source publishing it. */
   postLagSeconds: number | null;
-  /** Seconds from interval to us having it. Drives the graph colour. */
+  /** Seconds from interval to us having it. Drives the graph color. */
   collectLagSeconds: number | null;
 }
 

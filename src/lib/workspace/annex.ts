@@ -33,6 +33,7 @@ const SLOT = "{/* dryos:annex-slot */}";
 
 /** Helpers the generated runtime defines, renamed so they cannot collide. */
 const HELPERS = [
+  "NAKED",
   "DRAG_BLANK",
   "useSeries",
   "useMapbox",

@@ -1,6 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { cx } from "@/components/ui";
 import { useTheme } from "@/lib/useTheme";
 import { useTimeZone } from "@/lib/useTimeZone";
@@ -37,6 +42,7 @@ export function Runner({
   dropping,
   dropSize,
   dropPreview,
+  dropCard,
   onDropAt,
   placing,
   onResize,
@@ -69,6 +75,12 @@ export function Runner({
    */
   dropPreview?: string;
   /**
+   * The light version, for a staged group: one chip per member — shape and
+   * data — stacked at the ghost. A live preview of N tiles would be N
+   * frames compiling mid-drag; the chips say what lands without paying that.
+   */
+  dropCard?: { kind: string; data: string }[];
+  /**
    * The place on the canvas the frame says the drop would take — null when it
    * never found one, which is a release over ground the tile does not fit on.
    * Guessing a corner there would drop it on top of something.
@@ -96,7 +108,9 @@ export function Runner({
    * A tile's ✕ was clicked inside the frame. The frame has already hidden the
    * tile optimistically; resolve false and it is restored.
    */
-  onRemove?: (index: number) => Promise<boolean> | boolean | void;
+  onRemove?: (
+    index: number,
+  ) => Promise<boolean> | boolean | void;
   /** A tile's ⚙ was clicked inside the frame. */
   onConfigure?: (index: number) => void;
   /** Edge to edge: no radius, no border. The screen is the whole view. */
@@ -134,18 +148,26 @@ export function Runner({
   // below the layout.
   useEffect(() => {
     window.dispatchEvent(
-      new CustomEvent("dryos:querying", { detail: busy > 0 }),
+      new CustomEvent("dryos:querying", {
+        detail: busy > 0,
+      }),
     );
   }, [busy]);
   // A Runner that unmounts mid-query would otherwise leave the mark stuck on.
   useEffect(
     () => () => {
-      window.dispatchEvent(new CustomEvent("dryos:querying", { detail: false }));
+      window.dispatchEvent(
+        new CustomEvent("dryos:querying", {
+          detail: false,
+        }),
+      );
     },
     [],
   );
   /** The place on the canvas the frame says the pointer is currently over. */
-  const spot = useRef<{ x: number; y: number } | null>(null);
+  const spot = useRef<{ x: number; y: number } | null>(
+    null,
+  );
   /**
    * The ghost's rectangle in the frame's own pixels, for floating the live
    * preview of the incoming tile at exactly the place the drop would take.
@@ -186,7 +208,9 @@ export function Runner({
 
   /** The revision on screen, and the one loading invisibly behind it. */
   const [live, setLive] = useState(version);
-  const [pending, setPending] = useState<number | null>(null);
+  const [pending, setPending] = useState<number | null>(
+    null,
+  );
   useEffect(() => {
     setPending(version === live ? null : version);
   }, [version, live]);
@@ -194,7 +218,12 @@ export function Runner({
   // The stand-in leaves with the swap that makes it redundant — or, when the
   // placement failed, the moment everything has settled back to what it was.
   useEffect(() => {
-    if (landing && !placing && pending == null && version === live)
+    if (
+      landing &&
+      !placing &&
+      pending == null &&
+      version === live
+    )
       setLanding(null);
   }, [landing, placing, pending, version, live]);
 
@@ -203,12 +232,18 @@ export function Runner({
   // carries nothing but the dashboard.
   useEffect(() => {
     window.dispatchEvent(
-      new CustomEvent("dryos:updating", { detail: pending != null }),
+      new CustomEvent("dryos:updating", {
+        detail: pending != null,
+      }),
     );
   }, [pending]);
   useEffect(
     () => () => {
-      window.dispatchEvent(new CustomEvent("dryos:updating", { detail: false }));
+      window.dispatchEvent(
+        new CustomEvent("dryos:updating", {
+          detail: false,
+        }),
+      );
     },
     [],
   );
@@ -216,13 +251,19 @@ export function Runner({
   // The frame cannot read this document, so the theme has to be handed to it —
   // on load and again whenever it changes under someone's feet.
   useEffect(() => {
-    frame.current?.contentWindow?.postMessage({ __dryos: "theme", value: theme }, "*");
+    frame.current?.contentWindow?.postMessage(
+      { __dryos: "theme", value: theme },
+      "*",
+    );
   }, [theme, live]);
 
   // The display timezone rides the same channel, for the same reason.
   const tz = useTimeZone();
   useEffect(() => {
-    frame.current?.contentWindow?.postMessage({ __dryos: "tz", value: tz }, "*");
+    frame.current?.contentWindow?.postMessage(
+      { __dryos: "tz", value: tz },
+      "*",
+    );
   }, [tz, live]);
 
   // Same story for the mode: the frame cannot see the panel, so it is told
@@ -241,30 +282,49 @@ export function Runner({
   // has just booted heard none of the earlier ones, and a reloaded screen
   // silently snapping back to now would be the worst version of this.
   useEffect(() => {
-    frame.current?.contentWindow?.postMessage({ __dryos: "cursor", at: cursor ?? null }, "*");
+    frame.current?.contentWindow?.postMessage(
+      { __dryos: "cursor", at: cursor ?? null },
+      "*",
+    );
   }, [cursor, live]);
 
   const answer = useCallback(
-    async (win: Window, id: number, op: string, payload: unknown) => {
+    async (
+      win: Window,
+      id: number,
+      op: string,
+      payload: unknown,
+    ) => {
       setBusy((n) => n + 1);
       try {
-        if (op !== "query") throw new Error(`Unknown operation "${op}"`);
+        if (op !== "query")
+          throw new Error(`Unknown operation "${op}"`);
         const res = await fetch("/api/workspace/data", {
           method: "POST",
           headers: { "content-type": "application/json" },
           // Stamped here rather than in the frame: the app inside is untrusted
           // and must not be able to bill another screen.
-          body: JSON.stringify({ ...(payload as object), appId }),
+          body: JSON.stringify({
+            ...(payload as object),
+            appId,
+          }),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? "Query failed");
-        win.postMessage({ __dryos: "result", id, data: json }, "*");
+        if (!res.ok)
+          throw new Error(json.error ?? "Query failed");
+        win.postMessage(
+          { __dryos: "result", id, data: json },
+          "*",
+        );
       } catch (err) {
         win.postMessage(
           {
             __dryos: "result",
             id,
-            error: err instanceof Error ? err.message : "Query failed",
+            error:
+              err instanceof Error
+                ? err.message
+                : "Query failed",
           },
           "*",
         );
@@ -277,31 +337,58 @@ export function Runner({
 
   /** Both frames during a handover; answers go back to whichever one asked. */
   const windows = useRef(new Set<Window>());
-  const adopt = useCallback((el: HTMLIFrameElement | null, visible: boolean) => {
-    if (el?.contentWindow) windows.current.add(el.contentWindow);
-    if (visible) frame.current = el;
-  }, []);
+  const adopt = useCallback(
+    (el: HTMLIFrameElement | null, visible: boolean) => {
+      if (el?.contentWindow)
+        windows.current.add(el.contentWindow);
+      if (visible) frame.current = el;
+    },
+    [],
+  );
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       // Only listen to our own frames; anything else on the page is not ours.
-      if (!e.source || !windows.current.has(e.source as Window)) return;
+      if (
+        !e.source ||
+        !windows.current.has(e.source as Window)
+      )
+        return;
       const m = e.data as
-        | { __dryos: "call"; id: number; op: string; payload: unknown }
+        | {
+            __dryos: "call";
+            id: number;
+            op: string;
+            payload: unknown;
+          }
         | { __dryos: "error"; message: string }
         | {
             __dryos: "spot";
             x: number;
             y: number;
-            rect?: { left: number; top: number; width: number; height: number };
+            rect?: {
+              left: number;
+              top: number;
+              width: number;
+              height: number;
+            };
           }
-        | { __dryos: "resize"; index: number; w: number; h: number }
+        | {
+            __dryos: "resize";
+            index: number;
+            w: number;
+            h: number;
+          }
         | {
             __dryos: "move";
             index: number;
             x: number;
             y: number;
-            swap: { index: number; x: number; y: number } | null;
+            swap: {
+              index: number;
+              x: number;
+              y: number;
+            } | null;
           }
         | { __dryos: "remove"; index: number }
         | { __dryos: "configure"; index: number }
@@ -310,8 +397,15 @@ export function Runner({
       // Data calls are answered for either frame — the incoming one starts
       // querying while it is still invisible. Layout gestures only mean
       // anything from the one being looked at.
-      if (m.__dryos === "call") void answer(e.source as Window, m.id, m.op, m.payload);
-      else if (e.source !== frame.current?.contentWindow) return;
+      if (m.__dryos === "call")
+        void answer(
+          e.source as Window,
+          m.id,
+          m.op,
+          m.payload,
+        );
+      else if (e.source !== frame.current?.contentWindow)
+        return;
       else if (m.__dryos === "error") onError?.(m.message);
       else if (m.__dryos === "spot") {
         spot.current = { x: m.x, y: m.y };
@@ -326,9 +420,12 @@ export function Runner({
         // The frame hid the tile before asking; only a failed save puts it
         // back, so the gesture reads as instant on the path that matters.
         const src = e.source as Window;
-        void Promise.resolve(onRemove?.(m.index)).then((ok) => {
-          if (ok === false) src.postMessage({ __dryos: "restore" }, "*");
-        });
+        void Promise.resolve(onRemove?.(m.index)).then(
+          (ok) => {
+            if (ok === false)
+              src.postMessage({ __dryos: "restore" }, "*");
+          },
+        );
       } else if (m.__dryos === "configure") {
         onConfigure?.(m.index);
       } else if (m.__dryos === "cursor-set") {
@@ -339,12 +436,24 @@ export function Runner({
       }
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [answer, onError, onResize, onMove, onRemove, onConfigure, onCursor]);
+    return () =>
+      window.removeEventListener("message", onMessage);
+  }, [
+    answer,
+    onError,
+    onResize,
+    onMove,
+    onRemove,
+    onConfigure,
+    onCursor,
+  ]);
 
   // Never let the two slots carry the same revision — between the swap and
   // the effect that clears `pending` there is a render where they could.
-  const versions = pending != null && pending !== live ? [live, pending] : [live];
+  const versions =
+    pending != null && pending !== live
+      ? [live, pending]
+      : [live];
 
   // A placement that ends without a new revision failed; release the gap the
   // frame has been holding. A successful one ends with the swap replacing the
@@ -353,8 +462,16 @@ export function Runner({
   useEffect(() => {
     const was = wasPlacing.current;
     wasPlacing.current = Boolean(placing);
-    if (was && !placing && pending == null && version === live) {
-      frame.current?.contentWindow?.postMessage({ __dryos: "dragend" }, "*");
+    if (
+      was &&
+      !placing &&
+      pending == null &&
+      version === live
+    ) {
+      frame.current?.contentWindow?.postMessage(
+        { __dryos: "dragend" },
+        "*",
+      );
     }
   }, [placing, pending, version, live]);
 
@@ -378,7 +495,7 @@ export function Runner({
             // The revision is in the path, so a saved change gives the frame a
             // new address — no cache busting, and no imperative reload the
             // sandbox would not allow anyway. Theme on the URL so the very
-            // first paint is already the right colour.
+            // first paint is already the right color.
             src={`/api/workspace/apps/${appId}/bundle/${v}?theme=${theme}`}
             onLoad={(e) => {
               e.currentTarget.contentWindow?.postMessage(
@@ -397,7 +514,11 @@ export function Runner({
                 "*",
               );
               e.currentTarget.contentWindow?.postMessage(
-                { __dryos: "mode", edit: Boolean(editing), selected },
+                {
+                  __dryos: "mode",
+                  edit: Boolean(editing),
+                  selected,
+                },
                 "*",
               );
               e.currentTarget.contentWindow?.postMessage(
@@ -416,8 +537,12 @@ export function Runner({
             sandbox="allow-scripts"
             className={cx(
               "absolute top-0 left-0 border-0",
-              fit ? "origin-top-left" : "inset-0 h-full w-full",
-              visible ? "opacity-100" : "pointer-events-none opacity-0",
+              fit
+                ? "origin-top-left"
+                : "inset-0 h-full w-full",
+              visible
+                ? "opacity-100"
+                : "pointer-events-none opacity-0",
             )}
             // Laid out at the launched size, drawn at the size there is room
             // for. Pointer events inside a transformed frame are mapped back by
@@ -455,7 +580,8 @@ export function Runner({
           return (
             <iframe
               ref={(el) => {
-                if (el?.contentWindow) windows.current.add(el.contentWindow);
+                if (el?.contentWindow)
+                  windows.current.add(el.contentWindow);
               }}
               src={dropPreview}
               sandbox="allow-scripts"
@@ -469,6 +595,45 @@ export function Runner({
                 transform: `scale(${s})`,
               }}
             />
+          );
+        })()}
+
+      {/*
+        The staged group's chips, stacked at the ghost — the light stand-in
+        for the live preview a single tile gets.
+      */}
+      {dropping &&
+        !dropPreview &&
+        dropCard &&
+        spotRect &&
+        (() => {
+          const s = fit?.scale ?? 1;
+          return (
+            <div
+              className="pointer-events-none absolute z-[5] flex flex-col items-start gap-1 overflow-hidden p-2"
+              style={{
+                left: spotRect.left * s,
+                top: spotRect.top * s,
+                width: spotRect.width * s,
+                height: spotRect.height * s,
+              }}
+            >
+              {dropCard.map((c, i) => (
+                <div
+                  key={i}
+                  className="max-w-full truncate rounded border border-accent-line bg-surface/90 px-2 py-1 text-[11px] text-ink backdrop-blur"
+                >
+                  <span className="font-medium">
+                    {c.kind}
+                  </span>
+                  {c.data && (
+                    <span className="ml-1.5 text-[10px] text-muted">
+                      {c.data}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           );
         })()}
 
@@ -488,7 +653,8 @@ export function Runner({
           onDragOver={(e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
-            const r = shell.current?.getBoundingClientRect();
+            const r =
+              shell.current?.getBoundingClientRect();
             // The frame answers in its own coordinates, and a scaled frame's
             // are larger than the ones out here — so the scale comes back out
             // before the position is sent in.
@@ -524,7 +690,8 @@ export function Runner({
             // second or two, and an empty spot for that second reads as a
             // screen that ignored the gesture. It stands exactly where the
             // ghost was, because that is where the tile is going to be.
-            if (spot.current && spotRect) setLanding(spotRect);
+            if (spot.current && spotRect)
+              setLanding(spotRect);
             setSpotRect(null);
             // The frame decided where; it told us on the last dragover.
             onDropAt?.(spot.current);

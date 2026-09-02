@@ -8,15 +8,17 @@ import {
 } from "./catalog";
 import {
   DEFAULT_LAYOUT,
+  emitsPicks,
+  followable,
   type ComponentKind,
   type ComponentSpec,
 } from "./components";
 
 /**
- * Components somebody published.
+ * Components — and wired groups of them — somebody published.
  *
- * The third shelf in the build panel, beside the base shapes and the ones you
- * saved yourself. Everything here is Dryos-published today — the same honest
+ * The Community tab of the build panel, beside the base shapes. Everything
+ * here is Dryos-published today — the same honest
  * placeholder the community tab on the shelf carries, and the same reason:
  * a roster with nowhere to put an outside author never grows one.
  *
@@ -38,12 +40,8 @@ export interface PublishedComponent extends ComponentSpec {
   blurb: string;
 }
 
-interface Recipe {
-  slug: string;
-  name: string;
-  blurb: string;
-  /** Who published it. Dryos for now; the shelf is meant to take others. */
-  author: string;
+/** One component's worth of recipe: a shape and the data it reads. */
+interface Piece {
   kind: ComponentKind;
   schemaId: string;
   /**
@@ -54,6 +52,14 @@ interface Recipe {
   entities?: string[];
   options?: Record<string, string>;
   layout?: { w: number; h: number };
+}
+
+interface Recipe extends Piece {
+  slug: string;
+  name: string;
+  blurb: string;
+  /** Who published it. Dryos for now; the shelf is meant to take others. */
+  author: string;
 }
 
 const PUBLISHED: Recipe[] = [
@@ -100,7 +106,7 @@ const PUBLISHED: Recipe[] = [
 ];
 
 /** A recipe's references, rebuilt against the catalogue as it stands now. */
-function refsOf(recipe: Recipe): DataRef[] | null {
+function refsOf(recipe: Piece): DataRef[] | null {
   const schema = schemaById(recipe.schemaId);
   if (!schema) return null;
   if (!recipe.entities) {
@@ -142,4 +148,132 @@ export function communityComponents(): PublishedComponent[] {
 
 export function communityComponent(slug: string): PublishedComponent | undefined {
   return communityComponents().find((c) => c.id === slug);
+}
+
+/* ── Wired groups ──────────────────────────────────────────────────────── */
+
+/**
+ * A published group: several components that answer each other, landing as
+ * one drop. The same shape a staged group carries through the drag payload —
+ * `wireTo` is group-relative, and the edit route resolves it to manifest
+ * slots at placement because only the server knows where the group will sit.
+ */
+export interface PublishedGroupMember {
+  kind: ComponentKind;
+  refs: DataRef[];
+  options?: Record<string, string>;
+  layout: { w: number; h: number };
+  wireTo?: number;
+}
+
+export interface PublishedGroup {
+  id: string;
+  name: string;
+  author: string;
+  blurb: string;
+  /** In stacking order: the first source drives every follower under it. */
+  members: PublishedGroupMember[];
+}
+
+interface GroupRecipe {
+  slug: string;
+  name: string;
+  blurb: string;
+  author: string;
+  /**
+   * Members in stacking order. Wiring is not written down: every chart and
+   * ticker follows the first source in the list — the same rule the staging
+   * tray applies — so a recipe cannot carry a stale index.
+   */
+  members: Piece[];
+}
+
+const PUBLISHED_GROUPS: GroupRecipe[] = [
+  {
+    slug: "node-prices",
+    name: "Node prices",
+    blurb:
+      "Every settlement point on the map; click one and the chart and ticker under it follow.",
+    author: "Dryos",
+    members: [
+      {
+        kind: "map",
+        schemaId: "energy.power.realtime",
+        layout: { w: 12, h: 360 },
+      },
+      {
+        kind: "chart",
+        schemaId: "energy.power.realtime",
+        entities: ["HB_NORTH"],
+        options: { window: "-24h", shape: "line" },
+        layout: { w: 8, h: 260 },
+      },
+      {
+        kind: "ticker",
+        schemaId: "energy.power.realtime",
+        entities: ["HB_NORTH"],
+        layout: { w: 4, h: DEFAULT_LAYOUT.ticker.h },
+      },
+    ],
+  },
+  {
+    slug: "zone-load",
+    name: "Zone load",
+    blurb:
+      "Search the forecast zones by name; the load chart and the latest reading retarget on the pick.",
+    author: "Dryos",
+    members: [
+      {
+        kind: "picker",
+        schemaId: "energy.load.actualfz",
+        layout: { w: 4, h: 260 },
+      },
+      {
+        kind: "chart",
+        schemaId: "energy.load.actualfz",
+        entities: ["NORTH"],
+        options: { window: "-7d", shape: "area" },
+        layout: { w: 8, h: 260 },
+      },
+      {
+        kind: "ticker",
+        schemaId: "energy.load.actualfz",
+        entities: ["NORTH"],
+        layout: { w: 4, h: DEFAULT_LAYOUT.ticker.h },
+      },
+    ],
+  },
+];
+
+/**
+ * The published groups, wired the way the tray would wire them: every
+ * followable member points at the first source. A group naming a stream the
+ * catalogue no longer has is dropped whole — half a group is not the thing
+ * that was published.
+ */
+export function communityGroups(): PublishedGroup[] {
+  return PUBLISHED_GROUPS.flatMap((g) => {
+    const pieces = g.members.map((m) => ({ m, refs: refsOf(m) }));
+    if (pieces.some((p) => !p.refs)) return [];
+    const source = pieces.findIndex((p) => emitsPicks({ kind: p.m.kind }));
+    const members: PublishedGroupMember[] = pieces.map((p, i) => {
+      const refs = p.refs!;
+      const follows =
+        source !== -1 &&
+        i !== source &&
+        followable({ kind: p.m.kind, options: p.m.options, refs });
+      return {
+        kind: p.m.kind,
+        refs,
+        options: p.m.options,
+        layout: p.m.layout ?? DEFAULT_LAYOUT[p.m.kind],
+        wireTo: follows ? source : undefined,
+      };
+    });
+    return [{ id: g.slug, name: g.name, author: g.author, blurb: g.blurb, members }];
+  });
+}
+
+export function communityGroup(slug: string): PublishedGroup | undefined {
+  return communityGroups().find((g) => g.id === slug);
 }

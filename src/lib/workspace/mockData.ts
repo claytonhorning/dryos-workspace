@@ -1,5 +1,11 @@
 import { type Schema, schemaFor } from "./catalog";
-import { AIRPORTS, bearing, distanceNm, gridCells, gridPoint } from "./geo";
+import {
+  AIRPORTS,
+  bearing,
+  distanceNm,
+  gridCells,
+  gridPoint,
+} from "./geo";
 
 /**
  * Rows for the schemas that have no collector yet.
@@ -25,7 +31,12 @@ function hash(s: string): number {
 }
 
 function value(
-  spec: { base: number; swing: number; noise: number; floor?: number },
+  spec: {
+    base: number;
+    swing: number;
+    noise: number;
+    floor?: number;
+  },
   entity: string,
   at: number,
   key: string,
@@ -35,12 +46,15 @@ function value(
   // a 7d window does not look like seven copies of the same day.
   const day = (at % 86_400_000) / 86_400_000;
   const diurnal = Math.sin((day - 0.25) * 2 * Math.PI);
-  const slow = Math.sin(at / 259_200_000 + hash(entity) * 6.283);
+  const slow = Math.sin(
+    at / 259_200_000 + hash(entity) * 6.283,
+  );
 
   // A daily or slower stream samples the same point of the diurnal curve every
   // time, which would pin it to one end of the swing forever. Those get the slow
   // shape alone rather than a constant with noise sprinkled on it.
-  const shape = step < 43_200_000 ? diurnal * 0.7 + slow * 0.3 : slow;
+  const shape =
+    step < 43_200_000 ? diurnal * 0.7 + slow * 0.3 : slow;
 
   /*
     A grid cell varies with where it is, and smoothly.
@@ -59,17 +73,34 @@ function value(
     const spatial =
       Math.sin(cell.lon / 2.6 + drift) * 0.6 +
       Math.cos(cell.lat / 2.1 - drift * 0.6) * 0.4;
-    const wobble = (hash(`${entity}:${key}:${at}`) - 0.5) * 2 * spec.noise * 0.35;
-    const value = spec.base + spec.swing * (shape * 0.35 + spatial * 0.75) + wobble;
-    const bounded = spec.floor === undefined ? value : Math.max(spec.floor, value);
+    const wobble =
+      (hash(`${entity}:${key}:${at}`) - 0.5) *
+      2 *
+      spec.noise *
+      0.35;
+    const value =
+      spec.base +
+      spec.swing * (shape * 0.35 + spatial * 0.75) +
+      wobble;
+    const bounded =
+      spec.floor === undefined
+        ? value
+        : Math.max(spec.floor, value);
     return Math.round(bounded * 1000) / 1000;
   }
 
   const offset = (hash(`${entity}:${key}`) - 0.5) * 2;
-  const jitter = (hash(`${entity}:${key}:${at}`) - 0.5) * 2 * spec.noise;
+  const jitter =
+    (hash(`${entity}:${key}:${at}`) - 0.5) * 2 * spec.noise;
 
-  const raw = spec.base * (1 + offset * 0.12) + spec.swing * shape + jitter;
-  const out = spec.floor === undefined ? raw : Math.max(spec.floor, raw);
+  const raw =
+    spec.base * (1 + offset * 0.12) +
+    spec.swing * shape +
+    jitter;
+  const out =
+    spec.floor === undefined
+      ? raw
+      : Math.max(spec.floor, raw);
   return Math.round(out * 1000) / 1000;
 }
 
@@ -81,9 +112,17 @@ function entities(schema: Schema): string[] {
   // schema claiming eight zones can return eight.
   const out = [...schema.entities.sample];
   for (let i = out.length; i < schema.entities.count; i++) {
-    out.push(`${schema.path[1].toUpperCase()}_${String(i + 1).padStart(2, "0")}`);
+    out.push(
+      `${schema.path[1].toUpperCase()}_${String(i + 1).padStart(2, "0")}`,
+    );
   }
-  return out.slice(0, Math.max(schema.entities.count, schema.entities.sample.length));
+  return out.slice(
+    0,
+    Math.max(
+      schema.entities.count,
+      schema.entities.sample.length,
+    ),
+  );
 }
 
 /**
@@ -99,10 +138,22 @@ function entities(schema: Schema): string[] {
  * and vertical rate. Anything reading this is reading the same fields it would
  * read from a real feed.
  */
-const CARRIERS = ["SWA", "AAL", "UAL", "DAL", "ASA", "JBU", "FDX", "UPS"];
+const CARRIERS = [
+  "SWA",
+  "AAL",
+  "UAL",
+  "DAL",
+  "ASA",
+  "JBU",
+  "FDX",
+  "UPS",
+];
 const CODES = Object.keys(AIRPORTS);
 
-function flightRows(at: number, count: number): Record<string, unknown>[] {
+function flightRows(
+  at: number,
+  count: number,
+): Record<string, unknown>[] {
   const rows: Record<string, unknown>[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -116,23 +167,40 @@ function flightRows(at: number, count: number): Record<string, unknown>[] {
     */
     const icao24 = (
       0xa00000 +
-      Math.floor((hash(seed + ":hi") * 0xdf + hash(seed + ":lo") * 0.997) * 0x1000) % 0xdf7c7
+      (Math.floor(
+        (hash(seed + ":hi") * 0xdf +
+          hash(seed + ":lo") * 0.997) *
+          0x1000,
+      ) %
+        0xdf7c7)
     )
       .toString(16)
       .padStart(6, "0");
 
-    const from = AIRPORTS[CODES[Math.floor(hash(seed + ":from") * CODES.length)]];
-    let toKey = CODES[Math.floor(hash(seed + ":to") * CODES.length)];
-    if (AIRPORTS[toKey] === from) toKey = CODES[(CODES.indexOf(toKey) + 3) % CODES.length];
+    const from =
+      AIRPORTS[
+        CODES[
+          Math.floor(hash(seed + ":from") * CODES.length)
+        ]
+      ];
+    let toKey =
+      CODES[Math.floor(hash(seed + ":to") * CODES.length)];
+    if (AIRPORTS[toKey] === from)
+      toKey =
+        CODES[(CODES.indexOf(toKey) + 3) % CODES.length];
     const to = AIRPORTS[toKey];
 
     const nm = distanceNm(from, to);
     const cruiseKt = 400 + hash(seed + ":kt") * 120;
     // Padded for climb and descent, floored so short hops still have a profile.
-    const durationMs = Math.max(35, (nm / cruiseKt) * 60 + 22) * 60_000;
+    const durationMs =
+      Math.max(35, (nm / cruiseKt) * 60 + 22) * 60_000;
 
     // Each aircraft is somewhere different in its own cycle.
-    const phase = ((at + hash(seed + ":phase") * durationMs) % durationMs) / durationMs;
+    const phase =
+      ((at + hash(seed + ":phase") * durationMs) %
+        durationMs) /
+      durationMs;
 
     const lon = from.lon + (to.lon - from.lon) * phase;
     const lat = from.lat + (to.lat - from.lat) * phase;
@@ -140,11 +208,12 @@ function flightRows(at: number, count: number): Record<string, unknown>[] {
 
     /*
       A trapezoid: climb for the first fifth, cruise, descend over the last
-      quarter. Crude, but it is the shape that makes an altitude colour ramp
+      quarter. Crude, but it is the shape that makes an altitude color ramp
       mean something — everything near an airport is low, everything between
       them is high.
     */
-    const ceiling = 31_000 + Math.round(hash(seed + ":alt") * 10) * 1_000;
+    const ceiling =
+      31_000 + Math.round(hash(seed + ":alt") * 10) * 1_000;
     const altitude =
       phase < 0.2
         ? ceiling * (phase / 0.2)
@@ -158,16 +227,29 @@ function flightRows(at: number, count: number): Record<string, unknown>[] {
     rows.push({
       icao24,
       callsign:
-        CARRIERS[Math.floor(hash(seed + ":carrier") * CARRIERS.length)] +
+        CARRIERS[
+          Math.floor(
+            hash(seed + ":carrier") * CARRIERS.length,
+          )
+        ] +
         String(100 + Math.floor(hash(seed + ":no") * 8899)),
-      origin: Object.keys(AIRPORTS).find((k) => AIRPORTS[k] === from),
+      origin: Object.keys(AIRPORTS).find(
+        (k) => AIRPORTS[k] === from,
+      ),
       destination: toKey,
       lon: Math.round(lon * 1e5) / 1e5,
       lat: Math.round(lat * 1e5) / 1e5,
-      true_track_deg: Math.round(bearing(here, to) * 10) / 10,
+      true_track_deg:
+        Math.round(bearing(here, to) * 10) / 10,
       baro_altitude_ft: Math.round(altitude / 25) * 25,
-      velocity_kt: Math.round(climbing || descending ? cruiseKt * 0.72 : cruiseKt),
-      vertical_rate_fpm: climbing ? 1_900 : descending ? -1_500 : 0,
+      velocity_kt: Math.round(
+        climbing || descending ? cruiseKt * 0.72 : cruiseKt,
+      ),
+      vertical_rate_fpm: climbing
+        ? 1_900
+        : descending
+          ? -1_500
+          : 0,
       on_ground: false,
       interval_start_utc: new Date(at).toISOString(),
       node: icao24,
@@ -179,7 +261,9 @@ function flightRows(at: number, count: number): Record<string, unknown>[] {
   return rows;
 }
 
-export function isMockDataset(ref: string | undefined): boolean {
+export function isMockDataset(
+  ref: string | undefined,
+): boolean {
   return schemaFor(ref)?.availability === "mock";
 }
 
@@ -205,9 +289,13 @@ export function mockRows(input: {
     time the same way, which is what gives a tracker its trails.
   */
   if (schema.motion) {
-    const end = input.end ? Date.parse(input.end) : Date.now();
+    const end = input.end
+      ? Date.parse(input.end)
+      : Date.now();
     const latest = Math.floor(end / step) * step;
-    const startMs = input.start ? Date.parse(input.start) : latest - 3_600_000;
+    const startMs = input.start
+      ? Date.parse(input.start)
+      : latest - 3_600_000;
 
     const out: Record<string, unknown>[] = [];
     for (let i = 0; i < input.limit; i++) {
@@ -218,13 +306,20 @@ export function mockRows(input: {
     return out;
   }
   const available = entities(schema);
-  const asked = (Array.isArray(input.node) ? input.node : [input.node]).filter(
-    (n): n is string => typeof n === "string" && n.length > 0,
+  const asked = (
+    Array.isArray(input.node) ? input.node : [input.node]
+  ).filter(
+    (n): n is string =>
+      typeof n === "string" && n.length > 0,
   );
   const nodes = asked.length ? asked : available;
 
-  const end = input.end ? Date.parse(input.end) : Date.now();
-  const startMs = input.start ? Date.parse(input.start) : end - 24 * 3_600_000;
+  const end = input.end
+    ? Date.parse(input.end)
+    : Date.now();
+  const startMs = input.start
+    ? Date.parse(input.start)
+    : end - 24 * 3_600_000;
   const latest = Math.floor(end / step) * step;
 
   const rows: Record<string, unknown>[] = [];
@@ -236,12 +331,19 @@ export function mockRows(input: {
       const row: Record<string, unknown> = {
         interval_start_utc: new Date(at).toISOString(),
         node,
-        node_type: (schema.entities.label ?? "entity").replace(/s$/, "").toUpperCase().replace(/ /g, "_"),
+        node_type: (schema.entities.label ?? "entity")
+          .replace(/s$/, "")
+          .toUpperCase()
+          .replace(/ /g, "_"),
       };
       for (const v of schema.variables) {
-        row[v.key] = v.mock ? value(v.mock, node, at, v.key, step) : null;
+        row[v.key] = v.mock
+          ? value(v.mock, node, at, v.key, step)
+          : null;
       }
-      row.collected_at_utc = new Date(at + 20_000).toISOString();
+      row.collected_at_utc = new Date(
+        at + 20_000,
+      ).toISOString();
       rows.push(row);
     }
   }

@@ -4,8 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import { cx } from "@/components/ui";
 import { CollectionGraph } from "@/components/CollectionGraph";
 import type { DatasetPreview } from "@/lib/types";
-import { SCHEMAS, type DataRef, type Schema } from "@/lib/workspace/catalog";
-import { componentDef, type ComponentSpec } from "@/lib/workspace/components";
+import {
+  SCHEMAS,
+  type DataRef,
+  type Schema,
+} from "@/lib/workspace/catalog";
+import {
+  componentDef,
+  type ComponentSpec,
+} from "@/lib/workspace/components";
 import type { App } from "@/lib/workspace/types";
 
 /**
@@ -43,9 +50,15 @@ export function FeedsPanel({
   manifest?: ComponentSpec[];
   history: App["history"];
 }) {
-  const [previews, setPreviews] = useState<Record<string, DatasetPreview>>({});
-  const [failed, setFailed] = useState<Record<string, boolean>>({});
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<
+    Record<string, DatasetPreview>
+  >({});
+  const [failed, setFailed] = useState<
+    Record<string, boolean>
+  >({});
+  const [openKey, setOpenKey] = useState<string | null>(
+    null,
+  );
   const [now, setNow] = useState<number | null>(null);
 
   // Deferred so server and first client render agree — a clock in the markup
@@ -83,7 +96,9 @@ export function FeedsPanel({
       return manifest.map((spec, index) => ({
         index,
         name:
-          spec.custom?.name ?? componentDef(spec.kind)?.name ?? spec.kind,
+          spec.custom?.name ??
+          componentDef(spec.kind)?.name ??
+          spec.kind,
         schemas: dedupe(spec.refs ?? []),
       }));
     }
@@ -91,21 +106,24 @@ export function FeedsPanel({
       {
         index: -1,
         name: "This page",
-        schemas: dedupe(history.flatMap((r) => r.refs ?? [])),
+        schemas: dedupe(
+          history.flatMap((r) => r.refs ?? []),
+        ),
       },
     ];
   }, [manifest, history, schemaById]);
 
   /** Every collected dataset on the page, fetched once however many tiles share it. */
   const slugs = useMemo(
-    () =>
-      [
-        ...new Set(
-          tiles.flatMap((t) =>
-            t.schemas.map((s) => s.dataset).filter((d): d is string => !!d),
-          ),
+    () => [
+      ...new Set(
+        tiles.flatMap((t) =>
+          t.schemas
+            .map((s) => s.dataset)
+            .filter((d): d is string => !!d),
         ),
-      ],
+      ),
+    ],
     [tiles],
   );
 
@@ -118,7 +136,8 @@ export function FeedsPanel({
     // open in a background tab does not keep asking (the landing page never
     // meets this: its first paint is server-rendered).
     const tick = async (force = false) => {
-      if (!force && document.visibilityState !== "visible") return;
+      if (!force && document.visibilityState !== "visible")
+        return;
       await Promise.all(
         slugs.map(async (slug) => {
           try {
@@ -131,12 +150,14 @@ export function FeedsPanel({
               setFailed((f) => ({ ...f, [slug]: true }));
               return;
             }
-            const body = (await res.json()) as DatasetPreview;
+            const body =
+              (await res.json()) as DatasetPreview;
             if (cancelled) return;
             setFailed((f) => ({ ...f, [slug]: false }));
             setPreviews((p) => ({ ...p, [slug]: body }));
           } catch {
-            if (!cancelled) setFailed((f) => ({ ...f, [slug]: true }));
+            if (!cancelled)
+              setFailed((f) => ({ ...f, [slug]: true }));
           }
         }),
       );
@@ -149,7 +170,10 @@ export function FeedsPanel({
     return () => {
       cancelled = true;
       clearInterval(id);
-      document.removeEventListener("visibilitychange", poll);
+      document.removeEventListener(
+        "visibilitychange",
+        poll,
+      );
     };
   }, [slugs]);
 
@@ -169,28 +193,33 @@ export function FeedsPanel({
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto">
         {!API && (
           <p className="px-3 py-3 text-[12px] text-warn">
-            NEXT_PUBLIC_DRYOS_API_URL is not set, so the delivery record cannot
-            be read.
+            NEXT_PUBLIC_DRYOS_API_URL is not set, so the
+            delivery record cannot be read.
           </p>
         )}
 
         {empty ? (
           <p className="px-3 py-3 text-[12px] text-faint">
-            Nothing on this screen queries a stream yet. Place a component and
-            its data shows up here, with its delivery record.
+            Nothing on this screen queries a stream yet.
+            Place a component and its data shows up here,
+            with its delivery record.
           </p>
         ) : (
           <>
             {!manifest && (
               <p className="border-b border-line px-3 py-2 text-[11.5px] text-muted">
-                This page was edited by the model, so its data cannot be tied
-                to tiles — these are every stream its history references.
+                This page was edited by the model, so its
+                data cannot be tied to tiles — these are
+                every stream its history references.
               </p>
             )}
             {tiles
               .filter((t) => t.schemas.length > 0)
               .map((t) => (
-                <section key={t.index} className="border-b border-line last:border-0">
+                <section
+                  key={t.index}
+                  className="border-b border-line last:border-0"
+                >
                   <h3 className="px-3 pt-2.5 pb-1 font-mono text-[10px] tracking-[0.13em] text-faint uppercase">
                     {t.index >= 0 ? `${t.index + 1}. ` : ""}
                     {t.name}
@@ -202,12 +231,20 @@ export function FeedsPanel({
                         <StreamRow
                           key={key}
                           schema={s}
-                          preview={s.dataset ? previews[s.dataset] : undefined}
-                          unreachable={Boolean(s.dataset && failed[s.dataset])}
+                          preview={
+                            s.dataset
+                              ? previews[s.dataset]
+                              : undefined
+                          }
+                          unreachable={Boolean(
+                            s.dataset && failed[s.dataset],
+                          )}
                           now={now}
                           open={openKey === key}
                           onToggle={() =>
-                            setOpenKey((k) => (k === key ? null : key))
+                            setOpenKey((k) =>
+                              k === key ? null : key,
+                            )
                           }
                         />
                       );
@@ -233,16 +270,24 @@ type StreamState = "ok" | "late" | "waiting";
  * fresh however stale the collector is — the same honest limitation the
  * freshness check has everywhere else.
  */
-function streamState(p: DatasetPreview | undefined, now: number | null): StreamState {
-  if (!p || p.intervals.length === 0 || now === null) return "waiting";
-  const last = Date.parse(p.intervals[p.intervals.length - 1].t);
+function streamState(
+  p: DatasetPreview | undefined,
+  now: number | null,
+): StreamState {
+  if (!p || p.intervals.length === 0 || now === null)
+    return "waiting";
+  const last = Date.parse(
+    p.intervals[p.intervals.length - 1].t,
+  );
   const due = last + (p.cadenceSeconds ?? 300) * 1000;
   if (due > now) return "ok";
-  return (now - due) / 1000 <= p.freshnessSlaSeconds ? "ok" : "late";
+  return (now - due) / 1000 <= p.freshnessSlaSeconds
+    ? "ok"
+    : "late";
 }
 
-// The delivery graph's traffic-light colours, not the site tokens — the dot
-// and the cells beneath it are the same claim, so they speak the same colour.
+// The delivery graph's traffic-light colors, not the site tokens — the dot
+// and the cells beneath it are the same claim, so they speak the same color.
 // "Waiting" stays neutral: nothing heard yet is not a failure.
 const DOT: Record<StreamState, string> = {
   ok: "bg-emerald-500",
@@ -270,7 +315,9 @@ function StreamRow({
     return (
       <li className="flex items-center gap-2 px-3 py-1.5">
         <span className="h-2 w-2 shrink-0 rounded-full border border-dashed border-info-line" />
-        <span className="min-w-0 truncate text-[12px] text-ink">{schema.name}</span>
+        <span className="min-w-0 truncate text-[12px] text-ink">
+          {schema.name}
+        </span>
         <span className="ml-auto shrink-0 rounded border border-dashed border-info-line px-1 font-mono text-[9px] text-info">
           MOCK
         </span>
@@ -280,11 +327,20 @@ function StreamRow({
 
   const state = streamState(preview, now);
   const iv = preview?.intervals ?? [];
-  const last = iv.length ? Date.parse(iv[iv.length - 1].t) : null;
-  const cadenceMs = (preview?.cadenceSeconds ?? schema.cadence.seconds) * 1000;
+  const last = iv.length
+    ? Date.parse(iv[iv.length - 1].t)
+    : null;
+  const cadenceMs =
+    (preview?.cadenceSeconds ?? schema.cadence.seconds) *
+    1000;
   const due = last !== null ? last + cadenceMs : null;
   const expected = preview
-    ? Math.max(iv.length, Math.round((preview.hours * 3600 * 1000) / cadenceMs))
+    ? Math.max(
+        iv.length,
+        Math.round(
+          (preview.hours * 3600 * 1000) / cadenceMs,
+        ),
+      )
     : null;
 
   return (
@@ -296,8 +352,15 @@ function StreamRow({
           open && "bg-surface-2",
         )}
       >
-        <span className={cx("h-2 w-2 shrink-0 rounded-full", DOT[state])} />
-        <span className="min-w-0 truncate text-[12px] text-ink">{schema.name}</span>
+        <span
+          className={cx(
+            "h-2 w-2 shrink-0 rounded-full",
+            DOT[state],
+          )}
+        />
+        <span className="min-w-0 truncate text-[12px] text-ink">
+          {schema.name}
+        </span>
         <span className="ml-auto shrink-0 font-mono text-[10px] text-faint">
           {unreachable
             ? "unreachable"
@@ -319,7 +382,10 @@ function StreamRow({
         <div className="border-y border-line bg-surface-2/40 px-3 py-2.5">
           <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-faint">
             <span>
-              expected <span className="text-ink">{schema.cadence.label}</span>
+              expected{" "}
+              <span className="text-ink">
+                {schema.cadence.label}
+              </span>
             </span>
             {expected !== null && (
               <span>
@@ -332,7 +398,10 @@ function StreamRow({
             )}
             {due !== null && (
               <span>
-                next due <span className="text-accent">{countdown(due, now)}</span>
+                next due{" "}
+                <span className="text-accent">
+                  {countdown(due, now)}
+                </span>
               </span>
             )}
           </div>
@@ -356,7 +425,10 @@ function StreamRow({
 /* ── helpers ──────────────────────────────────────────────────────────── */
 
 /** Time until the next interval is due, or how long it is overdue. */
-function countdown(dueMs: number | null, now: number | null): string {
+function countdown(
+  dueMs: number | null,
+  now: number | null,
+): string {
   if (dueMs === null || now === null) return "—";
   const delta = Math.round((dueMs - now) / 1000);
   if (delta <= 0) return `+${fmt(-delta)} over`;

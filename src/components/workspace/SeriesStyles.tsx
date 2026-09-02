@@ -28,10 +28,10 @@ import type { DataRef } from "@/lib/workspace/catalog";
  * list the shape declares, and these are chosen from the selection — one row
  * per series, however many were picked.
  *
- * Colour and line style are the same decision twice on purpose. Two hues at
+ * color and line style are the same decision twice on purpose. Two hues at
  * 1.6px is a chart some readers cannot separate at all, and one that nobody can
  * separate in a greyscale printout of it; a dashed line survives both. So the
- * style sits beside the colour rather than under an "advanced" anything.
+ * style sits beside the color rather than under an "advanced" anything.
  *
  * Everything writes into one option — `series`, a JSON string — so it travels
  * with the rest of the settings through the preview URL, the drag payload and
@@ -53,7 +53,7 @@ export function SeriesStyles({
   const slots = seriesSlots(refs);
   const styles = readSeries(options);
   /*
-    Real colours, not the `var(--sN)` the generator emits. Those tokens are
+    Real colors, not the `var(--sN)` the generator emits. Those tokens are
     defined in the frame's own stylesheet — a swatch painted with one out here
     resolves against this document, finds nothing, and draws a white circle.
     The values come from the same array the frame's variables are written from,
@@ -61,7 +61,7 @@ export function SeriesStyles({
   */
   const palette = SERIES_PALETTE[useTheme()];
 
-  /** Which series' picker is open. One at a time: two would be a colour wheel each. */
+  /** Which series' picker is open. One at a time: two would be a color wheel each. */
   const [open, setOpen] = useState<string | null>(null);
 
   function set(
@@ -89,7 +89,7 @@ export function SeriesStyles({
     options.combine !== "spread";
 
   /*
-    A colour input reports every value the pointer passes through, and each one
+    A color input reports every value the pointer passes through, and each one
     committed here is a preview frame recomposed, recompiled and re-queried.
     So dragging is shown immediately and saved when it settles: the draft is
     what the swatch wears, the timer is what the chart gets.
@@ -115,7 +115,7 @@ export function SeriesStyles({
     [],
   );
 
-  function pickColour(key: string, hex: string) {
+  function pickcolor(key: string, hex: string) {
     setDraft((d) => ({ ...d, [key]: hex }));
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
@@ -140,7 +140,7 @@ export function SeriesStyles({
   }
 
   /** Back to the slot this series' position earns — draft included. */
-  function resetColour(key: string) {
+  function resetcolor(key: string) {
     if (timer.current) clearTimeout(timer.current);
     setDraft((d) => {
       const next = { ...d };
@@ -166,14 +166,14 @@ export function SeriesStyles({
       {/*
         A lone stream-level reference means all of it, and which entities that
         is comes from the rows at runtime — so there is nothing here to list and
-        saying so is better than an empty box. Their colours are assigned
+        saying so is better than an empty box. Their colors are assigned
         alphabetically in the frame, which is what keeps a reload from
         repainting anyone.
       */}
       {slots === null ? (
         <p className="mt-1.5 text-[11.5px] leading-snug text-muted">
           This stream fans out — a series per entity,
-          discovered from the data and coloured in name
+          discovered from the data and colored in name
           order, so an entity added later appears without
           this page being rebuilt.
         </p>
@@ -192,7 +192,7 @@ export function SeriesStyles({
                 typeof pick.c === "number"
                   ? pick.c % palette.length
                   : n;
-              const colour = custom ?? palette[slotIndex];
+              const color = custom ?? palette[slotIndex];
               const showing = open === slot.key;
               return (
                 <li
@@ -206,21 +206,21 @@ export function SeriesStyles({
                           setOpen(showing ? null : slot.key)
                         }
                         aria-expanded={showing}
-                        aria-label={`Colour for ${slot.label}`}
-                        title="Choose a colour"
+                        aria-label={`color for ${slot.label}`}
+                        title="Choose a color"
                         className={cx(
                           "h-5 w-5 shrink-0 rounded-full ring-offset-1 ring-offset-surface transition-transform hover:scale-110",
                           showing
                             ? "ring-2 ring-ink"
                             : "ring-1 ring-line",
                         )}
-                        style={{ background: colour }}
+                        style={{ background: color }}
                       />
                     ) : (
                       <span
                         aria-hidden
                         className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ background: colour }}
+                        style={{ background: color }}
                       />
                     )}
 
@@ -229,7 +229,7 @@ export function SeriesStyles({
                       small type. One truncating line held both, and what the
                       ellipsis ate was exactly the half that told two rows
                       apart. No hex readout — the swatch already is the
-                      colour, and the number is inside the picker for whoever
+                      color, and the number is inside the picker for whoever
                       needs it.
                     */}
                     <span className="min-w-0 flex-1">
@@ -279,16 +279,16 @@ export function SeriesStyles({
 
                     {/*
                       Only once there is something to undo. The default is not a
-                      colour, it is the slot this series' position earns — which
+                      color, it is the slot this series' position earns — which
                       is the one that follows the theme.
                     */}
                     {controls.color &&
                       pick.c !== undefined && (
                         <button
                           onClick={() =>
-                            resetColour(slot.key)
+                            resetcolor(slot.key)
                           }
-                          title="Back to the default colour"
+                          title="Back to the default color"
                           className="shrink-0 rounded px-1 font-mono text-[10px] text-faint transition-colors hover:text-ink"
                         >
                           reset
@@ -297,12 +297,12 @@ export function SeriesStyles({
                   </div>
 
                   {showing && controls.color && (
-                    <ColourPicker
+                    <ColorPicker
                       palette={palette}
                       slot={custom ? null : slotIndex}
-                      hex={colour}
+                      hex={color}
                       onSlot={(i) => pickSlot(slot.key, i)}
-                      onHex={(h) => pickColour(slot.key, h)}
+                      onHex={(h) => pickcolor(slot.key, h)}
                       onClose={() => setOpen(null)}
                     />
                   )}
@@ -317,20 +317,20 @@ export function SeriesStyles({
 }
 
 /**
- * The picker itself: the set to choose from, or a colour of your own.
+ * The picker itself: the set to choose from, or a color of your own.
  *
  * Two tabs rather than one control, because they are two different decisions.
  * The palette is a *set* — eight slots whose order and stepping were validated
- * together for colour-vision safety, one per theme — and picking from it keeps
+ * together for color-vision safety, one per theme — and picking from it keeps
  * a chart inside that guarantee and following the theme. Custom is the way out
- * of it, for the times the colour is not ours to choose: a brand, a house
+ * of it, for the times the color is not ours to choose: a brand, a house
  * style, a deck this has to sit in.
  *
  * It opens inline, under the row it belongs to, rather than floating over it.
  * This list lives inside two nested scroll containers — the panel's and the
  * pane's — and a popover in there is a popover with a corner clipped off.
  */
-function ColourPicker({
+function ColorPicker({
   palette,
   slot,
   hex,
@@ -339,7 +339,7 @@ function ColourPicker({
   onClose,
 }: {
   palette: string[];
-  /** Which slot is current, or null when a custom colour is. */
+  /** Which slot is current, or null when a custom color is. */
   slot: number | null;
   hex: string;
   onSlot: (slot: number) => void;
@@ -351,7 +351,7 @@ function ColourPicker({
   );
   /*
     The hex field is typed into a character at a time, and "#5b6" is not a
-    colour. So it keeps its own text until it is one, and only a complete
+    color. So it keeps its own text until it is one, and only a complete
     six-digit value is committed — the swatch and the chart never see a
     half-finished value.
   */
@@ -387,7 +387,7 @@ function ColourPicker({
         ))}
         <button
           onClick={onClose}
-          aria-label="Close the colour picker"
+          aria-label="Close the color picker"
           className="ml-auto rounded px-1 font-mono text-[11px] text-faint hover:text-ink"
         >
           ×
@@ -397,17 +397,17 @@ function ColourPicker({
       {tab === "palette" ? (
         /*
           Eight hues across, four steps down — one column per palette slot, so
-          every colour in the grid is a version of a colour the set was
+          every color in the grid is a version of a color the set was
           validated with rather than an unrelated one.
 
           The middle row *is* the set: picking from it stores a slot number and
           the series keeps stepping with the theme. Every other cell is a
-          derived colour and stores a literal, which is the same trade the
+          derived color and stores a literal, which is the same trade the
           Custom tab makes and is marked the same way in the line below.
 
           Left open after a pick on purpose: the chart above redraws on every
           one, and trying three against the data is the whole point of choosing
-          a colour beside a preview rather than in a dialog over it.
+          a color beside a preview rather than in a dialog over it.
         */
         <div className="mt-1.5 grid grid-cols-8 gap-1">
           {[0, 1, 2, 3].map((row) =>
@@ -424,11 +424,11 @@ function ColourPicker({
                   onClick={() =>
                     isSlot ? onSlot(col) : onHex(c)
                   }
-                  aria-label={`Colour ${col + 1}, step ${row + 1}`}
+                  aria-label={`color ${col + 1}, step ${row + 1}`}
                   aria-pressed={on}
                   title={
                     isSlot
-                      ? `Colour ${col + 1} · follows the theme`
+                      ? `color ${col + 1} · follows the theme`
                       : c
                   }
                   className={cx(
@@ -454,27 +454,27 @@ function ColourPicker({
         <div className="mt-1.5 flex items-center gap-2">
           {/*
             The platform's own picker — wheel, sliders, eyedropper — behind a
-            swatch, and the hex beside it for the colour somebody already knows
+            swatch, and the hex beside it for the color somebody already knows
             the number of.
           */}
           <input
             type="color"
             value={hex}
             onChange={(e) => onHex(e.target.value)}
-            aria-label="Pick a colour"
-            title="Open the colour picker"
+            aria-label="Pick a color"
+            title="Open the color picker"
             className="h-7 w-9 shrink-0 cursor-pointer appearance-none rounded border border-line bg-transparent p-0 [&::-moz-color-swatch]:rounded [&::-moz-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded [&::-webkit-color-swatch]:border-0"
           />
           <input
             value={typed}
             onChange={(e) => commitTyped(e.target.value)}
             spellCheck={false}
-            aria-label="Hex colour"
+            aria-label="Hex color"
             placeholder="#000000"
             className="w-24 rounded border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink outline-none focus:border-line-strong"
           />
           <span className="min-w-0 truncate font-mono text-[9.5px] text-faint">
-            any colour · fixed in both themes
+            any color · fixed in both themes
           </span>
         </div>
       )}
