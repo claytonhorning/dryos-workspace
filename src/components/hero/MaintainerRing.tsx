@@ -80,7 +80,7 @@ const PEOPLE: Person[] = [
   {
     name: "Cameron Horning",
     role: "Investor and account manager",
-    blurb: "Pictured. Will pick up.",
+    blurb: "New Relic data wizard. Also a great brother.",
     src: "/landing/people/cameron-horning.png",
     initials: "CH",
   },

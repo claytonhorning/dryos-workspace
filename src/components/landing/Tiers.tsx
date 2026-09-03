@@ -54,7 +54,7 @@ const HOSTED: Plan[] = [
     pitch:
       "A desk's worth of screens for a team that shares them, on the streams it actually uses.",
     points: [
-      "5 seats, 10 streams included",
+      "5 seats, 5 streams included",
       "$15 a month per extra stream",
       "API and MCP within a fair-use quota",
       "Overage credits at list, hard cap by default",
@@ -71,7 +71,7 @@ const HOSTED: Plan[] = [
     pitch:
       "Shared workspaces across the company, and the streams delivered into the warehouse you already trust.",
     points: [
-      "20 seats, 30 streams included",
+      "20 seats, 15 streams included",
       "SSO and shared workspaces",
       "Delivery into Snowflake or Databricks",
       "Priority support and an account manager",

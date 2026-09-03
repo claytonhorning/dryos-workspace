@@ -268,6 +268,40 @@ function build(f: Facts): Slide[] {
       ),
     },
     {
+      kicker: "The name",
+      title: "Do not repeat yourself, applied to a whole industry.",
+      body: (
+        <>
+          <P>
+            DRY is one of the oldest rules in software: every piece of knowledge
+            should live in exactly one place. Copy it and the copies drift, and
+            a fix has to be made everywhere, forever. Engineers treat repeated
+            code as a defect. The data industry runs on it.
+          </P>
+          <Cards
+            items={[
+              {
+                title: "Repeated on the way in",
+                body: "Every company that needs ERCOT prices writes the same parser, hits the same Central-time bug, and then pays a vendor who wrote it a third time and priced in the org chart around it.",
+              },
+              {
+                title: "Repeated on the way out",
+                body: "Every team builds its own dashboard of the same feed, faster than ever now that an agent does it, and none of it is shared. The cheaper a thing is to make, the more times it gets made.",
+              },
+            ]}
+          />
+          <P>
+            Collect a source once, with one named person accountable for it.
+            Build a component once, publish it, and let the next team drop it
+            in. What that frees is the thing a company is actually for, without
+            a vendor lock or a bill sized for somebody else&rsquo;s payroll: the
+            stream is the unit, the data lands in their own warehouse, and the
+            whole thing can be self-hosted.
+          </P>
+        </>
+      ),
+    },
+    {
       kicker: "The problem, part one",
       title: "Public data is public. That was never the hard part.",
       body: (
@@ -376,10 +410,11 @@ function build(f: Facts): Slide[] {
               already lives.
             </>,
             <>
-              <b className="text-ink">Verification.</b> Every run reconciled
-              against the source before it is promoted. Done on the full ERCOT
-              node set: {f.nodes.toLocaleString()} of {f.nodes.toLocaleString()}{" "}
-              matched exactly.
+              <b className="text-ink">Maintainers own the source.</b> The person
+              who collects a stream is named on it and answers for it. A
+              question about data quality goes to them directly, not into a
+              support queue, and the fix is their job. That is what their share
+              of the subscription pays for.
             </>,
           ]}
         />
@@ -440,11 +475,11 @@ function build(f: Facts): Slide[] {
             },
             {
               title: "Team · $150/mo",
-              body: "5 seats, 10 streams, $15 per extra. API and MCP within quota.",
+              body: "5 seats, 5 streams, $15 per extra. API and MCP within quota.",
             },
             {
               title: "Business · $500/mo",
-              body: "20 seats, 30 streams, SSO, warehouse delivery, account manager.",
+              body: "20 seats, 15 streams, SSO, warehouse delivery, account manager.",
             },
             {
               title: "Self-hosted · $500/mo + $25/stream",
@@ -464,18 +499,38 @@ function build(f: Facts): Slide[] {
     },
     {
       kicker: "Business model",
-      title: "Why the unit had to change.",
+      title: "Why this model wins the decade.",
       body: (
-        <List
+        <Cards
           items={[
-            "Per-query billing tracked screens left on walls, not value: a six-tile page polling every five minutes is fifty thousand queries a month whether anyone looks or not.",
-            "Nobody gets a purchase order approved for whatever the tiles poll. Account managers need a number they can write down.",
-            "A stream maps onto a maintainer, so the payout is arithmetic rather than attribution.",
-            "Warehouse delivery only works per stream: once the data is in a customer's Snowflake it is queried there forever and a query meter never sees it again.",
-            "Revenue becomes a count of streams under subscription, forecastable, with annual commits underneath it.",
+            {
+              title: "Recurring, and it expands on its own",
+              body: "A customer adds streams, not seats. Every new question a team asks is another stream under subscription, so net retention runs above a hundred by construction.",
+            },
+            {
+              title: "Structural margin",
+              body: "Public data carries no licence cost. The maintainer's share is the only cost of goods and scales exactly with revenue; the platform fee is software margin on top.",
+            },
+            {
+              title: "The supply side already exists",
+              body: "The gig economy produced thousands of domain experts who know one source cold and would rather be paid for keeping it right than employed by a company built around it. Creators get 70% on every platform that kept them; so do maintainers.",
+            },
+            {
+              title: "It matches how buyers buy now",
+              body: "Procurement approves flat subscriptions and annual commits, finance forecasts them, and data teams already purchase per dataset. The seat is dying as agents replace users; the stream is the unit that survives that.",
+            },
+            {
+              title: "AI is the demand, not the threat",
+              body: "The dashboard was the product and it is free now. What is left to sell is the verified feed under it, and every agent that reads one over MCP is a subscriber that never sleeps.",
+            },
+            {
+              title: "A moat that compounds",
+              body: "Every month of reconciled history and every maintainer who claims a source makes the network harder to copy. A vertical vendor cannot go horizontal without dismantling the org chart it sells.",
+            },
           ]}
         />
       ),
+      stacked: true,
     },
     {
       kicker: "Distribution",
