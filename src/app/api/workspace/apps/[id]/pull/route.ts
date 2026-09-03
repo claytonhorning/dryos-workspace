@@ -4,7 +4,10 @@ import { editApp } from "@/lib/workspace/agent";
 import { ndjsonStream } from "@/lib/workspace/ndjson";
 import { addRevision, getApp } from "@/lib/workspace/store";
 
-export const maxDuration = 600;
+// 300 is the Hobby plan's ceiling, and a deploy declaring more is refused
+// after the build has already succeeded. Replaying many changes could want
+// longer; if it ever does, the answer is a queue, not a bigger number.
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 /**
