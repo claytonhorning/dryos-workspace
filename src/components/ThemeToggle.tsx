@@ -70,8 +70,14 @@ export function ThemeToggle() {
         "text-muted transition-colors hover:border-line-strong hover:text-ink",
       )}
     >
-      {/* Both icons ship; CSS picks one, so there is nothing to swap on hydrate. */}
-      <SunIcon className="hidden dr-when-dark:block" />
+      {/*
+        Both icons ship; CSS picks one, so there is nothing to swap on hydrate.
+        Dark is the ground state and light the only override — the same rule
+        the palette follows — so the sun shows whenever the root carries no
+        theme at all. Gating it on `data-theme="dark"` left an empty square on
+        any load where the init script had not run yet, or had been blocked.
+      */}
+      <SunIcon className="dr-when-light:hidden" />
       <MoonIcon className="hidden dr-when-light:block" />
     </button>
   );
@@ -80,9 +86,10 @@ export function ThemeToggle() {
 /**
  * The same choice as a menu row, for the account popup.
  *
- * Stateless on purpose: which side is lit comes from the `dr-when-*` CSS
- * variants, the same way the standalone button picks its icon, so it can never
- * disagree with the page and there is nothing to reconcile on hydrate.
+ * Stateless on purpose: which side is lit comes from the `dr-when-light` CSS
+ * variant over a dark default, the same way the standalone button picks its
+ * icon, so it can never disagree with the page and there is nothing to
+ * reconcile on hydrate.
  */
 export function ThemeMenuItem() {
   function set(next: Theme) {
@@ -95,13 +102,13 @@ export function ThemeMenuItem() {
       <div className="grid grid-cols-2 overflow-hidden rounded-md border border-line-strong text-[12px]">
         <button
           onClick={() => set("dark")}
-          className="py-1.5 text-center transition-colors dr-when-dark:bg-accent-dim dr-when-dark:text-accent dr-when-light:text-muted dr-when-light:hover:bg-surface-2 dr-when-light:hover:text-ink"
+          className="bg-accent-dim py-1.5 text-center text-accent transition-colors dr-when-light:bg-transparent dr-when-light:text-muted dr-when-light:hover:bg-surface-2 dr-when-light:hover:text-ink"
         >
           Dark mode
         </button>
         <button
           onClick={() => set("light")}
-          className="border-l border-line-strong py-1.5 text-center transition-colors dr-when-light:bg-accent-dim dr-when-light:text-accent dr-when-dark:text-muted dr-when-dark:hover:bg-surface-2 dr-when-dark:hover:text-ink"
+          className="border-l border-line-strong py-1.5 text-center text-muted transition-colors hover:bg-surface-2 hover:text-ink dr-when-light:bg-accent-dim dr-when-light:text-accent dr-when-light:hover:bg-accent-dim dr-when-light:hover:text-accent"
         >
           Light mode
         </button>

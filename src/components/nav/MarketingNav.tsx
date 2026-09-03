@@ -33,8 +33,15 @@ const isActive = (href: string, pathname: string) =>
   !href.startsWith("/#") && pathname.startsWith(href);
 
 export function MarketingNav({ pathname }: { pathname: string }) {
+  // On the sign-in page the action is the page: a button that leads to the
+  // login from the login is a door painted on a wall.
+  const atDoor = pathname.startsWith("/login") || pathname.startsWith("/auth");
+  const strip = atDoor
+    ? LINKS
+    : [...LINKS, { href: "/workspace", label: "Workspace" }];
+
   return (
-    <Shell strip={<MobileStrip links={[...LINKS, { href: "/workspace", label: "Workspace" }]} />}>
+    <Shell strip={<MobileStrip links={strip} />}>
       <Link href="/" className="mr-5 flex items-center gap-2.5">
         <Wordmark />
       </Link>
@@ -45,9 +52,11 @@ export function MarketingNav({ pathname }: { pathname: string }) {
 
       <div className="ml-auto flex items-center gap-2.5">
         <ThemeToggle />
-        <ButtonLink href="/workspace" tone="primary" size="sm">
-          Open Dryos
-        </ButtonLink>
+        {!atDoor && (
+          <ButtonLink href="/workspace" tone="primary" size="sm">
+            Open Dryos
+          </ButtonLink>
+        )}
       </div>
     </Shell>
   );
