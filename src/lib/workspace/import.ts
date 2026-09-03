@@ -50,6 +50,11 @@ export async function importLocalOnce(): Promise<void> {
 
 async function run(userId: string): Promise<void> {
   try {
+    // No seed directory — a deployed instance, or a fresh clone. Nothing to
+    // adopt, and a deployed filesystem is read-only, so the marker write below
+    // would only ever log a warning per user.
+    if (!(await exists(ROOT))) return;
+
     const marker = path.join(MARKERS, userId);
     if (await exists(marker)) return;
 

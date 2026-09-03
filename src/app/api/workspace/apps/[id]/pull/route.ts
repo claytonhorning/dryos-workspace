@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/supabase/server";
 import { editApp } from "@/lib/workspace/agent";
 import { ndjsonStream } from "@/lib/workspace/ndjson";
 import { addRevision, getApp } from "@/lib/workspace/store";
@@ -25,6 +26,9 @@ export const dynamic = "force-dynamic";
  * changes is minutes of work and the dialog has to show whose turn it is.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (!(await requireUser())) {
+    return NextResponse.json({ error: "Sign in to use the workspace." }, { status: 401 });
+  }
   const { id } = await params;
   const mine = await getApp(id);
   if (!mine) return NextResponse.json({ error: "No such screen." }, { status: 404 });

@@ -20,7 +20,7 @@ const FLOW = [
   {
     n: "03",
     title: "You use the data",
-    body: "In a workspace, through the API, or through the MCP server. Charged the same whichever way it arrives.",
+    body: "In a workspace, through the API or the MCP server, or delivered into the Snowflake or Databricks warehouse you already treat as the truth. A stream costs the same whichever way it arrives.",
   },
   {
     n: "04",

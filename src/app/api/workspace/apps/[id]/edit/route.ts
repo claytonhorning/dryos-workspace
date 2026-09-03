@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/supabase/server";
 import { editApp } from "@/lib/workspace/agent";
 import { annexComponent } from "@/lib/workspace/annex";
 import { composeApp, describeComponent } from "@/lib/workspace/compose";
@@ -37,6 +38,9 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!(await requireUser())) {
+    return NextResponse.json({ error: "Sign in to use the workspace." }, { status: 401 });
+  }
   const { id } = await params;
   const app = await getApp(id);
   if (!app)

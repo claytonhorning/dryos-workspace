@@ -33,6 +33,10 @@ export function Nav() {
   */
   const inside = pathname.match(/^\/workspace\/([^/]+)\/([^/]+)/);
 
+  // The deck is a room with the lights down: no bar, no links out, nothing to
+  // say where you are except the slide you are on.
+  if (pathname.startsWith("/deck")) return null;
+
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/85 backdrop-blur-md">
       {marketing ? (

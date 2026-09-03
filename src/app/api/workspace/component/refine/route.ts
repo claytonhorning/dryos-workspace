@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/supabase/server";
 import { refineComponent } from "@/lib/workspace/agent";
 import { composeApp } from "@/lib/workspace/compose";
 import { ndjsonStream } from "@/lib/workspace/ndjson";
@@ -21,6 +22,10 @@ export const dynamic = "force-dynamic";
  * rather than each starting from the template again.
  */
 export async function POST(req: Request) {
+  if (!(await requireUser())) {
+    return NextResponse.json({ error: "Sign in to use the workspace." }, { status: 401 });
+  }
+
   const { kind, refs, options, code, ask } = (await req.json()) as {
     kind: ComponentKind;
     refs: DataRef[];

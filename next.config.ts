@@ -17,6 +17,15 @@ const nextConfig: NextConfig = {
   // as JavaScript and fails. Leaving it external means Node `require`s it
   // directly, which is what it expects.
   serverExternalPackages: ["esbuild"],
+
+  // The starter templates are `.txt` files read with `fs` at request time
+  // (`lib/workspace/templates`). The path is built from a variable, so the
+  // build's file tracer never sees them and a serverless function creating a
+  // page from a template finds no file. Every workspace route gets them; it
+  // is a few kilobytes, and any of them may come to read a template.
+  outputFileTracingIncludes: {
+    "/api/workspace/**": ["./src/lib/workspace/templates/*.txt"],
+  },
 };
 
 export default nextConfig;

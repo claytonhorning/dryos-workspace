@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/supabase/server";
 import { ask } from "@/lib/workspace/dataAgent";
 import { ndjsonStream } from "@/lib/workspace/ndjson";
 
@@ -6,6 +7,10 @@ export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  if (!(await requireUser())) {
+    return NextResponse.json({ error: "Sign in to use the workspace." }, { status: 401 });
+  }
+
   const { question, model, effort } = (await req.json()) as {
     question?: string;
     model?: string;
