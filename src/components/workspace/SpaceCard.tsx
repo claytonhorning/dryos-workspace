@@ -8,6 +8,7 @@ import type { AppSummary } from "@/lib/workspace/types";
 export interface SpaceSummary {
   id: string;
   name: string;
+  domain?: string;
   pages: string[];
   updatedAt: number;
   pageList: AppSummary[];
@@ -73,6 +74,11 @@ export function SpaceCard({
           {space.name}
         </span>
         <span className="flex shrink-0 items-center gap-1.5">
+          {space.domain && (
+            <span className="rounded border border-line bg-surface-2 px-1.5 py-[1px] font-mono text-[9px] tracking-[0.1em] text-faint uppercase">
+              {space.domain === "all" ? "everything" : space.domain}
+            </span>
+          )}
           <span className="font-mono text-[10px] text-faint">
             {space.pages.length} {space.pages.length === 1 ? "page" : "pages"}
           </span>

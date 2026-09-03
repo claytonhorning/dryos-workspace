@@ -1,7 +1,10 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
+import { cx } from "@/components/ui";
+import { shellFor } from "@/lib/shell";
 import { AppNav } from "./nav/AppNav";
+import { AppSidebar } from "./nav/AppSidebar";
 import { MarketingNav } from "./nav/MarketingNav";
 import { SpaceNav } from "./nav/SpaceNav";
 
@@ -14,43 +17,44 @@ import { SpaceNav } from "./nav/SpaceNav";
  * compromise: the marketing nav can push toward the workspace, and the app nav
  * can spend its right-hand side on what you are spending instead.
  */
-const MARKETING = ["/", "/maintainers"];
+/*
+  Which shell is `shellFor`'s decision (lib/shell.ts), shared with the page
+  frame so the body steps right by exactly the sidebar the nav drew. The
+  reasoning — the door is still outside, a page inside a workspace keeps the
+  workspace chrome whether read or edited — lives with the rule.
+*/
 
 export function Nav() {
   const pathname = usePathname();
   const search = useSearchParams();
-  const marketing = MARKETING.some((r) => (r === "/" ? pathname === "/" : pathname.startsWith(r)));
-
-  /*
-    Any page inside a workspace gets the workspace chrome, whether you are
-    reading it or changing it. Editing is a mode of being in a workspace, not a
-    trip out of one — the tabs are how you move between pages either way, and
-    swapping the whole bar underneath someone the moment they press Edit is a
-    disorientation with nothing to show for it.
-
-    The workspace's own list page keeps the app's navigation: there is no page
-    open, so there is nothing for tabs to switch between.
-  */
+  const shell = shellFor(pathname);
   const inside = pathname.match(/^\/workspace\/([^/]+)\/([^/]+)/);
 
-  // The deck is a room with the lights down: no bar, no links out, nothing to
-  // say where you are except the slide you are on.
-  if (pathname.startsWith("/deck")) return null;
+  if (shell === "none") return null;
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-bg/85 backdrop-blur-md">
-      {marketing ? (
-        <MarketingNav pathname={pathname} />
-      ) : inside ? (
-        <SpaceNav
-          spaceId={inside[1]}
-          pageId={inside[2]}
-          editMode={search.get("edit") === "1"}
-          naming={search.get("name") === "1"}
-        />
-      ) : (
-        <AppNav pathname={pathname} />
-      )}
-    </header>
+    <>
+      {/* The product's left edge, fixed, on the routes with no page open. */}
+      {shell === "app" && <AppSidebar pathname={pathname} />}
+      <header
+        className={cx(
+          "sticky top-0 z-40 border-b border-line bg-bg/85 backdrop-blur-md",
+          shell === "app" && "md:pl-[var(--sidebar-w)]",
+        )}
+      >
+        {shell === "marketing" ? (
+          <MarketingNav pathname={pathname} />
+        ) : shell === "space" && inside ? (
+          <SpaceNav
+            spaceId={inside[1]}
+            pageId={inside[2]}
+            editMode={search.get("edit") === "1"}
+            naming={search.get("name") === "1"}
+          />
+        ) : (
+          <AppNav pathname={pathname} />
+        )}
+      </header>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createSpace, listSpaces } from "@/lib/workspace/spaces";
+import { domains } from "@/lib/workspace/catalog";
+import { ALL_DOMAINS, createSpace, listSpaces } from "@/lib/workspace/spaces";
 import { listApps } from "@/lib/workspace/store";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,13 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { name } = (await req.json().catch(() => ({}))) as { name?: string };
-  return NextResponse.json({ space: await createSpace(name ?? "") });
+  const { name, domain } = (await req.json().catch(() => ({}))) as {
+    name?: string;
+    domain?: string;
+  };
+  // Only a subject the catalogue serves, or the blend. Anything else — a
+  // domain declared as "next", a typo — is stored as no choice at all.
+  const subject =
+    domain === ALL_DOMAINS || (domain && domains().includes(domain)) ? domain : undefined;
+  return NextResponse.json({ space: await createSpace(name ?? "", subject) });
 }

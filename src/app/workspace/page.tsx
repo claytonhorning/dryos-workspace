@@ -8,17 +8,9 @@ import { CardGridSkeleton } from "@/components/Skeleton";
 import { Tabs } from "@/components/Tabs";
 import { SpaceCard, type SpaceSummary } from "@/components/workspace/SpaceCard";
 import { CommunityPanel } from "@/components/workspace/CommunityPanel";
-import { AvailabilityBadge } from "@/components/workspace/DataChip";
 import { CommunityStarter } from "@/components/workspace/CommunityStarter";
-import {
-  LIVE_SCHEMA,
-  SCHEMAS,
-  pathLabel,
-  tokenLabel,
-} from "@/lib/workspace/catalog";
+import { ALL, SUBJECTS, domainWord, useDomain } from "@/lib/domain";
 import type { Template } from "@/lib/workspace/templates";
-
-const mockCount = SCHEMAS.filter((s) => s.availability === "mock").length;
 
 /**
  * The workspace: what you have built, what you can start from, what reached you.
@@ -33,6 +25,7 @@ export default function WorkspacePage() {
   const [spaces, setSpaces] = useState<SpaceSummary[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [creating, setCreating] = useState<string | null>(null);
+  const { domain, setDomain, ready } = useDomain();
   const [loaded, setLoaded] = useState(false);
   /** The workspace the bin was pressed on, while its dialog is up. */
   const [condemned, setCondemned] = useState<SpaceSummary | null>(null);
@@ -51,9 +44,14 @@ export default function WorkspacePage() {
       });
   }, []);
 
-  /** An empty workspace with one empty page, opened straight away. */
+  /**
+   * An empty workspace with one empty page, opened straight away. It is
+   * about whatever the sidebar says — that is the frame you are already in —
+   * and the name is asked for next, in the nav, where the subject is the one
+   * thing already in your head.
+   */
   async function newSpace() {
-    await create("compose");
+    await make("New workspace", domain ?? undefined, ["compose"]);
   }
 
   /**
@@ -81,13 +79,16 @@ export default function WorkspacePage() {
    * you were going anyway. Passing several copies the whole set into one.
    */
   async function create(...slugs: string[]) {
+    // A community set is ERCOT through and through, so it says so.
+    await make(slugs.length > 1 ? "ERCOT starters" : "New workspace", "Energy", slugs);
+  }
+
+  async function make(name: string, domain: string | undefined, slugs: string[]) {
     setCreating(slugs[0] ?? "all");
     const made = await fetch("/api/workspace/spaces", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name: slugs.length > 1 ? "ERCOT starters" : "New workspace",
-      }),
+      body: JSON.stringify({ name, domain }),
     }).then((r) => r.json());
 
     let first: string | undefined;
@@ -118,37 +119,88 @@ export default function WorkspacePage() {
 
   const grid = "grid gap-3 sm:grid-cols-2 lg:grid-cols-3";
 
+  /*
+    The shelf is scoped to the sidebar's domain. A workspace made before the
+    choice existed has none, and belongs everywhere rather than nowhere.
+  */
+  const visible = spaces.filter(
+    (sp) => domain === ALL || !sp.domain || sp.domain === domain,
+  );
+  // The community set is ERCOT through and through.
+  const starterFits = domain === ALL || domain === "Energy";
+  const word = domainWord(domain);
+
+  /*
+    Nothing is known until the domain is: the shelf's title, its list, the
+    panel's people and what Create makes all read from it. So the first visit
+    asks, full width, and the answer goes to the sidebar where it stays.
+  */
+  if (ready && !domain) {
+    return (
+      <div className="mx-auto max-w-[1240px] px-6 py-12">
+        <p className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
+          Workspace
+        </p>
+        <h1 className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-ink">
+          What are you working on?
+        </h1>
+        <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
+          Pick a domain and the workspace opens on it: its streams in the
+          explorer, its maintainers on the shelf, your workspaces about it.
+          Change it any time from the sidebar.
+        </p>
+        <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {SUBJECTS.map((sub) => (
+            <button
+              key={sub.id}
+              type="button"
+              disabled={sub.next}
+              onClick={() => setDomain(sub.id)}
+              className={
+                sub.next
+                  ? "rounded-lg border border-dashed border-line bg-surface/50 p-4 text-left opacity-70"
+                  : "rounded-lg border border-line bg-surface p-4 text-left transition-colors hover:border-accent-line hover:bg-accent-dim/40"
+              }
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-[16px] font-semibold text-ink">{sub.label}</span>
+                {sub.next && (
+                  <span className="rounded border border-line bg-surface-2 px-1.5 py-[1px] font-mono text-[9px] tracking-[0.12em] text-faint uppercase">
+                    next
+                  </span>
+                )}
+              </span>
+              <span className="mt-1.5 block text-[12.5px] leading-relaxed text-muted">
+                {sub.blurb}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-12">
       <header className="flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
         <div className="max-w-2xl">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
-              Workspace
-            </p>
-            <span className="text-[12.5px] text-muted">
-              {pathLabel(LIVE_SCHEMA)}
-            </span>
-            <AvailabilityBadge availability="live" />
-          </div>
-          <h1 className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-ink">
-            Your workspaces, on live data
-          </h1>
-          <p className="mt-3 text-[15px] leading-relaxed text-muted">
-            Every screen here is wired to the live feed —{" "}
-            {LIVE_SCHEMA.entities.count.toLocaleString()}{" "}
-            {LIVE_SCHEMA.entities.label ?? "entities"}, repriced {LIVE_SCHEMA.cadence.label}{" "}
-            at {tokenLabel(LIVE_SCHEMA.tokens)} a query. A workspace is a set of
-            pages; a page is components you arrange the way you want them.
+          <p className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
+            Workspace
           </p>
+          <h1 className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-ink">
+            {word ? `Your ${word} workspaces` : "Your workspaces"}
+          </h1>
           {/*
-          The rest of the tree, said plainly. Someone should learn what is real
-          here rather than in the middle of building on it.
-        */}
-          <p className="mt-2 text-[13.5px] leading-relaxed text-faint">
-            {mockCount} more {mockCount === 1 ? "schema is" : "schemas are"}{" "}
-            declared and marked mock — same shape, generated numbers, so you can
-            build against them before the collector exists.
+            What one is, in the words someone arriving needs: a dashboard of
+            their own, on their data, that they can start from someone else's.
+            Nothing here about the feed being live — everything on this site
+            is, and a claim that is true of everything says nothing.
+          */}
+          <p className="mt-3 text-[15px] leading-relaxed text-muted">
+            A workspace is a set of dashboards about one subject — the streams
+            you choose, arranged the way you want them, as many pages as it
+            takes. Start one empty and say what it is about, or take a copy of
+            a community workspace and make it yours.
           </p>
         </div>
 
@@ -158,10 +210,7 @@ export default function WorkspacePage() {
           and a workspace that never says whose work you are standing on reads
           like a folder of files.
         */}
-        <CommunityPanel
-          apps={spaces.flatMap((sp) => sp.pageList)}
-          templates={templates}
-        />
+        <CommunityPanel domain={domain ?? undefined} />
       </header>
 
       {/*
@@ -171,7 +220,7 @@ export default function WorkspacePage() {
         picks its initial tab at mount and the badges would flash empty.
       */}
       <div className="mt-10">
-        {!loaded ? (
+        {!loaded || !ready ? (
           <div className="mt-4">
             <CardGridSkeleton count={3} ratio="aspect-[16/9]" />
           </div>
@@ -191,12 +240,12 @@ export default function WorkspacePage() {
             tabs={[
               {
                 id: "mine",
-                label: "My workspaces",
-                badge: spaces.length,
+                label: word ? `My ${word} workspaces` : "My workspaces",
+                badge: visible.length,
                 content:
-                  spaces.length > 0 ? (
+                  visible.length > 0 ? (
                     <div className={grid}>
-                      {spaces.map((sp) => (
+                      {visible.map((sp) => (
                         <SpaceCard
                           key={sp.id}
                           space={sp}
@@ -206,7 +255,7 @@ export default function WorkspacePage() {
                     </div>
                   ) : (
                     <Empty
-                      title="No workspaces yet"
+                      title={word ? `No ${word} workspaces yet` : "No workspaces yet"}
                       body="A workspace is a set of pages you flip between. Press Create new for an empty one, or start from something in Community."
                     />
                   ),
@@ -214,8 +263,8 @@ export default function WorkspacePage() {
               {
                 id: "community",
                 label: "Community workspaces",
-                badge: 1,
-                content: (
+                badge: starterFits ? 1 : 0,
+                content: starterFits ? (
                   <div className={grid}>
                     <CommunityStarter
                       templates={templates}
@@ -223,6 +272,11 @@ export default function WorkspacePage() {
                       onStart={create}
                     />
                   </div>
+                ) : (
+                  <Empty
+                    title={`No ${word} workspaces published yet`}
+                    body="What the community publishes for this domain will show up here."
+                  />
                 ),
               },
             ]}

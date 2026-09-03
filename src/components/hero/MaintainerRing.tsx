@@ -28,6 +28,8 @@ import { cx } from "@/components/ui";
  * file cannot fall back at runtime — the image errors before React hydrates,
  * so an `onError` handler is attached to a failure that has already happened.
  */
+import { MAINTAINERS } from "@/lib/people";
+
 type Person = {
   name: string;
   role: string;
@@ -38,30 +40,9 @@ type Person = {
 };
 
 const PEOPLE: Person[] = [
-  {
-    name: "Marcus Delgado",
-    role: "Energy data maintainer",
-    blurb:
-      "ERCOT prices, ancillary services and load. Knows which report drops its repeated-hour flag.",
-    src: "/landing/people/energy.jpg",
-    initials: "MD",
-  },
-  {
-    name: "Hannah Okafor",
-    role: "Weather data maintainer",
-    blurb:
-      "NWS observations and forecasts. Knows which null means the station said nothing.",
-    src: "/landing/people/weather.jpg",
-    initials: "HO",
-  },
-  {
-    name: "Tomás Rivera",
-    role: "Property data maintainer",
-    blurb:
-      "County rolls, transfers and permits, one schema per county. Coming next.",
-    src: "/landing/people/property.jpg",
-    initials: "TR",
-  },
+  // The maintainers come from the one roster the workspace shelf reads too.
+  // The ring is portraits, so only those with one: the shelf lists everyone.
+  ...MAINTAINERS.filter((m) => m.src),
   {
     name: "Adam Smith",
     role: "Pioneer of free markets",

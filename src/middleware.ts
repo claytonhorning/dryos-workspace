@@ -17,6 +17,19 @@ import { NextResponse, type NextRequest } from "next/server";
  * internet, with RLS as the verified check behind every store call and
  * `requireUser` on the routes that spend money.
  */
+/**
+ * What a sandboxed frame loads: the bundle document, its script, the one-tile
+ * preview and the templates. `sandbox="allow-scripts"` without
+ * `allow-same-origin` is an opaque origin, and an opaque origin sends no
+ * cookies — so a session gate here refuses every frame, for a signed-in user
+ * as much as a visitor, and the shelf's thumbnails and the editor's own
+ * canvas 401 in a retry loop. These routes are cookie-less by construction
+ * (`getAppForFrame` reads through an RPC on the anon key) and were shareable
+ * previews before there was a login; that stays the design.
+ */
+const FRAME_ROUTES =
+  /^\/api\/workspace\/(apps\/[^/]+\/(bundle|script)\/|preview(\/|$)|templates\/)/;
+
 export async function middleware(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -24,8 +37,9 @@ export async function middleware(request: NextRequest) {
   // refresh and nothing to gate with, so the site stays reachable.
   if (!url || !key) return NextResponse.next();
 
-  const isApi = request.nextUrl.pathname.startsWith("/api/workspace");
-  if (isApi) {
+  const path = request.nextUrl.pathname;
+  const isApi = path.startsWith("/api/workspace");
+  if (isApi && !FRAME_ROUTES.test(path)) {
     const bare = createServerClient(url, key, {
       cookies: { getAll: () => request.cookies.getAll(), setAll: () => {} },
     });

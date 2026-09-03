@@ -51,6 +51,7 @@ export function ComponentEditor({
   onSave,
   onDelete,
   onDuplicate,
+  initialDomain,
 }: {
   def: ComponentDef;
   refs: DataRef[];
@@ -78,6 +79,8 @@ export function ComponentEditor({
    * and letting go anywhere else costs nothing.
    */
   onDuplicate?: (spec: ComponentSpec) => void;
+  /** The workspace's subject, for the explorer to open on. */
+  initialDomain?: string;
 }) {
   const [options, setOptions] = useState<Record<string, string>>(() =>
     withDefaults(def, initialOptions),
@@ -168,6 +171,7 @@ export function ComponentEditor({
     return (
       <div className="h-full min-h-0">
         <DataExplorer
+          initialDomain={initialDomain}
           selected={layers}
           onToggle={toggleRef}
           onClear={() => {

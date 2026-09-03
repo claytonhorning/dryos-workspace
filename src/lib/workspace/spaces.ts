@@ -21,15 +21,26 @@ import { deleteApp, listAppIds } from "./store";
 export interface Space {
   id: string;
   name: string;
+  /**
+   * What it is about: a catalogue domain ("Energy", "Weather"), `ALL` for a
+   * blend of everything, or absent on a workspace made before the choice
+   * existed. The explorer opens on it; nothing is filtered by it, because a
+   * page about energy is allowed to draw the weather.
+   */
+  domain?: string;
   /** App ids, in tab order. */
   pages: string[];
   createdAt: number;
   updatedAt: number;
 }
 
+/** The subject that means "every domain at once". */
+export const ALL_DOMAINS = "all";
+
 interface Row {
   id: string;
   name: string;
+  domain: string | null;
   pages: string[];
   created_at: number;
   updated_at: number;
@@ -38,6 +49,7 @@ interface Row {
 const fromRow = (r: Row): Space => ({
   id: r.id,
   name: r.name,
+  domain: r.domain ?? undefined,
   pages: r.pages,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -46,6 +58,7 @@ const fromRow = (r: Row): Space => ({
 const toRow = (s: Space) => ({
   id: s.id,
   name: s.name,
+  domain: s.domain ?? null,
   pages: s.pages,
   created_at: s.createdAt,
   updated_at: s.updatedAt,
@@ -57,7 +70,7 @@ async function readAll(): Promise<Space[]> {
   // still expects the latest workspace on top.
   const { data } = await supabase
     .from("workspaces")
-    .select("id, name, pages, created_at, updated_at")
+    .select("id, name, domain, pages, created_at, updated_at")
     .order("created_at", { ascending: false });
   return (data ?? []).map(fromRow);
 }
@@ -140,12 +153,13 @@ export async function spaceOfPage(pageId: string): Promise<Space | null> {
   return (await listSpaces()).find((s) => s.pages.includes(pageId)) ?? null;
 }
 
-export async function createSpace(name: string): Promise<Space> {
+export async function createSpace(name: string, domain?: string): Promise<Space> {
   await importLocalOnce();
   const now = Date.now();
   const space: Space = {
     id: randomUUID().slice(0, 8),
     name: name.trim() || "New workspace",
+    domain,
     pages: [],
     createdAt: now,
     updatedAt: now,

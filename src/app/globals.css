@@ -86,6 +86,8 @@
     exactly the screen, and the scrollbar then takes width off the canvas.
   */
   --nav-h: 57px;
+  /* The app's left sidebar. AppFrame and the nav step right by it. */
+  --sidebar-w: 224px;
 
   --page-grain: 0.05;
   --page-contour-accent: rgba(232, 255, 61, 0.022);

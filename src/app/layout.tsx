@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono, Sora } from "next/font/google";
+import { AppFrame } from "@/components/AppFrame";
 import { Nav } from "@/components/Nav";
 import { THEME_INIT_SCRIPT } from "@/components/ThemeToggle";
 import "./globals.css";
@@ -68,9 +69,7 @@ export default function RootLayout({
         <Suspense fallback={<div className="h-14 border-b border-line" />}>
           <Nav />
         </Suspense>
-        <main className="dr-page-bg min-h-[calc(100vh-var(--nav-h))]">
-          {children}
-        </main>
+        <AppFrame>{children}</AppFrame>
       </body>
     </html>
   );

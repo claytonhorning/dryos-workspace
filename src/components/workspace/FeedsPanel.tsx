@@ -188,6 +188,18 @@ export function FeedsPanel({
         <span className="min-w-0 truncate font-mono text-[9.5px] text-faint">
           what each tile reads, and when more arrives
         </span>
+        {/* The whole fleet, not just this screen's streams — a stale tile
+            is usually one collector, and that page names it. */}
+        {API && (
+          <a
+            href={`${API.replace(/\/$/, "")}/`}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto shrink-0 font-mono text-[9.5px] tracking-[0.1em] text-faint uppercase hover:text-ink"
+          >
+            all collectors ↗
+          </a>
+        )}
       </div>
 
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto">

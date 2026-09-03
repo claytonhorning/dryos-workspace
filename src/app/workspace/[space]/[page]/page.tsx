@@ -156,6 +156,21 @@ function markSaved() {
 export default function AppPage() {
   // `id` throughout is the page's id; the workspace only matters for links.
   const { space, page: id } = useParams<{ space: string; page: string }>();
+
+  // The workspace's subject, for the explorer to open on. One small fetch;
+  // the nav loads the workspace too, but a panel should not depend on the
+  // chrome above it having finished.
+  const [spaceDomain, setSpaceDomain] = useState<string | undefined>();
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/workspace/spaces/${space}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => live && setSpaceDomain(d?.space?.domain ?? undefined))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [space]);
   const router = useRouter();
   const search = useSearchParams();
 
@@ -970,6 +985,7 @@ export default function AppPage() {
                   key={`${replaceIndex ?? "new"}:${editing.name ?? editing.def.kind}`}
                   def={editing.def}
                   refs={editing.refs}
+                  initialDomain={spaceDomain}
                   initialName={editing.name}
                   initialOptions={editing.options}
                   initialCode={editing.custom?.code}
@@ -1191,6 +1207,7 @@ export default function AppPage() {
                     */
                     <div className="min-h-0 flex-1">
                       <DataExplorer
+                        initialDomain={spaceDomain}
                         selected={attached}
                         onToggle={toggle}
                         onClear={() => setAttached([])}

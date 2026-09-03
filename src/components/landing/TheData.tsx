@@ -26,6 +26,16 @@ type Vertical = {
   atSource: string;
 };
 
+/**
+ * The API serves a page about its own collectors — every one, its last run
+ * and its next — and it is the proof behind "checked against the source".
+ * Absent the public address (a fresh clone), the sentence is left out rather
+ * than pointed at nothing.
+ */
+const STATUS_URL = process.env.NEXT_PUBLIC_DRYOS_API_URL
+  ? `${process.env.NEXT_PUBLIC_DRYOS_API_URL.replace(/\/$/, "")}/`
+  : null;
+
 function collected(domain: string) {
   const live = SCHEMAS.filter((s) => s.availability === "live" && s.path[0] === domain);
   return { sectors: [...new Set(live.map((s) => s.path[1]))], streams: live.length };
@@ -164,6 +174,23 @@ export function TheData() {
           <Figure value="1" label="pipeline" hint="stage, validate, promote, for every source" accent />
         </RevealGroup>
       </div>
+
+      {STATUS_URL && (
+        <Reveal when="view">
+          <p className="mt-8 text-[13.5px] text-faint">
+            None of that is taken on trust. The collectors are running in the open:{" "}
+            <a
+              href={STATUS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted underline decoration-dotted underline-offset-4 hover:text-ink"
+            >
+              every collector, its last run and its next, live
+            </a>
+            .
+          </p>
+        </Reveal>
+      )}
     </Section>
   );
 }

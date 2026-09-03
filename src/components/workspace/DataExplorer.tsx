@@ -49,13 +49,24 @@ import { entityNote } from "@/lib/workspace/entityNotes";
  */
 const ALL = "All";
 
+/** The domain select's last option: every domain at once. */
+const EVERYTHING = "all";
+
 export function DataExplorer({
   selected,
   onToggle,
   onClear,
   onNext,
+  initialDomain,
 }: {
   selected: DataRef[];
+  /**
+   * The workspace's subject, if it has one — a domain name or `"all"`. The
+   * explorer opens on it and then belongs to the reader; it arrives after
+   * mount when the page is still fetching the workspace, so it is applied
+   * once as it lands rather than only read at first render.
+   */
+  initialDomain?: string;
   onToggle: (ref: DataRef) => void;
   /** Drop the whole selection. */
   onClear?: () => void;
@@ -69,16 +80,28 @@ export function DataExplorer({
   onNext?: () => void;
 }) {
   const all = useMemo(() => domains(), []);
-  const [domain, setDomain] = useState(all[0] ?? "Energy");
+  const known = (d?: string) => d === EVERYTHING || (d !== undefined && all.includes(d));
+  const [domain, setDomain] = useState(
+    known(initialDomain) ? initialDomain! : (all[0] ?? "Energy"),
+  );
   const [category, setCategory] = useState(ALL);
+  useEffect(() => {
+    if (known(initialDomain)) {
+      setDomain(initialDomain!);
+      setCategory(ALL);
+    }
+    // `all` is the catalogue, fixed for the life of the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDomain]);
+  const everything = domain === EVERYTHING;
   const [query, setQuery] = useState("");
   /** The set being read at level two, or null for the catalogue. */
   const [drill, setDrill] = useState<Schema | null>(null);
 
   const refs = useMemo(() => catalogRefs(), []);
   const cats = useMemo(
-    () => [ALL, ...categories(domain)],
-    [domain],
+    () => [ALL, ...categories(everything ? undefined : domain)],
+    [domain, everything],
   );
 
   const chosen = useMemo(
@@ -101,7 +124,7 @@ export function DataExplorer({
     >();
     for (const s of SCHEMAS) {
       if (
-        domainOf(s) !== domain ||
+        (!everything && domainOf(s) !== domain) ||
         (category !== ALL && categoryOf(s) !== category) ||
         (q &&
           !s.name.toLowerCase().includes(q) &&
@@ -114,7 +137,9 @@ export function DataExplorer({
           ))
       )
         continue;
-      const heading = s.path.slice(1).join(" › ");
+      // The select names the domain, so headings drop it — unless the select
+      // says everything, when the domain is the one thing a heading must say.
+      const heading = (everything ? s.path : s.path.slice(1)).join(" › ");
       const entry = {
         schema: s,
         streamRef: refs.find(
@@ -128,7 +153,7 @@ export function DataExplorer({
     return [...bySection.entries()].map(
       ([heading, entries]) => ({ heading, entries }),
     );
-  }, [refs, domain, category, query]);
+  }, [refs, domain, everything, category, query]);
 
   const shown = groups.length;
 
@@ -192,10 +217,10 @@ export function DataExplorer({
               setDomain(d);
               setCategory(ALL);
             }}
-            options={all.map((d) => ({
-              value: d,
-              label: d,
-            }))}
+            options={[
+              ...all.map((d) => ({ value: d, label: d })),
+              { value: EVERYTHING, label: "Everything" },
+            ]}
             aria-label="Domain"
             align="right"
             className="shrink-0"
@@ -231,7 +256,7 @@ export function DataExplorer({
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
         {shown === 0 ? (
           <p className="px-0.5 py-3 text-[12.5px] text-faint">
-            Nothing in {domain} matches “{query}”.
+            Nothing in {everything ? "the catalogue" : domain} matches “{query}”.
           </p>
         ) : (
           groups.map((g) => (
