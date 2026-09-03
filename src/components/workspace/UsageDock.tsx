@@ -85,8 +85,11 @@ export function UsageDock({
           ? `/api/workspace/usage?space=${encodeURIComponent(spaceId)}`
           : "/api/workspace/usage",
       )
-        .then((r) => r.json())
-        .then((d) => live && setUsage(d))
+        // Signed out, the workspace API answers 401 with an error body. The
+        // meter is meaningless then, and reading `today` off that body took
+        // the whole nav down with it.
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => live && setUsage(d && d.today ? d : null))
         .catch(() => {});
     load();
     // Slow enough to be free, quick enough that a query you just made shows up.
