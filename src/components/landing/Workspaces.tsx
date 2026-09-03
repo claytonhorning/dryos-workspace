@@ -69,7 +69,7 @@ export function Workspaces() {
             so it survives the copy.
           </p>
           <p className="mt-3 text-[15px] leading-[1.7] text-muted">
-            On the launched screen both ends wear the pair&rsquo;s colour, so whoever inherits
+            On the launched screen both ends wear the pair&rsquo;s color, so whoever inherits
             the page can see what is driving what without asking who built it.
           </p>
         </Reveal>

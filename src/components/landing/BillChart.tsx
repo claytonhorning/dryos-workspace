@@ -16,7 +16,7 @@ import { cx } from "@/components/ui";
  * Two invoices for the same dollar.
  *
  * The chart makes one distinction only: grey is the company that grew around
- * the data, colour is the data. Every org-chart line item wears the same grey
+ * the data, color is the data. Every org-chart line item wears the same grey
  * on purpose, so eight segments read as one block rather than eight causes, and
  * the accent sliver at the end of the first bar is the argument. Identity of an
  * individual segment comes from the legend (same order, left to right) and from
@@ -81,7 +81,7 @@ const FILL: Record<Kind, string> = {
 };
 
 /* Host tokens only — the series slots live inside the frame and would resolve
-   to nothing out here. Five statuses is plenty of colours for a small party. */
+   to nothing out here. Five statuses is plenty of colors for a small party. */
 const CONFETTI = ["bg-accent", "bg-info", "bg-warn", "bg-stale", "bg-fail"];
 const PIECES = 12;
 

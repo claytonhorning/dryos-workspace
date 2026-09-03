@@ -73,7 +73,7 @@ export const DRAG_TYPE = "application/x-dryos-component";
  * selection, focus, the drop boundary, every chip that says "wired". A pair
  * outlined in it on the launched screen is indistinguishable from chrome, and
  * in edit mode it is indistinguishable from the tile you have open. The seven
- * left are still the validated set, so nothing about colour-vision safety
+ * left are still the validated set, so nothing about color-vision safety
  * changes; a wire saved with slot 1 before this still draws as it was, and
  * cycling moves it into the seven and cannot bring it back.
  *

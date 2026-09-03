@@ -103,7 +103,7 @@ export function WireDemo() {
       className="relative grid grid-cols-[minmax(0,1.41fr)_minmax(0,1fr)] gap-3"
     >
       <div className="relative overflow-hidden rounded-md border border-line">
-        <ThemedShot name="map" alt="A map of every ERCOT settlement point, coloured by price" ratio="3266/1757" sizes="(min-width: 1024px) 40vw, 60vw" />
+        <ThemedShot name="map" alt="A map of every ERCOT settlement point, colored by price" ratio="3266/1757" sizes="(min-width: 1024px) 40vw, 60vw" />
         <div ref={pickedMap} className="absolute inset-0 opacity-0">
           <ThemedShot name="map-picked" alt="" ratio="3266/1757" sizes="(min-width: 1024px) 40vw, 60vw" />
         </div>

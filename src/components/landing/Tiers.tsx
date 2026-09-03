@@ -146,9 +146,7 @@ export function Tiers() {
         <Heading>Flat per month. Streams, not queries.</Heading>
         <Lead>
           A stream is a thing somebody maintains, so it is the thing you
-          subscribe to. The platform is a flat fee. Nothing on the invoice
-          depends on how many times a tile polled, which means you can budget it
-          and we can forecast it.
+          subscribe to. The platform is a flat fee.
         </Lead>
       </Reveal>
 
