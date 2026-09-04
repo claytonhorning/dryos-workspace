@@ -19,6 +19,8 @@ import {
 } from "@/components/workspace/BuildPanel";
 import { ComponentEditor } from "@/components/workspace/ComponentEditor";
 import { ChatDock } from "@/components/workspace/ChatDock";
+import { TileChat } from "@/components/workspace/TileChat";
+import type { TileAsk } from "@/lib/workspace/ask";
 import { WiresStrip } from "@/components/workspace/WiresStrip";
 import { FeedsPanel } from "@/components/workspace/FeedsPanel";
 import {
@@ -289,8 +291,37 @@ export default function AppPage() {
   }, [panelW]);
   /** Which tile the editor should put its result back into, from a ⚙ click. */
   const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
+  /**
+   * Tiles shift-clicked on the screen, by slot, in the order they were
+   * clicked. They are the wires strip's draft as far as the canvas is
+   * concerned: the frame rings each one, and the strip lists them as the
+   * group being built. Two of them start a group on their own.
+   */
+  const [marked, setMarked] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  /**
+   * The chat a double click on a launched tile opened: what the frame
+   * packed, and where. One at a time — another double click replaces it, a
+   * press anywhere (in the frame or out here) closes it, and entering edit
+   * mode closes it too, since a click means "configure" there.
+   */
+  const [ask, setAsk] = useState<{
+    ask: TileAsk;
+    at: { x: number; y: number };
+    box: { w: number; h: number };
+  } | null>(null);
+  const openAsk = useCallback(
+    (a: TileAsk, at: { x: number; y: number }, box: { w: number; h: number }) =>
+      setAsk({ ask: a, at, box }),
+    [],
+  );
+  const closeAsk = useCallback(() => setAsk(null), []);
+  useEffect(() => {
+    if (asideOpen) setAsk(null);
+    // A selection for the strip has no strip to land in once editing ends.
+    else setMarked([]);
+  }, [asideOpen]);
   const [pullOpen, setPullOpen] = useState(false);
   /** The canvas keeps the launched screen's proportions while being edited. */
   const { box: canvasBox, fit } = useScreenFit(asideOpen, Boolean(app));
@@ -684,12 +715,26 @@ export default function AppPage() {
    * remember which slot to put the result back into.
    */
   const configure = useCallback(
-    (index: number) => {
+    (index: number, shift: boolean) => {
       const spec = app?.manifest?.[index];
       const def = spec ? componentDef(spec.kind) : undefined;
       if (!spec || !def) {
         setError(
-          "This page was edited by the model, so tiles cannot be reconfigured in place — describe the change instead.",
+          shift
+            ? "This page was edited by the model, so its tiles cannot be wired in place."
+            : "This page was edited by the model, so tiles cannot be reconfigured in place — describe the change instead.",
+        );
+        return;
+      }
+      // Shift-click is "this one too": the tile joins (or leaves) the group
+      // the strip is building, and the editor stays out of it. A plain click
+      // leaves the marks alone — opening one tile's settings to check them
+      // should not throw away a selection made two clicks ago.
+      if (shift) {
+        setMarked((prev) =>
+          prev.includes(index)
+            ? prev.filter((i) => i !== index)
+            : [...prev, index],
         );
         return;
       }
@@ -789,6 +834,8 @@ export default function AppPage() {
               onMove={move}
               onRemove={remove}
               onConfigure={configure}
+              onAsk={openAsk}
+              onPress={closeAsk}
               flush={!asideOpen}
               fit={fit}
               // A tile is clicked to configure it, so the frame has to know
@@ -800,9 +847,26 @@ export default function AppPage() {
               // would keep the ring for a frame and a message round trip
               // after Done — which is exactly the moment it has to go.
               selected={asideOpen ? replaceIndex : null}
+              marked={marked}
               cursor={cursor}
               onCursor={moveCursor}
             />
+
+            {/*
+              The chat a double click opened, at the click. Inside the canvas box so
+              its coordinates are the frame's, scaled back out by the Runner.
+            */}
+            {ask && (
+              <TileChat
+                key={`${ask.ask.index}:${ask.at.x}:${ask.at.y}`}
+                ask={ask.ask}
+                at={ask.at}
+                box={ask.box}
+                page={app.name}
+                tz={tzPref}
+                onClose={closeAsk}
+              />
+            )}
 
             {/*
               The staged duplicate: the copy hovering over a dimmed canvas,
@@ -900,6 +964,8 @@ export default function AppPage() {
                 manifest={app.manifest}
                 carrying={dragging}
                 onStaged={() => setStage("data")}
+                marked={marked}
+                onMarkedChange={setMarked}
                 onConnect={async (t, from, color) => {
                   const spec = app.manifest?.[t];
                   if (!spec) return;

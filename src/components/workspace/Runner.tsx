@@ -9,6 +9,7 @@ import {
 import { cx } from "@/components/ui";
 import { useTheme } from "@/lib/useTheme";
 import { useTimeZone } from "@/lib/useTimeZone";
+import type { TileAsk } from "@/lib/workspace/ask";
 
 /**
  * Hosts a running app, answers its data calls, and takes drops.
@@ -49,10 +50,13 @@ export function Runner({
   onMove,
   onRemove,
   onConfigure,
+  onAsk,
+  onPress,
   flush,
   fit,
   editing,
   selected,
+  marked,
   cursor,
   onCursor,
 }: {
@@ -112,7 +116,20 @@ export function Runner({
     index: number,
   ) => Promise<boolean> | boolean | void;
   /** A tile's ⚙ was clicked inside the frame. */
-  onConfigure?: (index: number) => void;
+  onConfigure?: (index: number, shift: boolean) => void;
+  /**
+   * A launched tile was double-clicked on its data. The frame packed what it was
+   * showing; `at` is where, in this shell's own pixels (the frame's
+   * coordinates with the fit's scale taken back out), and `box` is the
+   * shell, so whatever opens can stay inside it.
+   */
+  onAsk?: (
+    ask: TileAsk,
+    at: { x: number; y: number },
+    box: { w: number; h: number },
+  ) => void;
+  /** Any pointer press inside the frame — what closes an open chat. */
+  onPress?: () => void;
   /** Edge to edge: no radius, no border. The screen is the whole view. */
   flush?: boolean;
   /**
@@ -135,6 +152,8 @@ export function Runner({
    */
   editing?: boolean;
   selected?: number | null;
+  /** The tiles shift-clicked into the wired group being built, by slot. */
+  marked?: number[];
 }) {
   /** The visible frame — drops, theme pushes and drag messages address it. */
   const frame = useRef<HTMLIFrameElement | null>(null);
@@ -271,10 +290,10 @@ export function Runner({
   // because a new revision is a new document that has heard none of this.
   useEffect(() => {
     frame.current?.contentWindow?.postMessage(
-      { __dryos: "mode", edit: Boolean(editing), selected },
+      { __dryos: "mode", edit: Boolean(editing), selected, marked },
       "*",
     );
-  }, [editing, selected, live]);
+  }, [editing, selected, marked, live]);
 
   // And the time cursor, which is the same story a third time: the frame cannot
   // see the bar the scrubber lives in, so it is told which instant the screen is
@@ -391,7 +410,9 @@ export function Runner({
             } | null;
           }
         | { __dryos: "remove"; index: number }
-        | { __dryos: "configure"; index: number }
+        | { __dryos: "configure"; index: number; shift?: boolean }
+        | ({ __dryos: "ask"; x: number; y: number } & TileAsk)
+        | { __dryos: "press" }
         | { __dryos: "cursor-set"; at: string | null };
       if (!m || typeof m !== "object") return;
       // Data calls are answered for either frame — the incoming one starts
@@ -427,7 +448,21 @@ export function Runner({
           },
         );
       } else if (m.__dryos === "configure") {
-        onConfigure?.(m.index);
+        onConfigure?.(m.index, Boolean(m.shift));
+      } else if (m.__dryos === "ask") {
+        // Frame pixels to shell pixels: the frame sits at the shell's origin
+        // and is drawn scaled, so the scale is the whole of the conversion.
+        const s = fit?.scale ?? 1;
+        const r = shell.current?.getBoundingClientRect();
+        const { __dryos: _tag, x, y, ...ask } = m;
+        void _tag;
+        onAsk?.(
+          ask,
+          { x: x * s, y: y * s },
+          { w: r?.width ?? 0, h: r?.height ?? 0 },
+        );
+      } else if (m.__dryos === "press") {
+        onPress?.();
       } else if (m.__dryos === "cursor-set") {
         // A tile asking the page to move its instant. The frame does not get to
         // decide — it is told the answer on the way back, like every other
@@ -445,7 +480,10 @@ export function Runner({
     onMove,
     onRemove,
     onConfigure,
+    onAsk,
+    onPress,
     onCursor,
+    fit,
   ]);
 
   // Never let the two slots carry the same revision — between the swap and
@@ -518,6 +556,7 @@ export function Runner({
                   __dryos: "mode",
                   edit: Boolean(editing),
                   selected,
+                  marked,
                 },
                 "*",
               );

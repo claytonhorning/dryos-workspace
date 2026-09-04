@@ -39,7 +39,7 @@ export type AskEvent =
   | { type: "ref"; ref: DataRef }
   | { type: "error"; message: string };
 
-const TOOLS: Anthropic.Tool[] = [
+export const TOOLS: Anthropic.Tool[] = [
   {
     name: "browse_schemas",
     description:
@@ -164,7 +164,7 @@ function mockEntities(schema: Schema, limit: number): string[] {
 }
 
 /** Runs one tool and returns both its result text and any chips it produced. */
-async function runTool(
+export async function runTool(
   name: string,
   input: Record<string, unknown>,
 ): Promise<{ text: string; refs: DataRef[]; summary: string }> {

@@ -57,6 +57,8 @@ export function WiresStrip({
   onConnect,
   carrying,
   onStaged,
+  marked = [],
+  onMarkedChange,
 }: {
   onDragStateChange: (payload: TrayPayload | null) => void;
   /** Bumped by the page each time a staged group lands on the screen. */
@@ -73,6 +75,13 @@ export function WiresStrip({
   carrying?: TrayPayload | null;
   /** A drop landed in the strip — the page resets its panel on this. */
   onStaged?: () => void;
+  /**
+   * Tiles shift-clicked on the screen, by slot, in click order. The page owns
+   * the list because the frame has to be told which tiles to ring; the strip
+   * folds them into its draft.
+   */
+  marked?: number[];
+  onMarkedChange?: (marked: number[]) => void;
 }) {
   /**
    * The draft's members. They live here rather than in the pane because the
@@ -124,10 +133,59 @@ export function WiresStrip({
   }
 
   function newGroup() {
-    setStaged([]);
+    // Tiles already marked on the screen are what the group starts with;
+    // only the previews dropped into an earlier draft are cleared.
+    setStaged((prev) => prev.filter((x) => x.slot !== undefined));
     setDrafting(true);
     setPick("draft");
   }
+
+  /*
+    The marked tiles are members of the draft, kept in step with the page's
+    list: a tile shift-clicked joins at the end, one shift-clicked again (or
+    taken out here) leaves. Keyed on the slots rather than the array, which
+    the page hands over fresh on every render. The manifest is read through a
+    ref for the same reason — it only has to be current at the moment a tile
+    is added, and a save must not re-run the sync.
+  */
+  const specs = useRef(manifest);
+  specs.current = manifest;
+  const markedKey = marked.join(",");
+  useEffect(() => {
+    const slots = markedKey ? markedKey.split(",").map(Number) : [];
+    setStaged((prev) => {
+      const kept = prev.filter(
+        (x) => x.slot === undefined || slots.includes(x.slot),
+      );
+      const have = new Set(kept.map((x) => x.slot));
+      const added = slots
+        .filter((s) => !have.has(s) && specs.current?.[s])
+        .map((s) => {
+          const spec = specs.current![s];
+          return {
+            id: `s${s}`,
+            slot: s,
+            kind: spec.kind,
+            options: spec.options,
+            custom: spec.custom,
+            refs: spec.refs,
+            layout: {
+              w: spec.layout?.w ?? DEFAULT_LAYOUT[spec.kind].w,
+              h: spec.layout?.h ?? DEFAULT_LAYOUT[spec.kind].h,
+            },
+          };
+        });
+      return added.length === 0 && kept.length === prev.length
+        ? prev
+        : [...kept, ...added];
+    });
+    // Two tiles marked is a group whether or not anyone pressed the button:
+    // there is nothing else two shift-clicks could mean.
+    if (slots.length >= 2) {
+      setDrafting(true);
+      setPick("draft");
+    }
+  }, [markedKey]);
 
   /**
    * A landed group is a record now. The draft that made it goes away rather
@@ -142,6 +200,8 @@ export function WiresStrip({
     setStaged([]);
     setDrafting(false);
     setPick(null);
+    onMarkedChange?.([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the tick is the trigger
   }, [placedTick]);
 
   return (
@@ -191,7 +251,7 @@ export function WiresStrip({
         >
           <span aria-hidden="true">+</span>
           {drafting
-            ? "building — drop components in"
+            ? "building — drop previews in, or ⇧-click tiles"
             : accepts
               ? // A drop with no draft opens one, so the button says what a
                 // release would do rather than standing there unexplained.
@@ -211,6 +271,8 @@ export function WiresStrip({
         setPick={setPick}
         over={overBox && accepts}
         onDragStateChange={onDragStateChange}
+        marked={marked}
+        onMarkedChange={onMarkedChange}
       />
     </div>
   );
@@ -223,7 +285,11 @@ export function WiresStrip({
  * would silently re-aim every reference the moment somebody removed a member
  * above it.
  */
-export type StagedItem = StagedComponent & { id: string };
+export type StagedItem = StagedComponent & {
+  id: string;
+  /** Its manifest slot, when it was shift-clicked off the screen. */
+  slot?: number;
+};
 
 /** Any component, named the way its card was: kind, then its data. */
 function itemName(m: {
@@ -351,6 +417,8 @@ function WiresPane({
   setPick,
   over,
   onDragStateChange,
+  marked,
+  onMarkedChange,
 }: {
   manifest?: ComponentSpec[];
   onConnect?: (
@@ -369,6 +437,8 @@ function WiresPane({
   /** A stageable drag is currently over the strip. */
   over: boolean;
   onDragStateChange: (payload: TrayPayload | null) => void;
+  marked: number[];
+  onMarkedChange?: (marked: number[]) => void;
 }) {
   const specs = manifest ?? [];
   const [busy, setBusy] = useState(false);
@@ -413,6 +483,7 @@ function WiresPane({
           custom: m.custom,
           refs: m.refs,
           layout: m.layout,
+          slot: m.slot,
         })),
       }
     : null;
@@ -463,6 +534,14 @@ function WiresPane({
     setStaged([]);
     setDrafting(false);
     setPick(null);
+    onMarkedChange?.([]);
+  }
+
+  /** Take one member out: a marked tile leaves the page's list, a drop leaves ours. */
+  function dropMember(p: Part) {
+    if (p.slot !== undefined)
+      onMarkedChange?.(marked.filter((s) => s !== p.slot));
+    else setStaged((prev) => prev.filter((x) => x.id !== p.key));
   }
 
   const moveMember = (i: number, by: number) =>
@@ -511,6 +590,48 @@ function WiresPane({
     });
   }
 
+  /*
+    A draft made of tiles already on the screen does not land — it is wired
+    where it stands, one replace-in-slot write per follower, the same path an
+    existing group's color and unlink go down. A draft of dropped previews
+    still lands as one drop. A draft of both has no single act that finishes
+    it (the previews do not exist yet, so nothing on the screen can follow
+    them), so the widget says so rather than doing half.
+  */
+  const onScreen =
+    open?.origin === "draft"
+      ? open.parts.filter((p) => p.slot !== undefined)
+      : [];
+  const mixed =
+    open?.origin === "draft" &&
+    onScreen.length > 0 &&
+    onScreen.length < open.parts.length;
+  const wireable =
+    open?.origin === "draft" &&
+    !mixed &&
+    onScreen.length > 0 &&
+    firstSource !== -1 &&
+    wiring.some((w) => w !== undefined);
+
+  async function wireDraft() {
+    if (!open || !onConnect || busy || !wireable) return;
+    const src = open.parts[firstSource]?.slot;
+    if (src === undefined) return;
+    setBusy(true);
+    try {
+      for (let i = 0; i < open.parts.length; i++) {
+        const slot = open.parts[i].slot;
+        if (wiring[i] === undefined || slot === undefined) continue;
+        await onConnect(slot, src, nextSlot);
+      }
+      // The wire now reads back out of the manifest as a real group, and the
+      // draft that made it would only stand beside it saying "draft".
+      discardDraft();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   /** One wire's worth of writes: every follower, in turn. */
   async function reWire(
     g: WireGroup,
@@ -551,12 +672,17 @@ function WiresPane({
             over ? "text-accent" : "text-muted",
           )}
         >
-          {over ? "Release to start a group with it" : "Nothing here yet"}
+          {over
+            ? "Release to start a group with it"
+            : marked.length === 1
+              ? "One tile marked — shift-click another to start a group with both"
+              : "Nothing here yet"}
         </p>
         <p className="max-w-[52ch] text-[11px] leading-relaxed text-faint">
           Wire components together and they answer each other — clicking a node
-          on a map retargets the charts beside it. Start a group above, then
-          drag running previews onto this box.
+          on a map retargets the charts beside it. Shift-click two tiles on the
+          screen, or start a group above and drag running previews onto this
+          box.
         </p>
       </div>
     );
@@ -663,10 +789,10 @@ function WiresPane({
           </p>
         ) : open.parts.length === 0 ? (
           <p className="px-0.5 text-[11px] leading-relaxed text-faint">
-            Drag a running preview anywhere onto this box.
-            They stack in the order they land, and every
-            chart and ticker follows the first source in it — the map, or a
-            search over the stream&rsquo;s own names.
+            Shift-click tiles on the screen, or drag a running preview
+            anywhere onto this box. They stack in the order they arrive, and
+            every chart and ticker follows the first source in it — the map,
+            or a search over the stream&rsquo;s own names.
           </p>
         ) : (
           <>
@@ -740,13 +866,7 @@ function WiresPane({
                         ↓
                       </button>
                       <button
-                        onClick={() =>
-                          setStaged((prev) =>
-                            prev.filter(
-                              (x) => x.id !== p.key,
-                            ),
-                          )
-                        }
+                        onClick={() => dropMember(p)}
                         aria-label="Take out of the group"
                         className="grid h-5 w-5 place-items-center rounded text-[11px] text-muted transition-colors hover:bg-surface-3 hover:text-fail"
                       >
@@ -855,6 +975,40 @@ function WiresPane({
             A group lands as one piece. Open one and drag it
             from here.
           </div>
+        ) : mixed ? (
+          <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-line px-3 text-center text-[11px] leading-relaxed text-faint">
+            A group is tiles already on the screen, or previews
+            dropped here — not both at once. Take one kind out.
+          </div>
+        ) : onScreen.length > 0 ? (
+          /*
+            Tiles on the screen are wired where they stand: nothing lands, so
+            nothing is dragged. The box keeps the widget's shape — the same
+            list, the accent border — with the act at the top where the
+            handle would be.
+          */
+          <div className="dr-scroll flex min-h-0 flex-col overflow-y-auto rounded-md border border-accent bg-accent-dim">
+            <button
+              onClick={() => void wireDraft()}
+              disabled={!wireable || busy}
+              title={
+                wireable
+                  ? "Wire these tiles together on the screen"
+                  : "The group needs a map or a Node search to drive it"
+              }
+              className="sticky top-0 flex items-center gap-1.5 border-b border-accent-line bg-accent-dim px-2 py-1 text-left font-mono text-[9.5px] tracking-[0.08em] text-accent uppercase transition-colors hover:bg-accent/20 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-accent-dim"
+            >
+              <span aria-hidden="true">⌁</span>
+              {busy
+                ? "wiring…"
+                : `wire these ${open.parts.length} on the screen`}
+            </button>
+            <span className="flex flex-col gap-1 p-2">
+              {open.parts.map((p, i) => (
+                <WidgetRow key={p.key} part={p} to={wiring[i]} />
+              ))}
+            </span>
+          </div>
         ) : (
           <div
             draggable
@@ -868,49 +1022,46 @@ function WiresPane({
               drag onto the screen
             </span>
             <span className="flex flex-col gap-1 p-2">
-              {open.parts.map((p, i) => {
-                const to = wiring[i];
-                const n = itemName(p);
-                return (
-                  <span
-                    key={p.key}
-                    className="flex items-center gap-1.5 rounded border border-line bg-surface px-1.5 py-1"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="shrink-0 font-mono text-[10px] text-faint"
-                    >
-                      {GLYPH[p.kind] ?? "◆"}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11.5px] text-ink">
-                        {n.kind}
-                      </span>
-                      {/*
-                        The data under the name: two rows both reading "Chart"
-                        say nothing about which chart is stacked where, which
-                        is the one question a list of names is read to answer.
-                      */}
-                      <span className="block truncate text-[10px] text-muted">
-                        {n.data}
-                      </span>
-                    </span>
-                    {to !== undefined && (
-                      <span
-                        aria-label={`follows ${to + 1}`}
-                        className="shrink-0 font-mono text-[10px] text-accent"
-                      >
-                        ⌁{to + 1}
-                      </span>
-                    )}
-                  </span>
-                );
-              })}
+              {open.parts.map((p, i) => (
+                <WidgetRow key={p.key} part={p} to={wiring[i]} />
+              ))}
             </span>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/** One line of the widget: the part's shape, its data, and who it follows. */
+function WidgetRow({ part, to }: { part: Part; to: number | undefined }) {
+  const n = itemName(part);
+  return (
+    <span className="flex items-center gap-1.5 rounded border border-line bg-surface px-1.5 py-1">
+      <span
+        aria-hidden="true"
+        className="shrink-0 font-mono text-[10px] text-faint"
+      >
+        {GLYPH[part.kind] ?? "◆"}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[11.5px] text-ink">{n.kind}</span>
+        {/*
+          The data under the name: two rows both reading "Chart" say nothing
+          about which chart is stacked where, which is the one question a list
+          of names is read to answer.
+        */}
+        <span className="block truncate text-[10px] text-muted">{n.data}</span>
+      </span>
+      {to !== undefined && (
+        <span
+          aria-label={`follows ${to + 1}`}
+          className="shrink-0 font-mono text-[10px] text-accent"
+        >
+          ⌁{to + 1}
+        </span>
+      )}
+    </span>
   );
 }
 

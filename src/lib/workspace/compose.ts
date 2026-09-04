@@ -46,6 +46,25 @@ export const PREAMBLE = `import React, { useEffect, useMemo, useRef, useState } 
 const NAKED = typeof window !== "undefined" && window.__dryosNaked;
 
 /**
+ * What every tile is showing, kept for the question somebody asks of it.
+ *
+ * A double click on a launched tile opens a small chat about the data under
+ * the pointer, and the host on the other side of the frame cannot see any of
+ * it — so the frame keeps the answer ready. \`useSeries\` registers the rows it
+ * holds under the tile it is rendering in (the slot says which, through
+ * \`TileIndex\`), \`Section\` registers its title, and whichever readout the
+ * pointer is on records the point it is describing on
+ * \`window.__dryosHover\`. The click packs all three and posts them out;
+ * nothing is fetched twice and nothing crosses the boundary until asked for.
+ */
+const TILE_DATA = {};
+const TILE_META = {};
+const TileIndex = React.createContext(null);
+// One counter for every per-instance id the runtime hands out: series
+// registrations and the tips that own a hover.
+let SERIES_SEQ = 0;
+
+/**
  * One request per selection, polled together and kept in step.
  *
  * \`cursor\` is a tile-local instant (the map's scrubber). When set, every query
@@ -61,6 +80,18 @@ function useSeries(queries, refreshMs, cursor) {
   const [rows, setRows] = useState(queries.map(() => []));
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Which tile this belongs to, and one slot per hook so a component that
+  // calls this twice registers both. Null outside a slot — a preview has no
+  // host to ask, and a thumbnail is never clicked.
+  const tile = React.useContext(TileIndex);
+  const slot = useRef(0);
+  if (!slot.current) slot.current = ++SERIES_SEQ;
+  useEffect(() => {
+    if (tile == null) return;
+    (TILE_DATA[tile] = TILE_DATA[tile] || {})[slot.current] = { queries, rows };
+    return () => { if (TILE_DATA[tile]) delete TILE_DATA[tile][slot.current]; };
+  }, [tile, rows]);
 
   useEffect(() => {
     let live = true;
@@ -313,6 +344,74 @@ const DRAG_BLANK = new Image();
 DRAG_BLANK.src =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
+/*
+  The rows a tile holds, trimmed for the wire.
+
+  Columns null all the way down go (ERCOT's price components), the bookkeeping
+  columns go, and a long series is thinned to \`keep\` rows spread evenly
+  across it. Every row for \`want\` — the entity under the click — is kept
+  ahead of the thinning, because that is the one the question is about; a
+  fan-out over a thousand nodes would otherwise sample it away. \`count\`
+  rides along so the reader knows what it is looking at a slice of.
+*/
+function compactRows(rows, keep, want) {
+  if (!rows || !rows.length) return { count: 0, columns: [], rows: [] };
+  const drop = { collected_at_utc: 1, source_published_at_utc: 1, node_type: 1 };
+  const cols = Object.keys(rows[0]).filter((k) => !drop[k] && rows.some((r) => r[k] != null));
+  const slim = (r) => { const o = {}; cols.forEach((k) => { o[k] = r[k]; }); return o; };
+  const mine = want ? rows.filter((r) => r.node === want).slice(0, keep) : [];
+  const rest = want ? rows.filter((r) => r.node !== want) : rows;
+  const room = Math.max(0, keep - mine.length);
+  let picked = rest;
+  if (rest.length > room) {
+    picked = [];
+    const step = rest.length / Math.max(1, room);
+    for (let i = 0; i < room; i++) picked.push(rest[Math.floor(i * step)]);
+  }
+  return { count: rows.length, columns: cols, rows: mine.concat(picked).map(slim) };
+}
+
+/*
+  Everything the host needs to open a chat about a click: the point under the
+  pointer (the readout that was showing, or the table row that was pressed),
+  the clicked tile's rows, and a digest of every other tile — the question is
+  about this number, but "compared to what" is usually the next one.
+*/
+function askPayload(index, target, x, y) {
+  const hover = window.__dryosHover || null;
+  const row = !hover && target && target.closest ? target.closest("tr") : null;
+  const cells = row ? Array.from(row.cells).map((c) => c.textContent.trim()).filter(Boolean) : null;
+  const want = hover && hover.entity ? hover.entity : null;
+  const pack = (i, keep) => {
+    const meta = TILE_META[i] || {};
+    const series = [];
+    Object.values(TILE_DATA[i] || {}).forEach((s) => {
+      s.queries.forEach((q, n) => {
+        series.push(Object.assign({ query: q }, compactRows(s.rows[n], keep, i === index ? want : null)));
+      });
+    });
+    return { index: i, title: meta.title || null, unit: meta.unit || null, series };
+  };
+  const others = Object.keys(TILE_META)
+    .map(Number)
+    .filter((i) => i !== index)
+    .sort((a, b) => a - b)
+    .map((i) => pack(i, 6));
+  return {
+    __dryos: "ask",
+    index,
+    x,
+    y,
+    point: hover
+      ? { at: hover.when || null, label: hover.label || null, entity: want, values: hover.values || [] }
+      : cells && cells.length
+        ? { row: cells }
+        : null,
+    tile: pack(index, 150),
+    screen: others,
+  };
+}
+
 /**
  * Every section has the same frame, so the page reads as one thing.
  *
@@ -339,6 +438,11 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
   // arrive by message rather than being inferred in here.
   const [edit, setEdit] = useState(false);
   const [picked, setPicked] = useState(null);
+  // The tiles shift-clicked into a wired group being built in the strip. A
+  // set rather than one slot, because a group is several of them — and the
+  // frame draws the ring on each so the selection can be seen where it was made.
+  const [marked, setMarked] = useState([]);
+  const inGroup = Array.isArray(marked) && marked.includes(index);
   // Stamped by buildDocument for previews: looking, not arranging.
   const bare = typeof window !== "undefined" && window.__dryosBare;
   // ...and the preview panes, where even the title is a line the widget could
@@ -349,8 +453,23 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
      click that opens nothing is worse than a click that does nothing. */
   const selectable =
     !bare && !full && edit && typeof window !== "undefined" && window.parent !== window;
+  /* Launched, a double click on the data asks about it. There is no panel to
+     configure into, and the question somebody has of a number is the reason
+     they are pointing at it — so the point, this tile's rows and a digest of
+     the screen go out to the host, which opens a chat where the click was.
+     A double click rather than a click because a launched screen is looked
+     at, and a single click that opens a window is a window that opens while
+     somebody is only pointing. */
+  const askable =
+    !bare && !edit && typeof window !== "undefined" && window.parent !== window;
   /** Where the pointer went down, so a drag is never mistaken for a click. */
   const from = useRef(null);
+
+  // What this tile is called, for the ask payload of any tile on the screen.
+  useEffect(() => {
+    TILE_META[index] = { title, unit };
+    return () => { delete TILE_META[index]; };
+  }, [index, title, unit]);
 
   useEffect(() => setSize({ w: w || 6, h: h || 240 }), [w, h]);
 
@@ -363,6 +482,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       if (!m || typeof m !== "object" || m.__dryos !== "mode") return;
       setEdit(Boolean(m.edit));
       setPicked(typeof m.selected === "number" ? m.selected : null);
+      setMarked(Array.isArray(m.marked) ? m.marked : []);
     };
     window.addEventListener("message", onHost);
     return () => window.removeEventListener("message", onHost);
@@ -507,7 +627,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         border: bare || naked
           ? "none"
           : "1px solid " +
-            (dragging || picked === index
+            (dragging || picked === index || inGroup
               ? "var(--accent)"
               : over
                 ? "var(--info)"
@@ -518,7 +638,13 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         // The picked tile is the one the panel is talking about, so it is
         // stated twice — a second ring, because one hairline of accent is the
         // same weight as the hover it has to be told apart from.
-        boxShadow: picked === index ? "0 0 0 2px var(--accent-dim)" : "none",
+        // A tile marked for a group wears the same ring, only solid: it is
+        // one of several, and a dim halo reads as "the one".
+        boxShadow: inGroup
+          ? "0 0 0 2px var(--accent)"
+          : picked === index
+            ? "0 0 0 2px var(--accent-dim)"
+            : "none",
         cursor: selectable ? "pointer" : "default",
         display: "flex",
         flexDirection: "column",
@@ -538,7 +664,9 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       data-tile={index}
       style={frame}
       onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      // Leaving the tile forgets the readout: a hover recorded here must not
+      // answer for a click on the tile next door.
+      onMouseLeave={() => { setHover(false); window.__dryosHover = null; }}
       onPointerDown={(e) => { from.current = { x: e.clientX, y: e.clientY }; }}
       onClick={(e) => {
         if (!selectable) return;
@@ -548,9 +676,18 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
         if (e.target.closest && e.target.closest("button, a, input, select, textarea, [data-nopick]")) return;
         const d = from.current;
         if (d && Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 6) return;
+        // Shift is "this one too": the host adds the tile to the wired group
+        // being built instead of opening its settings.
         window.dispatchEvent(
-          new CustomEvent("dryos:tileconfigure", { detail: { index } }),
+          new CustomEvent("dryos:tileconfigure", { detail: { index, shift: e.shiftKey } }),
         );
+      }}
+      onDoubleClick={(e) => {
+        if (!askable) return;
+        if (e.target.closest && e.target.closest("button, a, input, select, textarea, [data-nopick]")) return;
+        const d = from.current;
+        if (d && Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 6) return;
+        parent.postMessage(askPayload(index, e.target, e.clientX, e.clientY), "*");
       }}
     >
       {/*
@@ -685,6 +822,10 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
           minHeight: 0,
           overflow: fill ? "hidden" : "auto",
           position: "relative",
+          // A double click selects a word, and the word under it was an axis
+          // label — the chart lit up with a highlight every time somebody
+          // asked about a point. A tile is read, not copied from.
+          userSelect: "none",
         }}
       >
         {error ? (
@@ -874,8 +1015,27 @@ function TimeTick({ x, y, payload, labels, tz }) {
 // \`tz\` is the display timezone; absent, UTC — and the short zone name rides
 // beside the clock, because a time with no zone on it is a number, not a time.
 function ChartTip({ active, payload, label, unit, units, tz }) {
-  if (!active || !payload || !payload.length) return null;
+  // The point being read, for the double click that asks about it (see
+  // askPayload). A plain assignment during render, on purpose: recharts
+  // renders this on every pointer move, and an effect would be a render
+  // behind. The clear is owned: a tip only forgets a readout it wrote. Every
+  // chart re-renders its tip inactive when its data changes — a poll, or a
+  // wire retargeting it off a map click — and an unowned clear there wiped
+  // the node under the pointer on the map between the first click and the
+  // second, so the ask arrived with no point.
+  const me = useRef(0);
+  if (!me.current) me.current = ++SERIES_SEQ;
+  if (!active || !payload || !payload.length) {
+    if (window.__dryosHover && window.__dryosHover.owner === me.current) window.__dryosHover = null;
+    return null;
+  }
   const zone = tz || "UTC";
+  window.__dryosHover = {
+    owner: me.current,
+    when: typeof label === "number" ? new Date(label).toISOString() : String(label),
+    label: tzTime(label, zone) + " " + tzShort(label, zone),
+    values: payload.map((p) => ({ name: p.name, value: p.value, unit: (units && units[p.dataKey]) || unit || "" })),
+  };
   return (
     <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
       <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
@@ -1229,7 +1389,12 @@ export default function App() {
     `      if (window.parent !== window) parent.postMessage({ __dryos: "remove", index: i }, "*");`,
     `    };`,
     `    const onConfigure = (e) => {`,
-    `      if (window.parent !== window) parent.postMessage({ __dryos: "configure", index: e.detail.index }, "*");`,
+    `      if (window.parent !== window) parent.postMessage({ __dryos: "configure", index: e.detail.index, shift: Boolean(e.detail.shift) }, "*");`,
+    `    };`,
+    `    // Any press closes the chat a double click opened; the double click`,
+    `    // that follows reopens it if it lands on data. The host cannot see either.`,
+    `    const onPress = () => {`,
+    `      if (window.parent !== window) parent.postMessage({ __dryos: "press" }, "*");`,
     `    };`,
     `    const onHost = (e) => {`,
     `      const m = e.data;`,
@@ -1270,6 +1435,7 @@ export default function App() {
     `    window.addEventListener("dryos:tilesized", onSized);`,
     `    window.addEventListener("dryos:tileremove", onRemove);`,
     `    window.addEventListener("dryos:tileconfigure", onConfigure);`,
+    `    window.addEventListener("pointerdown", onPress);`,
     `    window.addEventListener("message", onHost);`,
     `    return () => {`,
     `      window.removeEventListener("dryos:tilegrab", onGrab);`,
@@ -1277,6 +1443,7 @@ export default function App() {
     `      window.removeEventListener("dryos:tilesized", onSized);`,
     `      window.removeEventListener("dryos:tileremove", onRemove);`,
     `      window.removeEventListener("dryos:tileconfigure", onConfigure);`,
+    `      window.removeEventListener("pointerdown", onPress);`,
     `      window.removeEventListener("message", onHost);`,
     `    };`,
     `  }, []);`,
@@ -1356,7 +1523,9 @@ export default function App() {
     `            borderRadius: 8,`,
     `          }}`,
     `        >`,
-    `          {tile}`,
+    // The slot tells the tile which one it is, so useSeries can file the rows
+    // it holds under the right index for the ask payload.
+    `          <TileIndex.Provider value={i}>{tile}</TileIndex.Provider>`,
     `        </div>`,
     `      ))}`,
     `      {ghost && <Ghost x={ghost.x} y={ghost.y} w={ghost.w} h={ghost.h} placing={placing} />}`,

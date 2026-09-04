@@ -34,6 +34,12 @@ const SLOT = "{/* dryos:annex-slot */}";
 /** Helpers the generated runtime defines, renamed so they cannot collide. */
 const HELPERS = [
   "NAKED",
+  "TILE_DATA",
+  "TILE_META",
+  "TileIndex",
+  "SERIES_SEQ",
+  "compactRows",
+  "askPayload",
   "DRAG_BLANK",
   "useSeries",
   "useMapbox",
@@ -174,9 +180,11 @@ export function annexComponent(source: string, spec: ComponentSpec): string {
     name,
   );
 
+  // Wrapped in the tile-index provider the canvas's slots supply, so a click
+  // on an annexed tile carries its rows out like any other.
   out = out.replace(
     SLOT,
-    `<${name} w={${layout.w}} h={${layout.h}} />\n      ${SLOT}`,
+    `<__dxTileIndex.Provider value={${index}}><${name} w={${layout.w}} h={${layout.h}} /></__dxTileIndex.Provider>\n      ${SLOT}`,
   );
   return `${out}\n${section}\n`;
 }

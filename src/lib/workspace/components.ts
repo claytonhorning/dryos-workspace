@@ -1216,8 +1216,24 @@ const scatter: ComponentDef = {
   const tz = useTz(${JSON.stringify(sourceTz(refs))});
 
   function ScatterTip({ active, payload }) {
-    if (!active || !payload || !payload.length) return null;
+    // The point being read, for the double click that asks about it
+    // (askPayload). The clear is owned — see ChartTip for why.
+    const me = React.useRef(0);
+    if (!me.current) me.current = ++SERIES_SEQ;
+    if (!active || !payload || !payload.length) {
+      if (window.__dryosHover && window.__dryosHover.owner === me.current) window.__dryosHover = null;
+      return null;
+    }
     const p = payload[0].payload;
+    window.__dryosHover = {
+      owner: me.current,
+      when: new Date(p.t).toISOString(),
+      label: tzTime(p.t, tz) + " " + tzShort(p.t, tz),
+      values: [
+        { name: ${JSON.stringify(s[0].label)}, value: p.x, unit: ${JSON.stringify(s[0].unit)} },
+        { name: ${JSON.stringify(s[1].label)}, value: p.y, unit: ${JSON.stringify(s[1].unit)} },
+      ],
+    };
     return (
       <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
         <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
@@ -1453,7 +1469,20 @@ const distribution: ComponentDef = {
   }, [rows]);
 
   function DistTip({ active, payload, label }) {
-    if (!active || !payload || !payload.length) return null;
+    // The bin being read, for the double click that asks about it
+    // (askPayload). The clear is owned — see ChartTip for why.
+    const me = React.useRef(0);
+    if (!me.current) me.current = ++SERIES_SEQ;
+    if (!active || !payload || !payload.length) {
+      if (window.__dryosHover && window.__dryosHover.owner === me.current) window.__dryosHover = null;
+      return null;
+    }
+    window.__dryosHover = {
+      owner: me.current,
+      when: null,
+      label: DURATION ? label + "% of the window at or above" : "around " + Number(label).toFixed(1) + " ${s[0].unit}",
+      values: payload.map((p) => ({ name: p.name, value: p.value, unit: DURATION ? "${s[0].unit}" : "readings" })),
+    };
     return (
       <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
         <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
@@ -1652,8 +1681,16 @@ const bar: ComponentDef = {
 ${dataMemo}
 
   function BarTip({ active, payload }) {
-    if (!active || !payload || !payload.length) return null;
+    // The bar being read, for the double click that asks about it
+    // (askPayload). The clear is owned — see ChartTip for why.
+    const me = React.useRef(0);
+    if (!me.current) me.current = ++SERIES_SEQ;
+    if (!active || !payload || !payload.length) {
+      if (window.__dryosHover && window.__dryosHover.owner === me.current) window.__dryosHover = null;
+      return null;
+    }
     const d = payload[0].payload;
+    window.__dryosHover = { owner: me.current, when: null, label: d.full, values: [{ name: d.full, value: d.v, unit: ${JSON.stringify(s[0].unit)} }] };
     return (
       <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
         <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>{d.full}</div>
@@ -1961,6 +1998,22 @@ const heatmap: ComponentDef = {
   // Prices want cents; load does not want four digits of them.
   const num = (v) =>
     Math.abs(v) >= 1000 ? v.toFixed(0) : Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(2);
+
+  // The cell being read, for the click that asks about it (askPayload in the
+  // runtime). An effect rather than an assignment in render, because the
+  // readout is state here and the clear on leave is a state change too.
+  React.useEffect(() => {
+    window.__dryosHover = hover && hc
+      ? {
+          when: hover.key,
+          label: clock(startMin) + " – " + clock(startMin + CELL_SECONDS / 60) + " CT, " + hover.key.slice(0, 10),
+          values: [
+            { name: AGG === "max" ? "peak" : "average", value: grid.val(hc), unit: UNIT },
+            { name: "readings", value: hc.n, unit: "" },
+          ],
+        }
+      : null;
+  }, [hover, hc]);
 
   return (
     <Section index={${i}} w={w} h={h} title=${JSON.stringify(s[0].label)} unit={UNIT} loading={loading} error={error}>
@@ -2914,6 +2967,9 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   React.useEffect(() => {
     if (!ready || !host.current || map.current) return;
     map.current = new window.mapboxgl.Map({
+      // A double click on the map asks about the node under it (see Section),
+      // so it must not also zoom. The wheel and the controls still do.
+      doubleClickZoom: false,
       container: host.current,
       style: "mapbox://styles/mapbox/" + style,
       center: [${ERCOT_VIEW.lon}, ${ERCOT_VIEW.lat}],
@@ -3043,6 +3099,25 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     would be the same invention the whole stream exists to avoid.
   */
   const [probe, setProbe] = React.useState(null);
+  // The readout, for the click that asks about it (askPayload in the
+  // runtime): the node under the pointer and its value, or the wind there.
+  // The entity rides along so the ask keeps every row of that node ahead of
+  // thinning a thousand-node layer down for the wire.
+  React.useEffect(() => {
+    window.__dryosHover = !probe
+      ? null
+      : probe.kind === "point"
+        ? { when: null, label: probe.id, entity: probe.id, values: [{ name: probe.id, value: probe.value, unit: UNIT }] }
+        : {
+            when: null,
+            label: "wind at " + probe.lat.toFixed(2) + ", " + probe.lon.toFixed(2),
+            entity: null,
+            values: [
+              { name: "speed", value: probe.spd, unit: FIELD ? FIELD.unit : "" },
+              { name: "from", value: probe.dir, unit: "deg" },
+            ],
+          };
+  }, [probe]);
   /*
     The placed nodes, in a ref rather than in the effect's dependencies.
 
