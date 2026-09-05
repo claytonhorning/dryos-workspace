@@ -492,21 +492,27 @@ function SetView({
     string,
     number
   > | null>(null);
-  /** The tier in view, unfiltered. Typing never refetches this. */
-  const [rows, setRows] = useState<EntityRow[]>([]);
-  const [opened, setOpened] = useState(false);
-  /** A fetch has actually delivered rows for the current view — before that,
-   *  an empty list means "still looking", not "nothing matches". */
+  /**
+   * The set, in hand: every entity the one fetch returned, up to the API's
+   * cap of 2,000. Tiers and search are filters over this list — the endpoint
+   * answers once per set, and pressing a tier chip or typing a letter never
+   * asks it again. It did once: the set opened with two calls in series
+   * (the tiers, then the hubs) and one more per keystroke, each a full
+   * aggregate over the table, which was fourteen seconds a call against
+   * the hosted database. The endpoint is milliseconds now and this list is
+   * a thousand names, so there is nothing left for a second call to find.
+   */
+  const [all, setAll] = useState<EntityRow[]>([]);
+  /** How many entities the stream really holds — past the cap for the
+   *  bus-level streams, which is the one case a search still asks the API. */
+  const [total, setTotal] = useState(schema.entities.count);
+  /** The fetch has delivered — before that, an empty list means "still
+   *  looking", not "nothing matches". */
   const [settled, setSettled] = useState(false);
   /**
-   * Matches from outside the tier in view, and the query they answer.
-   *
-   * The entity endpoint aggregates observation counts per node and takes two
-   * to three seconds on a stream of a thousand — per keystroke, when the
-   * search box drove it. So it no longer does: typing filters the rows already
-   * in hand, instantly, and the slow query only runs to find what is *not* in
-   * hand. Those arrive underneath, labelled, without disturbing what was
-   * already on screen.
+   * Matches from past the cap, and the query they answer. Only a stream too
+   * big to hold whole ever has any; they land underneath, labelled, without
+   * disturbing what is already on screen.
    */
   const [far, setFar] = useState<{
     q: string;
@@ -514,8 +520,8 @@ function SetView({
   } | null>(null);
   const [farBusy, setFarBusy] = useState(false);
 
-  // The tier: fetched when the set opens and when a tier chip is pressed, and
-  // at no other time.
+  // Once per set. The response carries the tiers and the true entity count
+  // beside the rows, so one call opens the view.
   useEffect(() => {
     let live = true;
     (async () => {
@@ -525,56 +531,54 @@ function SetView({
           window.location.origin,
         );
         url.searchParams.set("dataset", schema.dataset!);
-        if (facet) url.searchParams.set("node_type", facet);
         url.searchParams.set("limit", "2000");
         const res = await fetch(url);
         const json = await res.json();
         if (!live) return;
         if (!res.ok) {
-          setRows([]);
+          setAll([]);
           setSettled(true);
           return;
         }
-        if (json.facets && !opened) {
+        if (json.facets) {
           setFacets(json.facets);
           // Open on the smallest readable tier — the hubs, not an
-          // alphabetical slice of the resource nodes. When a tier is chosen,
-          // the unfiltered rows this first fetch returned are never shown:
-          // painting them for a beat and then jumping to the tier read as a
-          // glitch, and the second fetch is the one that matters.
+          // alphabetical slice of the resource nodes.
           const tiers = Object.entries(
             json.facets as Record<string, number>,
           )
             .filter(([, n]) => n > 1 && n <= 12)
             .sort((a, b) => a[1] - b[1]);
-          setOpened(true);
-          if (tiers[0]) {
-            setFacet(tiers[0][0]);
-            return;
-          }
+          if (tiers[0]) setFacet(tiers[0][0]);
         }
-        setRows(json.nodes ?? []);
+        if (typeof json.coverage?.nodes === "number") {
+          setTotal(json.coverage.nodes);
+        }
+        setAll(json.nodes ?? []);
         setSettled(true);
       } catch {
         if (!live) return;
-        setRows([]);
+        setAll([]);
         setSettled(true);
       }
     })();
     return () => {
       live = false;
     };
-  }, [schema.dataset, facet, opened]);
+  }, [schema.dataset]);
+
+  /** The tier in view, or the whole set when none is chosen. */
+  const rows = useMemo(
+    () => (facet ? all.filter((r) => r.nodeType === facet) : all),
+    [all, facet],
+  );
 
   /*
-    The rest of the stream, for a query the tier cannot answer on its own. It
-    is deliberately not what you are shown first: it lands when it lands, and
+    What the cap left out, for a query the rows in hand cannot answer. It is
+    deliberately not what you are shown first: it lands when it lands, and
     nothing waits for it.
   */
-  const beyond = Math.max(
-    0,
-    schema.entities.count - rows.length,
-  );
+  const beyond = Math.max(0, total - all.length);
   useEffect(() => {
     const query = q.trim();
     if (!query || beyond === 0) {
@@ -615,26 +619,28 @@ function SetView({
   /*
     The filter itself: over the rows in hand, on every keystroke, no network.
     It reads the note as well as the name, so "austin" finds the node whose
-    one-liner says Austin even though its id does not.
+    one-liner says Austin even though its id does not. A search runs over the
+    whole set, not the tier — the tier chips hide while typing — but the open
+    tier's matches lead, because HB_NORTH is the answer to "north" more often
+    than a resource node with the word in it.
   */
   const needle = q.trim().toLowerCase();
-  const here = needle
-    ? rows.filter(
-        (r) =>
-          r.node.toLowerCase().includes(needle) ||
-          (r.nodeType ?? "")
-            .toLowerCase()
-            .includes(needle) ||
-          (entityNote(r.node) ?? "")
-            .toLowerCase()
-            .includes(needle),
-      )
-    : rows;
+  const matches = (r: EntityRow) =>
+    r.node.toLowerCase().includes(needle) ||
+    (r.nodeType ?? "").toLowerCase().includes(needle) ||
+    (entityNote(r.node) ?? "").toLowerCase().includes(needle);
+  const here = needle ? rows.filter(matches) : rows;
   const seen = new Set(here.map((r) => r.node));
-  const elsewhere =
-    needle && far?.q === q.trim()
-      ? far.rows.filter((r) => !seen.has(r.node))
-      : [];
+  const elsewhere: EntityRow[] = [];
+  if (needle) {
+    const rest = facet ? all.filter(matches) : [];
+    for (const r of [...rest, ...(far?.q === q.trim() ? far.rows : [])]) {
+      if (!seen.has(r.node)) {
+        seen.add(r.node);
+        elsewhere.push(r);
+      }
+    }
+  }
 
   /*
     Select-all: the whole view in hand as one chip.
@@ -774,8 +780,8 @@ function SetView({
       {strip}
 
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
-        {/* Only the first load can be a wait; after it, typing never is. */}
-        {!settled && rows.length === 0 ? (
+        {/* The one fetch is the only wait; after it, nothing here is. */}
+        {!settled ? (
           <p className="px-1 py-1.5 text-[11.5px] text-faint">
             Loading…
           </p>
@@ -801,9 +807,10 @@ function SetView({
             ))}
 
             {/*
-              What the tier in view does not hold. Below the fold rather than
-              mixed in, because these arrived a beat later and moving what
-              somebody is already reading is worse than labelling the rest.
+              What the tier in view does not hold: the other tiers, and on a
+              stream past the cap whatever the API found. Below the fold
+              rather than mixed in, so the tier's own matches stay where
+              they are while the rest arrives.
             */}
             {elsewhere.length > 0 && (
               <>
