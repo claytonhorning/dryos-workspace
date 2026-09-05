@@ -33,9 +33,11 @@ import type { App } from "@/lib/workspace/types";
  * one that most needs to say. The bar is there in both modes, and the dot
  * costs the screen nothing.
  *
- * Scoped by component deliberately: "is my data fresh" is really "is *this
- * tile's* data fresh", and a flat list of streams makes the reader do the
- * join. A stream two tiles share appears under both, but is fetched once.
+ * One row per stream, however many tiles read it. It was grouped by tile
+ * once, on the argument that "is my data fresh" is really "is this tile's
+ * data fresh" — and a page of seven tickers on one feed answered with the
+ * same row seven times, which is a list nobody reads. The row says how many
+ * tiles read the stream instead, so the join is still there, in one line.
  *
  * The page announces what it reads with a `dryos:feeds` event (`tileUses`
  * below builds the detail), the same idiom as the saved and busy marks — the
@@ -188,6 +190,26 @@ export function FeedsMenu({ feeds }: { feeds: FeedsDetail | null }) {
     [feeds, schemaById],
   );
 
+  /**
+   * One entry per stream, in first-use order, with the tiles that read it —
+   * a `TileUse` of index −1 is the model-edited fallback, where nothing can
+   * say which tile reads what, so those carry no readers.
+   */
+  const streams = useMemo(() => {
+    const by = new Map<string, { schema: Schema; names: string[] }>();
+    tiles.forEach((t) =>
+      t.schemas.forEach((s) => {
+        const at = by.get(s.id) ?? { schema: s, names: [] };
+        if (t.index >= 0) at.names.push(t.name);
+        by.set(s.id, at);
+      }),
+    );
+    return [...by.values()].map(({ schema, names }) => ({
+      schema,
+      readers: readersLabel(names),
+    }));
+  }, [tiles]);
+
   /** Every collected dataset on the page, fetched once however many tiles share it. */
   const slugs = useMemo(
     () => [
@@ -335,41 +357,22 @@ export function FeedsMenu({ feeds }: { feeds: FeedsDetail | null }) {
                 to tiles — these are every stream its history references.
               </p>
             )}
-            {tiles
-              .filter((t) => t.schemas.length > 0)
-              .map((t) => (
-                <section
-                  key={t.index}
-                  className="border-b border-line last:border-0"
-                >
-                  <h3 className="px-3 pt-2.5 pb-1 font-mono text-[10px] tracking-[0.13em] text-faint uppercase">
-                    {t.index >= 0 ? `${t.index + 1}. ` : ""}
-                    {t.name}
-                  </h3>
-                  <ul className="pb-1.5">
-                    {t.schemas.map((s) => {
-                      const key = `${t.index}:${s.id}`;
-                      return (
-                        <StreamRow
-                          key={key}
-                          schema={s}
-                          preview={
-                            s.dataset ? previews[s.dataset] : undefined
-                          }
-                          unreachable={Boolean(
-                            s.dataset && failed[s.dataset],
-                          )}
-                          now={now}
-                          open={openKey === key}
-                          onToggle={() =>
-                            setOpenKey((k) => (k === key ? null : key))
-                          }
-                        />
-                      );
-                    })}
-                  </ul>
-                </section>
+            <ul className="py-1.5">
+              {streams.map(({ schema: s, readers }) => (
+                <StreamRow
+                  key={s.id}
+                  schema={s}
+                  readers={readers}
+                  preview={s.dataset ? previews[s.dataset] : undefined}
+                  unreachable={Boolean(s.dataset && failed[s.dataset])}
+                  now={now}
+                  open={openKey === s.id}
+                  onToggle={() =>
+                    setOpenKey((k) => (k === s.id ? null : s.id))
+                  }
+                />
               ))}
+            </ul>
           </div>
         </div>
       )}
@@ -436,8 +439,23 @@ function streamState(
   return (now - due) / 1000 <= p.freshnessSlaSeconds ? "ok" : "late";
 }
 
+/**
+ * "chart · ticker ×6": which tiles read a stream, grouped by kind so seven
+ * tickers are one word and a count rather than seven words.
+ */
+function readersLabel(names: string[]): string | null {
+  if (!names.length) return null;
+  const count = new Map<string, number>();
+  names.forEach((n) => count.set(n, (count.get(n) ?? 0) + 1));
+  return [...count]
+    .map(([n, c]) => (c > 1 ? `${n} ×${c}` : n))
+    .join(" · ")
+    .toLowerCase();
+}
+
 function StreamRow({
   schema,
+  readers,
   preview,
   unreachable,
   now,
@@ -445,6 +463,7 @@ function StreamRow({
   onToggle,
 }: {
   schema: Schema;
+  readers: string | null;
   preview?: DatasetPreview;
   unreachable: boolean;
   now: number | null;
@@ -459,6 +478,11 @@ function StreamRow({
         <span className="min-w-0 truncate text-[12px] text-ink">
           {schema.name}
         </span>
+        {readers && (
+          <span className="min-w-0 shrink truncate font-mono text-[10px] text-faint">
+            {readers}
+          </span>
+        )}
         <span className="ml-auto shrink-0 rounded border border-dashed border-info-line px-1 font-mono text-[9px] text-info">
           MOCK
         </span>
@@ -497,6 +521,11 @@ function StreamRow({
         <span className="min-w-0 truncate text-[12px] text-ink">
           {schema.name}
         </span>
+        {readers && (
+          <span className="min-w-0 shrink truncate font-mono text-[10px] text-faint">
+            {readers}
+          </span>
+        )}
         <span className="ml-auto shrink-0 font-mono text-[10px] text-faint">
           {unreachable
             ? "unreachable"
