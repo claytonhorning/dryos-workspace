@@ -273,6 +273,8 @@ function series(refs: DataRef[]) {
       // truncation with the part that distinguishes intact.
       short: base,
       stream,
+      // The stream where there is no room for its name — a ticker's title.
+      streamShort: schemaFor(r.schemaId)?.short ?? stream,
       mock: r.availability === "mock",
     };
   });
@@ -549,6 +551,21 @@ function titleFor(
     );
   }
   return s.map((x) => x.label).join(" · ");
+}
+
+/**
+ * The stream beside the title, in the header's quieter voice — "RT · LMP"
+ * after "HB_NORTH". Only when the selection is one stream: a mixed selection
+ * already carries the stream on every label, and a title that *is* the
+ * stream's name (a whole-stream fan-out) would only repeat itself.
+ */
+function subFor(refs: DataRef[], title: string): string | null {
+  const ids = [...new Set(refs.map((r) => r.schemaId))];
+  if (ids.length !== 1) return null;
+  const schema = schemaFor(ids[0]);
+  if (!schema) return null;
+  const short = schema.short ?? schema.name;
+  return title === schema.name || title === short ? null : short;
 }
 
 /**
@@ -1036,11 +1053,9 @@ ${orderMemo}
     return { ticks, labels, tall };
   }, [merged, plotW, tz]);
   return (
-    <Section index={${i}} w={w} h={h} fill title=${
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill sub={${JSON.stringify(subFor(refs, title))}} title=${
       follow !== null
-        ? `{picked ? picked + ${JSON.stringify(
-            ` — ${schemaFor(refs[0]?.schemaId)?.name ?? ""}`,
-          )} : ${JSON.stringify(title)}}`
+        ? `{picked ? picked : ${JSON.stringify(title)}}`
         : JSON.stringify(title)
     } unit=${JSON.stringify(headerUnit)} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div ref={plotBox} style={{ inset: 0, position: "absolute" }}>
@@ -1246,7 +1261,7 @@ const scatter: ComponentDef = {
   }
 
   return (
-    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(`${s[1].label} vs ${s[0].label}`)} unit={r == null ? "" : "r " + r.toFixed(2)} loading={loading} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(`${s[1].label} vs ${s[0].label}`)} sub={${JSON.stringify(subFor(refs, `${s[1].label} vs ${s[0].label}`))}} unit={r == null ? "" : "r " + r.toFixed(2)} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart margin={{ top: 8, right: 12, bottom: 4, left: -12 }}>
@@ -1499,7 +1514,7 @@ const distribution: ComponentDef = {
   }
 
   return (
-    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(titleFor(refs, s))} unit=${JSON.stringify(duration ? s[0].unit : "readings")} loading={loading} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(titleFor(refs, s))} sub={${JSON.stringify(subFor(refs, titleFor(refs, s)))}} unit=${JSON.stringify(duration ? s[0].unit : "readings")} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
       <ResponsiveContainer width="100%" height="100%">
         <${duration || !bars ? "LineChart" : "BarChart"} data={data} margin={{ top: 6, right: 10, bottom: 0, left: -12 }}>
@@ -1703,7 +1718,7 @@ ${dataMemo}
   }
 
   return (
-    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(title)} unit=${JSON.stringify(s[0].unit)} loading={loading} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(title)} sub={${JSON.stringify(subFor(refs, title))}} unit=${JSON.stringify(s[0].unit)} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} ${horizontal ? 'layout="vertical" ' : ""}margin={{ top: 4, right: 8, bottom: 0, left: ${horizontal ? 4 : -12} }} barCategoryGap="22%">
@@ -2016,7 +2031,7 @@ const heatmap: ComponentDef = {
   }, [hover, hc]);
 
   return (
-    <Section index={${i}} w={w} h={h} title=${JSON.stringify(s[0].label)} unit={UNIT} loading={loading} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} title=${JSON.stringify(s[0].label)} sub={${JSON.stringify(subFor(refs, s[0].label))}} unit={UNIT} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div
         onMouseMove={track}
         onMouseLeave={() => setHover(null)}
@@ -2130,7 +2145,7 @@ ${mockTag(anyMock)}      <div
 
 const ticker: ComponentDef = {
   kind: "ticker",
-  name: "Live ticker",
+  name: "Ticker",
   blurb:
     "The newest value for each selection, with its move since the last interval.",
   options: [
@@ -2188,7 +2203,10 @@ ${followSnippet(
     2,
   ).replace(/\n/g, "\n      "),
 )}
-  const { rows, error, loading, fresh } = useSeries(queries, ${refreshMs(refs)});
+  const { rows, error, loading, fresh, asOf } = useSeries(queries, ${refreshMs(refs)});
+  const tz = useTz(${JSON.stringify(sourceTz(refs))});
+
+  const cell = useRef(null);
 
   const cells = ${JSON.stringify(
     s.map((x) => ({
@@ -2203,33 +2221,91 @@ ${followSnippet(
     const prev = ${day ? "recent[recent.length - 1]" : "recent[1]"} ? ${day ? "recent[recent.length - 1]" : "recent[1]"}[c.column] : null;
     // Keyed on the advance so a second one inside the flash restarts it.
     const flash = fresh.at[n] != null ? "f" + fresh.seq : null;
-    return { ...c, now, flash, delta: now != null && prev != null ? now - prev : null };
+    return { ...c, now, prev, flash, delta: now != null && prev != null ? now - prev : null };
   });
 
   return (
-    <Section index={${i}} w={w} h={h} title="Live" loading={loading} error={error}>
-      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
-        {cells.map((c) => (
-          <div key={c.label + (c.flash || "")} className={c.flash ? "dr-fresh-cell" : undefined} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, padding: "10px 12px" }}>
-            <div style={{ alignItems: "center", display: "flex", gap: 5 }}>
-              <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".1em", textTransform: "uppercase" }}>{${
-                follow !== null
-                  ? "picked ?? c.label"
-                  : "c.label"
-              }}</span>
-              {c.mock && (
-                <span style={{ border: "1px dashed var(--info)", borderRadius: 3, color: "var(--info)", fontFamily: "var(--mono)", fontSize: 8.5, padding: "0 3px", textTransform: "uppercase" }}>mock</span>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} title={${
+      follow !== null ? "picked ?? cells[0].label" : "cells[0].label"
+    }} sub={${JSON.stringify(s[0]?.streamShort ?? "Ticker")}} loading={loading} error={error} fill minH={${TICKER_MIN_H}} minW={${TICKER_MIN_W}} headerAsOf={false}>
+      {/* The number is the tile: named once in the header — the entity
+          leads, since it is what tells two tickers apart — it takes the
+          whole box as one em-scaled unit, so a bigger tile is a bigger
+          number and not a second frame. The sparser tier is the bare
+          number, once the tile is too narrow for its move. */}
+      <div ref={cell} style={{ display: "grid", gap: 10, gridAutoRows: "minmax(0,1fr)", gridTemplateColumns: "repeat(auto-fit,minmax(min(150px,100%),1fr))", inset: 0, position: "absolute" }}>
+        {cells.map((c) => {
+          const mock = c.mock && (
+            <span style={{ border: "1px dashed var(--info)", borderRadius: ".14em", color: "var(--info)", fontFamily: "var(--mono)", fontSize: ".3em", padding: "0 .3em", textTransform: "uppercase" }}>mock</span>
+          );
+          const number = c.now == null ? "—" : c.now.toFixed(2);
+          // The move is an arrow and a percentage to the right of the
+          // number, nothing else — the arrow carries the sign, so the
+          // figure is a magnitude, and a whole one: a ticker is glanced at,
+          // and "3%" is the glance. Up is green and down is red, the way
+          // every market screen reads. Percent is against the previous
+          // value and falls back to units within a unit of zero: prices
+          // cross zero here, and a move from −2 to +2 is not "−200%".
+          const up = c.delta != null && c.delta > 0;
+          const down = c.delta != null && c.delta < 0;
+          const pct = c.delta != null && c.prev != null && Math.abs(c.prev) >= 1;
+          const move = c.delta == null
+            ? null
+            : (up ? "▲ " : down ? "▼ " : "") + (pct ? Math.round(100 * Math.abs(c.delta) / Math.abs(c.prev)) + "%" : Math.abs(c.delta).toFixed(2));
+          // The time rides under the move in one small column beside the
+          // number rather than in the header: a header line is a line the
+          // number does not get. A clock glyph rather than "as of".
+          const when = asOf != null && (
+            <span
+              title={"Newest interval: " + tzDate(asOf, tz) + " " + tzTime(asOf, tz) + " " + tzShort(asOf, tz)}
+              style={{ color: "var(--info)", fontFamily: "var(--mono)", fontSize: ".3em", letterSpacing: ".04em", whiteSpace: "nowrap" }}
+            >
+              <Clock /> {tzTime(asOf, tz)}
+            </span>
+          );
+          const moveEl = move && (
+            <span style={{ color: up ? "var(--up)" : down ? "var(--fail)" : "var(--faint)", fontFamily: "var(--mono)", fontSize: ".42em", whiteSpace: "nowrap" }}>{move}</span>
+          );
+          const bare = (
+            <div className={c.flash ? "dr-fresh-val" : undefined} style={{ alignItems: "baseline", color: "var(--ink)", display: "flex", fontVariantNumeric: "tabular-nums", gap: ".22em" }}>
+              <span>{number}</span>
+              {mock}
+            </div>
+          );
+          const full = (
+            <div className={c.flash ? "dr-fresh-val" : undefined} style={{ alignItems: "flex-end", color: "var(--ink)", display: "flex", fontVariantNumeric: "tabular-nums", gap: ".22em" }}>
+              <span>{number}</span>
+              {(moveEl || when) && (
+                <span style={{ display: "flex", flexDirection: "column", gap: ".06em", lineHeight: 1, paddingBottom: ".04em" }}>
+                  {moveEl}
+                  {when}
+                </span>
               )}
+              {mock}
             </div>
-            <div className={c.flash ? "dr-fresh-val" : undefined} style={{ color: "var(--ink)", fontSize: 22, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>
-              {c.now == null ? "—" : c.now.toFixed(2)}
-              <span style={{ color: "var(--faint)", fontSize: 11, marginLeft: 4 }}>{c.unit}</span>
+          );
+          // One column cannot hold the column beside the number at a size
+          // either can be read at, so there it sits underneath — and a tile
+          // too short for even that keeps the number alone.
+          const stacked = (
+            <div className={c.flash ? "dr-fresh-val" : undefined} style={{ color: "var(--ink)", display: "flex", flexDirection: "column", fontVariantNumeric: "tabular-nums", gap: ".08em" }}>
+              <div style={{ alignItems: "baseline", display: "flex", gap: ".22em" }}><span>{number}</span>{mock}</div>
+              {moveEl}
+              {when}
             </div>
-            <div style={{ color: c.delta == null ? "var(--faint)" : c.delta >= 0 ? "var(--accent)" : "var(--info)", fontFamily: "var(--mono)", fontSize: 11, marginTop: 2 }}>
-              {c.delta == null ? "no comparison" : (c.delta >= 0 ? "+" : "") + c.delta.toFixed(2) + ${JSON.stringify(day ? " vs 24h ago" : " since last")}}
+          );
+          return (
+            <div key={c.label + (c.flash || "")} className={c.flash ? "dr-fresh-cell" : undefined} style={{ borderRadius: 6, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <FitText
+                min={26}
+                floor={12}
+                max={400}
+                style={{ flex: 1 }}
+                tiers={[full, stacked, bare]}
+              />
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Section>
   );
@@ -2300,7 +2376,7 @@ const table: ComponentDef = {
   }, [rows]);
 
   return (
-    <Section index={${i}} w={w} h={h} title="Recent intervals" loading={loading} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} title="Recent intervals" sub={${JSON.stringify(subFor(refs, "Recent intervals"))}} loading={loading} error={error}>
       <div style={{ maxHeight: 260, overflowY: "auto" }}>
         <table>
           <thead>
@@ -3759,7 +3835,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
 
   if (ready === "no-token") {
     return (
-      <Section index={${i}} w={w} h={h} title="Map">
+      <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} title="Map">
         <p style={{ color: "var(--warn)", fontSize: 13 }}>
           No Mapbox token. Set <code>MAPBOX_TOKEN</code> in <code>frontend/.env.local</code> and restart.
         </p>
@@ -3768,7 +3844,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   }
 
   return (
-    <Section index={${i}} w={w} h={h} fill title=${JSON.stringify(motionRef ? "Live traffic" : fieldRef ? `${fieldRef.label} field` : `${s[0]?.label ?? "Map"} by location`)} unit={FIELD ? FIELD.unit : UNIT} loading={loading && !ready} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(motionRef ? "Live traffic" : fieldRef ? `${fieldRef.label} field` : `${s[0]?.label ?? "Map"} by location`)} sub={${JSON.stringify(subFor(refs, motionRef ? "Live traffic" : fieldRef ? `${fieldRef.label} field` : `${s[0]?.label ?? "Map"} by location`))}} unit={FIELD ? FIELD.unit : UNIT} loading={loading && !ready} error={error}>
       <div ref={host} style={{ background: "var(--surface-2)", border: NAKED ? "none" : "1px solid var(--line)", borderRadius: NAKED ? 0 : 6, inset: 0, position: "absolute" }} />
       {/* Over the map, under the markers, and deaf to the pointer — the map
           below still pans and zooms as if nothing were on top of it. */}
@@ -4212,7 +4288,7 @@ const picker: ComponentDef = {
   }
 
   return (
-    <Section index={${i}} w={w} h={h} title=${JSON.stringify(title)} loading={loading} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} title=${JSON.stringify(title)} sub={${JSON.stringify(subFor(refs, title))}} loading={loading} error={error}>
       <div style={{ background: "var(--surface)", paddingBottom: 6, position: "sticky", top: 0, zIndex: 2 }}>
         <input
           value={q}
@@ -4303,6 +4379,29 @@ export function componentDef(
  * its corner to the size that suits the dashboard. A component that lands
  * full-bleed has already made the decision for you.
  */
+/**
+ * How short a ticker may be dragged. The general floor is 120px, sized for a
+ * chart's axes; a ticker is a number and a label, and at 90px it still reads —
+ * the header, the cell padding and a two-line stack at its floor. The frame's
+ * growth strip is 120px, so the canvas clamp never falls under this.
+ */
+export const TICKER_MIN_H = 90;
+
+/** The shortest a tile of this kind may be: the frame's floor, the route's and the packer's, one answer. */
+export function minTileHeight(kind: ComponentKind): number {
+  return kind === "ticker" ? TICKER_MIN_H : 120;
+}
+
+/**
+ * The narrowest, in columns. A chart needs two for its axes; a ticker is a
+ * number, and one column with the entity over the stream in the header is
+ * its most concise form.
+ */
+export const TICKER_MIN_W = 1;
+export function minTileWidth(kind: ComponentKind): number {
+  return kind === "ticker" ? TICKER_MIN_W : 2;
+}
+
 export const DEFAULT_LAYOUT: Record<
   ComponentKind,
   NonNullable<ComponentSpec["layout"]>
@@ -4370,8 +4469,8 @@ export function packLayout(
   manifest: ComponentSpec[],
 ): ComponentSpec[] {
   const size = manifest.map((spec) => ({
-    w: clamp(Math.round(spec.layout?.w ?? 6), 1, GRID.cols),
-    h: Math.max(120, Math.round(spec.layout?.h ?? 240)),
+    w: clamp(Math.round(spec.layout?.w ?? 6), minTileWidth(spec.kind), GRID.cols),
+    h: Math.max(minTileHeight(spec.kind), Math.round(spec.layout?.h ?? 240)),
   }));
 
   // Everything that already has a place keeps it, and keeps it first: a page

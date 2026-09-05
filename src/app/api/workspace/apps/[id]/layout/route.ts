@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { TICKER_MIN_H, TICKER_MIN_W } from "@/lib/workspace/components";
 import { composeApp } from "@/lib/workspace/compose";
 import { compile } from "@/lib/workspace/runtime";
 import { moveTile, setLayout } from "@/lib/workspace/store";
@@ -53,7 +54,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const app = await setLayout(
     id,
     index,
-    { w: Math.max(2, Math.min(12, Math.round(w))), h: Math.max(120, Math.min(900, Math.round(h))) },
+    // The floor here is the lowest any kind allows; the packer applies the
+    // kind's own on the way to the manifest, so a chart posted short is still
+    // saved at a chart's minimum.
+    { w: Math.max(TICKER_MIN_W, Math.min(12, Math.round(w))), h: Math.max(TICKER_MIN_H, Math.min(900, Math.round(h))) },
     composeApp,
     compile,
   );

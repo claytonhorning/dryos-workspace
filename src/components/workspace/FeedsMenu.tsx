@@ -270,24 +270,32 @@ export function FeedsMenu({ feeds }: { feeds: FeedsDetail | null }) {
 
   return (
     <div ref={wrap} className="flex shrink-0 items-center">
+      {/*
+        A pill, not a bare dot: an 8px dot beside a tab read as decoration,
+        and nobody clicks decoration. The border and the chevron say it
+        opens; a word appears only when the color is bad news.
+      */}
       <button
         ref={trigger}
         onClick={() => setOpen((v) => !v)}
-        aria-label="Feeds: what this page reads, and whether it is arriving"
+        aria-label="Dashboard health: what this page reads, and whether it is arriving"
         aria-expanded={open}
         title={TITLE[overall]}
         className={cx(
-          "flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-surface-2",
-          open && "bg-surface-2",
+          "flex h-6 items-center gap-1.5 rounded-full border px-2 font-mono text-[10px] tracking-[0.12em] uppercase transition-colors",
+          "border-line text-faint hover:border-line-strong hover:bg-surface-2 hover:text-ink",
+          open && "border-line-strong bg-surface-2 text-ink",
         )}
       >
         <span
           className={cx(
-            "h-2 w-2 rounded-full",
+            "h-2 w-2 shrink-0 rounded-full",
             DOT[overall],
             overall === "late" && "animate-pulse",
           )}
         />
+        {WORD[overall] && <span>{WORD[overall]}</span>}
+        <span aria-hidden className="text-[8px] leading-none opacity-70">▾</span>
       </button>
 
       {open && (
@@ -382,10 +390,20 @@ function worst(states: Overall[]): Overall {
 }
 
 const TITLE: Record<Overall, string> = {
-  ok: "Feeds · every stream on this page is arriving",
-  late: "Feeds · a stream on this page is late",
-  unreachable: "Feeds · the delivery API did not answer",
-  waiting: "Feeds · reading the delivery record…",
+  ok: "Dashboard health · every stream on this page is arriving",
+  late: "Dashboard health · a stream on this page is late",
+  unreachable: "Dashboard health · the delivery API did not answer",
+  waiting: "Dashboard health · reading the delivery record…",
+};
+
+// A word on the pill only when there is something to say: a green dot says
+// enough on its own, and "healthy" beside every page's name was a label on
+// the normal state.
+const WORD: Record<Overall, string | null> = {
+  ok: null,
+  late: "late",
+  unreachable: "down",
+  waiting: "checking",
 };
 
 // The delivery graph's traffic-light colors, not the site tokens — the dot

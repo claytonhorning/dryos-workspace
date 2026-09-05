@@ -59,6 +59,9 @@ const NAKED = typeof window !== "undefined" && window.__dryosNaked;
  */
 const TILE_DATA = {};
 const TILE_META = {};
+// The newest interval each series on a tile holds, so the tile's header can
+// say what its numbers are as of. Written by useSeries, read by Section.
+const TILE_ASOF = {};
 const TileIndex = React.createContext(null);
 // One counter for every per-instance id the runtime hands out: series
 // registrations and the tips that own a hover.
@@ -89,6 +92,8 @@ function useSeries(queries, refreshMs, cursor) {
     and preview rows never do — sample data has nothing new in it.
   */
   const [fresh, setFresh] = useState({ seq: 0, at: [] });
+  // The newest interval loaded, for a shape that draws its own "when".
+  const [asOf, setAsOf] = useState(null);
   const newest = useRef([]);
   const freshTimer = useRef(null);
   // The rows as last delivered, for the failure path: a tile that has numbers
@@ -107,7 +112,10 @@ function useSeries(queries, refreshMs, cursor) {
   useEffect(() => {
     if (tile == null) return;
     (TILE_DATA[tile] = TILE_DATA[tile] || {})[slot.current] = { queries, rows };
-    return () => { if (TILE_DATA[tile]) delete TILE_DATA[tile][slot.current]; };
+    return () => {
+      if (TILE_DATA[tile]) delete TILE_DATA[tile][slot.current];
+      if (TILE_ASOF[tile]) delete TILE_ASOF[tile][slot.current];
+    };
   }, [tile, rows]);
 
   useEffect(() => {
@@ -145,6 +153,12 @@ function useSeries(queries, refreshMs, cursor) {
           !out[n].preview && newest.current[n] != null && t > newest.current[n] ? t : undefined,
         );
         newest.current = seen;
+        // Sample rows carry made-up times, and an "as of" on them would be a
+        // claim the SAMPLE DATA tag exists to deny.
+        const asOf = seen.reduce((m, t, n) => (!out[n].preview && t > m ? t : m), -Infinity);
+        (TILE_ASOF[tile] = TILE_ASOF[tile] || {})[slot.current] = asOf > -Infinity ? asOf : null;
+        setAsOf(asOf > -Infinity ? asOf : null);
+        window.dispatchEvent(new CustomEvent("dryos:asof", { detail: { tile } }));
         if (at.some((t) => t != null)) {
           setFresh((f) => ({ seq: f.seq + 1, at }));
           if (freshTimer.current) clearTimeout(freshTimer.current);
@@ -223,7 +237,7 @@ function useSeries(queries, refreshMs, cursor) {
     // object each render, and the string is what says whether it changed.
   }, [cursor, JSON.stringify(queries)]);
 
-  return { rows, error, loading, fresh };
+  return { rows, error, loading, fresh, asOf };
 }
 
 // Three beats of the ring, then gone.
@@ -370,6 +384,81 @@ function axisNum(v) {
   One hook so a change repaints every axis at once; cached formatters because
   Intl.DateTimeFormat construction is the expensive half.
 */
+/**
+ * A clock face the height of the text beside it. It stands in for the words
+ * "as of": a time on its own is a time, a time with a clock is *when this
+ * was*, and the glyph costs a character where the words cost six.
+ */
+function Clock() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden style={{ verticalAlign: "-.12em" }}>
+      <circle cx="6" cy="6" r="4.6" />
+      <path d="M6 3.4V6l1.9 1.2" />
+    </svg>
+  );
+}
+
+/**
+ * Content sized to the box it is given. The ticker's number has to grow with
+ * its tile, and a font size has to come from a measurement: each tier is
+ * rendered once more as a probe at a fixed 100px, hidden and out of the
+ * flow, and the visible copy takes the ratio of the box to it. Measuring the
+ * visible copy instead would be a loop, because its size is the thing being
+ * decided. Everything inside is written in \`em\`, so one number scales the
+ * whole stack.
+ *
+ * Tiers are the same content with less in it, fullest first. The first tier
+ * that fits at its minimum or better is the one drawn — \`min\` is one number
+ * for every tier or one per tier, since a comparison line reads at a smaller
+ * size than a unit is worth keeping at — and a tile too small for all of
+ * them draws the sparsest at whatever it gets, down to \`floor\`. A ticker
+ * squeezed to a strip keeps its number and loses its "since last" line, then
+ * its unit, rather than keeping everything at a size nothing can be read at.
+ */
+function FitText({ children, tiers, min, max, floor, style }) {
+  const alts = tiers || [children];
+  const box = useRef(null);
+  const probes = useRef([]);
+  const [fit, setFit] = useState({ tier: 0, size: floor || 12 });
+  useEffect(() => {
+    const b = box.current;
+    if (!b) return;
+    const measure = () => {
+      const bw = b.clientWidth, bh = b.clientHeight;
+      if (!bw || !bh) return;
+      let tier = alts.length - 1;
+      let size = floor || 12;
+      for (let i = 0; i < alts.length; i++) {
+        const p = probes.current[i];
+        if (!p || !p.offsetWidth || !p.offsetHeight) continue;
+        const s = Math.floor(100 * Math.min(bw / p.offsetWidth, bh / p.offsetHeight));
+        const need = Array.isArray(min) ? (min[i] ?? min[min.length - 1] ?? 12) : (min || 12);
+        if (s >= need || i === alts.length - 1) {
+          tier = i;
+          size = Math.max(floor || 12, Math.min(max || 400, s));
+          break;
+        }
+      }
+      setFit((f) => (f.tier === tier && f.size === size ? f : { tier, size }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(b);
+    probes.current.forEach((p) => p && ro.observe(p));
+    return () => ro.disconnect();
+  }, [alts.length, JSON.stringify(min), max, floor]);
+  return (
+    <div ref={box} style={{ alignItems: "center", display: "flex", height: "100%", minHeight: 0, minWidth: 0, position: "relative", width: "100%", ...style }}>
+      {alts.map((alt, i) => (
+        <div key={i} ref={(el) => { probes.current[i] = el; }} aria-hidden style={{ fontSize: 100, left: 0, lineHeight: 1, pointerEvents: "none", position: "absolute", top: 0, visibility: "hidden", whiteSpace: "nowrap" }}>
+          {alt}
+        </div>
+      ))}
+      <div style={{ fontSize: fit.size, lineHeight: 1, whiteSpace: "nowrap" }}>{alts[Math.min(fit.tier, alts.length - 1)]}</div>
+    </div>
+  );
+}
+
 function useTz(sourceTz) {
   const read = () => {
     const v = (typeof window !== "undefined" && window.__dryosTz) || "source";
@@ -544,9 +633,36 @@ function askPayload(index, target, x, y) {
  *   · It can fill the frame, because a tile sized for a dashboard is not always
  *     sized for the question you are asking of it right now.
  */
-function Section({ index, title, unit, loading, error, w, h, fill, children }) {
+// \`minH\` is how short a shape lets itself be dragged: 120 fits a chart's axes,
+// a ticker reads at less.
+// \`sub\` is the entity beside the title — "HB_NORTH" after "RT · LMP" — in
+// the header's quieter voice, so a ticker's tile carries its name once and
+// the number gets the rest of the box.
+function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, minW, sourceTz, headerAsOf, children }) {
+  const MIN_H = minH || 120;
+  const MIN_W = minW || 2;
   const box = useRef(null);
   const [size, setSize] = useState({ w: w || 6, h: h || 240 });
+  const narrow = size.w <= 1;
+  /*
+    What the numbers on this tile are as of: the newest interval any of its
+    series holds, in the page's display zone. It arrives by event from
+    useSeries rather than as a prop, so every shape carries it without every
+    emitter learning to pass it — and a tile whose data is still in flight
+    says nothing rather than something stale.
+  */
+  const tz = useTz(sourceTz);
+  const [asOf, setAsOf] = useState(null);
+  useEffect(() => {
+    const read = () => {
+      const at = Object.values(TILE_ASOF[index] || {}).filter((t) => t != null);
+      setAsOf(at.length ? Math.max(...at) : null);
+    };
+    read();
+    const on = (e) => { if (e.detail && e.detail.tile === index) read(); };
+    window.addEventListener("dryos:asof", on);
+    return () => window.removeEventListener("dryos:asof", on);
+  }, [index]);
   const [dragging, setDragging] = useState(false);
   const [over, setOver] = useState(null);
   const [full, setFull] = useState(false);
@@ -585,9 +701,9 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
 
   // What this tile is called, for the ask payload of any tile on the screen.
   useEffect(() => {
-    TILE_META[index] = { title, unit };
+    TILE_META[index] = { title: sub ? title + " · " + sub : title, unit };
     return () => { delete TILE_META[index]; };
-  }, [index, title, unit]);
+  }, [index, title, sub, unit]);
 
   useEffect(() => setSize({ w: w || 6, h: h || 240 }), [w, h]);
 
@@ -675,19 +791,19 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
       collapsed the tile to its minimum width.
     */
     const measure = (ev) => {
-      let w = Math.max(2, Math.min(GRID_COLS, start.w + Math.round((ev.clientX - start.x) / (col + GRID_GAP))));
-      let h = Math.max(120, Math.min(900, Math.round((start.h + (ev.clientY - start.y)) / GRID_SNAP) * GRID_SNAP));
+      let w = Math.max(MIN_W, Math.min(GRID_COLS, start.w + Math.round((ev.clientX - start.x) / (col + GRID_GAP))));
+      let h = Math.max(MIN_H, Math.min(900, Math.round((start.h + (ev.clientY - start.y)) / GRID_SNAP) * GRID_SNAP));
       if (me) {
         h = Math.min(h, floor - me.y);
         others.forEach((o) => {
           if (o.y >= me.y && o.x < me.x + start.w && me.x < o.x + o.w) h = Math.min(h, o.y - GRID_GAP - me.y);
         });
-        h = Math.max(120, h);
+        h = Math.max(MIN_H, h);
         w = Math.min(w, GRID_COLS - me.x);
         others.forEach((o) => {
           if (o.x >= me.x && o.y < me.y + h && me.y < o.y + o.h) w = Math.min(w, o.x - me.x);
         });
-        w = Math.max(2, w);
+        w = Math.max(MIN_W, w);
       }
       return { w: w, h: h };
     };
@@ -859,7 +975,7 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
           userSelect: "none",
         }}
       >
-        {!bare && (
+        {!bare && !narrow && (
         <span
           aria-hidden="true"
           style={{
@@ -872,10 +988,53 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
           ⠿
         </span>
         )}
-        <h2 style={{ color: "var(--ink)", fontSize: 13, fontWeight: 600, margin: 0 }}>{title}</h2>
-        {unit && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>{unit}</span>}
+        {/* Title, stream and unit flow as one group: beside each other while
+            the row has room, and on a tile too narrow for that the stream
+            drops under the entity rather than being cut short. The group
+            wraps; the words inside it never do. */}
+        <div style={{ alignItems: "baseline", columnGap: 8, display: "flex", flexWrap: "wrap", minWidth: 0, rowGap: 2 }}>
+          <h2 style={{ color: "var(--ink)", fontSize: narrow ? 12 : 13, fontWeight: 600, margin: 0, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</h2>
+          {sub && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".08em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{sub}</span>}
+          {unit && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, whiteSpace: "nowrap" }}>{unit}</span>}
+          {/* In the info blue rather than the accent: the accent already
+              means "new" on this screen, and amber means "late" in the
+              feeds menu. This is neither — it is when. */}
+          {/* Off for a shape that draws the time itself (the ticker). */}
+          {asOf != null && headerAsOf !== false && (
+            <span
+              title={"Newest interval on this tile: " + tzDate(asOf, tz) + " " + tzTime(asOf, tz) + " " + tzShort(asOf, tz)}
+              style={{ color: "var(--info)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".04em", whiteSpace: "nowrap" }}
+            >
+              <Clock /> {tzTime(asOf, tz)}
+            </span>
+          )}
+        </div>
         {loading && <span style={{ color: "var(--accent)", fontFamily: "var(--mono)", fontSize: 10 }}>loading…</span>}
+        {/*
+          On a one-column tile the two controls are wider than the name
+          they sit beside, so there they float over the header's corner
+          and appear on hover; at rest the entity and the stream get the
+          whole row, which is the concise form a narrow ticker exists for.
+        */}
         {!bare && (
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            marginLeft: "auto",
+            ...(narrow
+              ? {
+                  background: "var(--surface)",
+                  opacity: hover || full ? 1 : 0,
+                  pointerEvents: hover || full ? "auto" : "none",
+                  position: "absolute",
+                  right: 12,
+                  top: 12,
+                  transition: "opacity .12s",
+                }
+              : {}),
+          }}
+        >
         <button
           onClick={() => setFull((v) => !v)}
           title={full ? "Back to the dashboard (Esc)" : "Fill the screen"}
@@ -887,19 +1046,17 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
             cursor: "pointer",
             fontSize: 10,
             lineHeight: 1,
-            marginLeft: "auto",
             padding: "3px 5px",
           }}
         >
           {full ? "✕" : "⤢"}
         </button>
-        )}
         {/*
           No ⚙. The tile is its own button while the page is being edited —
           clicking anywhere on it opens its settings — so a control that meant
           "this one" was a second way to say what pointing at it already says.
         */}
-        {!bare && !full && window.parent !== window && (
+        {!full && window.parent !== window && (
           <button
             onClick={() =>
               // One click, no "are you sure": the revision this writes is the
@@ -924,6 +1081,8 @@ function Section({ index, title, unit, loading, error, w, h, fill, children }) {
           >
             ✕
           </button>
+        )}
+        </div>
         )}
       </header>
       )}

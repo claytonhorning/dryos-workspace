@@ -303,10 +303,14 @@ export const PREVIEW_SHIM = String.raw`
  * Every app is written against these variable names and nothing else, so a
  * component authored months ago follows the theme without being touched.
  */
+// \`--up\` is a market green, distinct from the accent: the accent already
+// means "new" on a screen (the fresh flash) and reads as yellow beside a red
+// down arrow. The pair is \`--up\` / \`--fail\`.
 const TOKENS_DARK = `
   --bg:#0a0d12; --surface:#10141b; --surface-2:#171d26; --line:#26303d;
   --line-strong:#3d4b5c; --ink:#eef2f7; --muted:#9aa8ba; --faint:#8998ab;
   --accent:#e8ff3d; --warn:#fbbf24; --info:#7dd3fc; --fail:#f4666b;
+  --up:#34d399;
   ${seriesVars("dark")}
 `;
 
@@ -320,6 +324,7 @@ const TOKENS_LIGHT = `
   --bg:#ffffff; --surface:#ffffff; --surface-2:#f4f6f8; --line:#dde3ea;
   --line-strong:#aeb9c6; --ink:#0f141b; --muted:#4a5666; --faint:#586474;
   --accent:#5b6f0c; --warn:#a16207; --info:#0b6a94; --fail:#b3261e;
+  --up:#15803d;
   ${seriesVars("light")}
 `;
 

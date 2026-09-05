@@ -58,6 +58,12 @@ export interface Schema {
   /** Domain › sector › stream. What the header shows instead of a slug. */
   path: [string, string, string];
   name: string;
+  /**
+   * The name where there is no room for the name: a ticker's title, a chip.
+   * "RT · LMP" where the full name says "ERCOT real-time LMP". Absent, the
+   * full name serves.
+   */
+  short?: string;
   /** Collector slug. Only live schemas have one. */
   dataset?: string;
   availability: Availability;
@@ -203,6 +209,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.realtime",
     path: ["Energy", "Pricing", "Real-time"],
     name: "ERCOT real-time LMP",
+    short: "RT · LMP",
     dataset: "ercot-realtime-lmp",
     availability: "live",
     cadence: { label: "every 5 min", seconds: 300 },
@@ -255,6 +262,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.dayahead",
     path: ["Energy", "Pricing", "Day-ahead"],
     name: "ERCOT day-ahead hourly LMP",
+    short: "DA · LMP",
     dataset: "ercot-dam-lmp-bus",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86_400 },
@@ -310,6 +318,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.load",
     path: ["Energy", "Load", "Actual by weather zone"],
     name: "Actual system load",
+    short: "System load",
     dataset: "ercot-actual-load-weather-zone",
     availability: "live",
     // Hourly rows, but ERCOT posts the whole prior day each morning — the
@@ -356,6 +365,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.loadforecast",
     path: ["Energy", "Load", "Forecast by weather zone"],
     name: "Seven-day load forecast",
+    short: "Load forecast",
     dataset: "ercot-load-forecast-weather-zone",
     availability: "live",
     cadence: {
@@ -401,6 +411,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.genmix",
     path: ["Energy", "Generation", "Fuel mix"],
     name: "Fuel mix",
+    short: "Fuel mix",
     dataset: "ercot-fuel-mix",
     availability: "live",
     cadence: { label: "every 5 min", seconds: 300 },
@@ -446,6 +457,7 @@ export const SCHEMAS: Schema[] = [
     // the signal and the number settlement actually uses.
     path: ["Energy", "Pricing", "Real-time"],
     name: "Real-time settlement point prices",
+    short: "RT · SPP",
     dataset: "ercot-rt-spp",
     availability: "live",
     cadence: { label: "every 15 min", seconds: 900 },
@@ -481,6 +493,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.damspp",
     path: ["Energy", "Pricing", "DAM settlement"],
     name: "DAM settlement point prices",
+    short: "DAM · SPP",
     dataset: "ercot-dam-spp",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
@@ -514,6 +527,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.rtbus",
     path: ["Energy", "Pricing", "RT bus LMP"],
     name: "Real-time LMPs by electrical bus",
+    short: "RT · bus LMP",
     dataset: "ercot-rt-lmp-bus",
     availability: "live",
     cadence: { label: "every 5 min", seconds: 300 },
@@ -549,6 +563,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.indicative",
     path: ["Energy", "Pricing", "Indicative LMP"],
     name: "Indicative LMPs (RTD look-ahead)",
+    short: "RTD · LMP",
     dataset: "ercot-indicative-lmp",
     availability: "live",
     cadence: {
@@ -587,6 +602,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.scedlambda",
     path: ["Energy", "Pricing", "System lambda"],
     name: "SCED system lambda",
+    short: "SCED · lambda",
     dataset: "ercot-sced-lambda",
     availability: "live",
     cadence: { label: "every 5 min", seconds: 300 },
@@ -619,6 +635,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.damlambda",
     path: ["Energy", "Pricing", "DAM lambda"],
     name: "DAM system lambda",
+    short: "DAM · lambda",
     dataset: "ercot-dam-lambda",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
@@ -651,6 +668,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.shadow",
     path: ["Energy", "Pricing", "Shadow prices"],
     name: "DAM shadow prices",
+    short: "DAM · shadow",
     dataset: "ercot-dam-shadow-prices",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
@@ -698,6 +716,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.dambought",
     path: ["Energy", "Pricing", "DAM volumes bought"],
     name: "DAM energy purchased",
+    short: "DAM · bought",
     dataset: "ercot-dam-energy-bought",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
@@ -731,6 +750,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.power.damsold",
     path: ["Energy", "Pricing", "DAM volumes sold"],
     name: "DAM energy sold",
+    short: "DAM · sold",
     dataset: "ercot-dam-energy-sold",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
@@ -764,6 +784,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.ancillary.dammcpc",
     path: ["Energy", "Ancillary", "DAM prices"],
     name: "DAM capacity clearing prices",
+    short: "DAM · MCPC",
     dataset: "ercot-dam-mcpc",
     availability: "live",
     cadence: { label: "daily, ~12:35 CT", seconds: 86400 },
@@ -797,6 +818,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.ancillary.scedmcpc",
     path: ["Energy", "Ancillary", "RT prices"],
     name: "Real-time capacity clearing prices (SCED)",
+    short: "SCED · MCPC",
     dataset: "ercot-sced-mcpc",
     availability: "live",
     cadence: { label: "every 5 min", seconds: 300 },
@@ -830,6 +852,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.ancillary.rtmcpc",
     path: ["Energy", "Ancillary", "RT settlement"],
     name: "Capacity settlement prices (15-minute)",
+    short: "RT · MCPC 15m",
     dataset: "ercot-rt-mcpc",
     availability: "live",
     cadence: { label: "every 15 min", seconds: 900 },
@@ -863,6 +886,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.ancillary.plan",
     path: ["Energy", "Ancillary", "Plan"],
     name: "Ancillary service plan",
+    short: "AS plan",
     dataset: "ercot-dam-as-plan",
     availability: "live",
     cadence: { label: "daily, 7-day plan", seconds: 86400 },
@@ -902,6 +926,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.load.actualfz",
     path: ["Energy", "Load", "Actual by forecast zone"],
     name: "Actual load by forecast zone",
+    short: "Zone load",
     dataset: "ercot-actual-load-forecast-zone",
     availability: "live",
     cadence: {
@@ -944,6 +969,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.load.forecastfz",
     path: ["Energy", "Load", "Forecast by forecast zone"],
     name: "Seven-day forecast by forecast zone",
+    short: "Zone load fcst",
     dataset: "ercot-load-forecast-forecast-zone",
     availability: "live",
     cadence: {
@@ -986,6 +1012,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.load.demand",
     path: ["Energy", "Load", "System demand"],
     name: "System-wide demand",
+    short: "Demand",
     dataset: "ercot-system-demand",
     availability: "live",
     cadence: {
@@ -1027,6 +1054,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.load.supplydemand",
     path: ["Energy", "Load", "Supply vs demand"],
     name: "Supply and demand",
+    short: "Supply · demand",
     dataset: "ercot-supply-demand",
     availability: "live",
     cadence: { label: "every 5 min", seconds: 300 },
@@ -1077,6 +1105,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.generation.wind",
     path: ["Energy", "Generation", "Wind by load zone"],
     name: "Wind: actual and forecast",
+    short: "Wind",
     dataset: "ercot-wind-hourly",
     availability: "live",
     cadence: {
@@ -1132,6 +1161,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.generation.windgeo",
     path: ["Energy", "Generation", "Wind by region"],
     name: "Wind by geographical region",
+    short: "Wind · region",
     dataset: "ercot-wind-hourly-geo",
     availability: "live",
     cadence: {
@@ -1188,6 +1218,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.generation.solar",
     path: ["Energy", "Generation", "Solar"],
     name: "Solar: actual and forecast",
+    short: "Solar",
     dataset: "ercot-solar-hourly",
     availability: "live",
     cadence: {
@@ -1241,6 +1272,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.generation.solargeo",
     path: ["Energy", "Generation", "Solar by region"],
     name: "Solar by geographical region",
+    short: "Solar · region",
     dataset: "ercot-solar-hourly-geo",
     availability: "live",
     cadence: {
@@ -1299,6 +1331,7 @@ export const SCHEMAS: Schema[] = [
     // and someone reading prices should find them beside the prices they move.
     path: ["Energy", "Pricing", "Price adders"],
     name: "Real-time price adders and reserves",
+    short: "RT · adders",
     dataset: "ercot-rt-price-adders",
     availability: "live",
     cadence: { label: "every 5 min", seconds: 300 },
@@ -1355,6 +1388,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.grid.adequacy",
     path: ["Energy", "Grid", "Adequacy"],
     name: "Short-term system adequacy",
+    short: "Adequacy",
     dataset: "ercot-short-term-adequacy",
     availability: "live",
     cadence: { label: "hourly, 168h out", seconds: 3600 },
@@ -1407,6 +1441,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.grid.outages",
     path: ["Energy", "Grid", "Outages"],
     name: "Resource outage capacity",
+    short: "Outages",
     dataset: "ercot-outage-capacity",
     availability: "live",
     cadence: { label: "hourly, week out", seconds: 3600 },
@@ -1460,6 +1495,7 @@ export const SCHEMAS: Schema[] = [
     id: "energy.grid.temperature",
     path: ["Energy", "Grid", "Temperature"],
     name: "Temperature forecast by weather zone",
+    short: "Zone temp fcst",
     dataset: "ercot-temperature-forecast",
     availability: "live",
     cadence: {
@@ -1500,6 +1536,7 @@ export const SCHEMAS: Schema[] = [
     id: "weather.observations.surface",
     path: ["Weather", "Observations", "Surface"],
     name: "Surface observations",
+    short: "Surface obs",
     dataset: "noaa-station-observations",
     availability: "live",
     cadence: {
@@ -1574,6 +1611,7 @@ export const SCHEMAS: Schema[] = [
     id: "weather.forecast.zone",
     path: ["Weather", "Forecast", "By ERCOT zone"],
     name: "Hourly forecast by weather zone",
+    short: "Zone forecast",
     dataset: "openmeteo-zone-forecast",
     availability: "live",
     cadence: {
@@ -1664,6 +1702,7 @@ export const SCHEMAS: Schema[] = [
     id: "weather.forecast.official",
     path: ["Weather", "Forecast", "Official (NWS)"],
     name: "NWS forecast by weather zone",
+    short: "NWS forecast",
     dataset: "noaa-gridpoint-forecast",
     availability: "live",
     cadence: {
@@ -1762,6 +1801,7 @@ export const SCHEMAS: Schema[] = [
     id: "weather.forecast.windfield",
     path: ["Weather", "Forecast", "Wind field"],
     name: "Hub-height wind field",
+    short: "Wind field",
     dataset: "openmeteo-wind-field",
     availability: "live",
     cadence: { label: "every 3 hours", seconds: 10_800 },
