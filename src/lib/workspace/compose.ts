@@ -80,6 +80,17 @@ function useSeries(queries, refreshMs, cursor) {
   const [rows, setRows] = useState(queries.map(() => []));
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  /*
+    Which queries just brought a newer interval than the load before. \`at[n]\`
+    is that newest timestamp for query n, or undefined; \`seq\` climbs on every
+    advance so a CSS animation keyed on it restarts rather than continuing.
+    Cleared once the animation has had its say, so a still screen carries no
+    marker. The first load of a query set is the baseline and never flashes,
+    and preview rows never do — sample data has nothing new in it.
+  */
+  const [fresh, setFresh] = useState({ seq: 0, at: [] });
+  const newest = useRef([]);
+  const freshTimer = useRef(null);
 
   // Which tile this belongs to, and one slot per hook so a component that
   // calls this twice registers both. Null outside a slot — a preview has no
@@ -107,12 +118,31 @@ function useSeries(queries, refreshMs, cursor) {
       }
       return out;
     }
+    // A new query set (a wire retarget, a scrub) starts a new baseline.
+    newest.current = [];
     async function load() {
       try {
         const out = await Promise.all(queries.map((q) => dryos.query(atInstant(q))));
         if (!live) return;
         setRows(out.map((r) => r.rows));
         setError(null);
+        const seen = out.map((r) =>
+          (r.rows || []).reduce((m, x) => {
+            const t = Date.parse(x.interval_start_utc);
+            return t > m ? t : m;
+          }, -Infinity),
+        );
+        const at = seen.map((t, n) =>
+          !out[n].preview && newest.current[n] != null && t > newest.current[n] ? t : undefined,
+        );
+        newest.current = seen;
+        if (at.some((t) => t != null)) {
+          setFresh((f) => ({ seq: f.seq + 1, at }));
+          if (freshTimer.current) clearTimeout(freshTimer.current);
+          freshTimer.current = setTimeout(() => {
+            if (live) setFresh((f) => ({ seq: f.seq, at: [] }));
+          }, FRESH_MS);
+        }
       } catch (e) {
         if (live) setError(e && e.message ? e.message : String(e));
       } finally {
@@ -120,7 +150,24 @@ function useSeries(queries, refreshMs, cursor) {
       }
     }
     load();
-    const id = setInterval(load, refreshMs);
+    // While the host is on the API's event stream, a feed advancing arrives as
+    // \`dryos:advanced\` below and the poll does nothing: the stream is
+    // watched for its own heartbeat out in the host, so a silence is noticed
+    // there and reported as not streaming, and the next tick here is back on
+    // cadence. The poll is never removed — without the stream this is exactly
+    // what it was before there was one.
+    const id = setInterval(() => {
+      if (window.dryos && window.dryos.streaming) return;
+      load();
+    }, refreshMs);
+    // A collector landed rows for a dataset this hook reads (null: the stream
+    // lost its place, and everything refetches once). Same default as the
+    // data route, so a query naming no dataset still matches its own feed.
+    function advanced(e) {
+      const hit = e.detail && e.detail.datasets;
+      if (!hit || queries.some((q) => hit.includes(q.dataset || "ercot-realtime-lmp"))) load();
+    }
+    window.addEventListener("dryos:advanced", advanced);
     // The shim fires this when the page's time cursor moves (a shared ?t=
     // link). Without it a tile on a five-minute poll would keep showing the
     // instant you scrubbed away from for another five minutes, and a screen
@@ -130,14 +177,48 @@ function useSeries(queries, refreshMs, cursor) {
     return () => {
       live = false;
       clearInterval(id);
+      if (freshTimer.current) clearTimeout(freshTimer.current);
       window.removeEventListener("dryos:cursor", load);
+      window.removeEventListener("dryos:advanced", advanced);
     };
     // Stringified because a wired tile (see \`followSnippet\`) swaps its
     // queries when another tile's selection changes — the array is a new
     // object each render, and the string is what says whether it changed.
   }, [cursor, JSON.stringify(queries)]);
 
-  return { rows, error, loading };
+  return { rows, error, loading, fresh };
+}
+
+// Three beats of the ring, then gone.
+const FRESH_MS = 3600;
+
+/**
+ * A recharts \`dot\` that draws only on a series' newest point, and only while
+ * that point is new — the flash that says "this just arrived" on a chart that
+ * otherwise redraws in silence. \`indexes\` are the queries the series is made
+ * of (one for a plain line or a fan-out entity, two for a spread); the point
+ * flashes when its timestamp is the newest of any of them.
+ *
+ * The ring is keyed on \`fresh.seq\`, so a second advance inside the first
+ * flash restarts the animation instead of letting it run out. Recharts owns
+ * the outer element's key; the inner one is ours.
+ *
+ * A stacked area's stroke is the surface-colored hairline between segments
+ * and its fill is the identity — the same rule the tooltip marker follows.
+ */
+function freshDot(fresh, ...indexes) {
+  const at = indexes.map((n) => fresh.at[n]).filter((t) => t != null);
+  if (!at.length) return false;
+  return (p) => {
+    if (p.cx == null || p.cy == null || !p.payload || !at.includes(p.payload.t)) return null;
+    const color = p.stroke === "var(--surface)" ? p.fill : p.stroke;
+    return (
+      <g>
+        <circle key={fresh.seq} cx={p.cx} cy={p.cy} r={3} fill="none" stroke={color} strokeWidth={1.5} className="dr-fresh-ring" />
+        <circle cx={p.cx} cy={p.cy} r={2.5} fill={color} />
+      </g>
+    );
+  };
 }
 
 /**

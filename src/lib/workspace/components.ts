@@ -931,17 +931,17 @@ ${
             // segments, so adjacent fills never touch — identity is never
             // color alone.
             `{ordered.map((sr) => (
-            <Area key={sr.key} type="monotone" stackId="a" dataKey={sr.key} name={sr.label} stroke="var(--surface)" strokeWidth={1} fill={sr.color} fillOpacity={0.85} dot={false} isAnimationActive={false} connectNulls />
+            <Area key={sr.key} type="monotone" stackId="a" dataKey={sr.key} name={sr.label} stroke="var(--surface)" strokeWidth={1} fill={sr.color} fillOpacity={0.85} dot={freshDot(fresh, ${fan ? "0" : "Number(sr.key.slice(1))"})} isAnimationActive={false} connectNulls />
           ))}`
           : `{ordered.map((sr) => (
-            <${area ? "Area" : "Line"} key={sr.key} type="monotone" dataKey={sr.key} name={sr.label} stroke={sr.color} ${area ? "fill={sr.color} fillOpacity={0.12} " : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />
+            <${area ? "Area" : "Line"} key={sr.key} type="monotone" dataKey={sr.key} name={sr.label} stroke={sr.color} ${area ? "fill={sr.color} fillOpacity={0.12} " : ""}strokeWidth={1.6} dot={freshDot(fresh, 0)} isAnimationActive={false} connectNulls />
           ))}`
         : spread
           ? // One line, drawn as the first series was told to draw: the spread
             // is a question about A against B, and A is the one it follows.
             (() => {
               const p = paint(styles, "s0", 0);
-              return `<${area ? "Area" : "Line"} type="monotone" dataKey="sd" name=${JSON.stringify(title)} stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
+              return `<${area ? "Area" : "Line"} type="monotone" dataKey="sd" name=${JSON.stringify(title)} stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={freshDot(fresh, 0, 1)} isAnimationActive={false} connectNulls />`;
             })()
           : s
               .map((x, n) => {
@@ -953,7 +953,7 @@ ${
                   follow !== null
                     ? `{picked ?? ${JSON.stringify(x.label)}}`
                     : JSON.stringify(x.label);
-                return `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${label} ${dual ? `yAxisId="${axisOf(x.key)}" ` : ""}stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
+                return `<${area ? "Area" : "Line"} type="monotone" dataKey="${x.key}" name=${label} ${dual ? `yAxisId="${axisOf(x.key)}" ` : ""}stroke="${p.color}" ${dashProp(p.dash)}${area ? `fill="${p.color}" fillOpacity={0.12} ` : ""}strokeWidth={1.6} dot={freshDot(fresh, ${n})} isAnimationActive={false} connectNulls />`;
               })
               .join("\n          ");
 
@@ -972,7 +972,7 @@ ${
       code: `function ${name}({ w, h }) {
   const SOURCE_TZ = ${JSON.stringify(sourceTz(refs))};
 ${followSnippet(follow, JSON.stringify(queries, null, 2).replace(/\n/g, "\n      "))}
-  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
+  const { rows, error, loading, fresh } = useSeries(queries, ${refreshMs(refs)});
 ${setup}
 ${orderMemo}
   /*
@@ -2188,7 +2188,7 @@ ${followSnippet(
     2,
   ).replace(/\n/g, "\n      "),
 )}
-  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
+  const { rows, error, loading, fresh } = useSeries(queries, ${refreshMs(refs)});
 
   const cells = ${JSON.stringify(
     s.map((x) => ({
@@ -2201,14 +2201,16 @@ ${followSnippet(
     const recent = rows[n] || [];
     const now = recent[0] ? recent[0][c.column] : null;
     const prev = ${day ? "recent[recent.length - 1]" : "recent[1]"} ? ${day ? "recent[recent.length - 1]" : "recent[1]"}[c.column] : null;
-    return { ...c, now, delta: now != null && prev != null ? now - prev : null };
+    // Keyed on the advance so a second one inside the flash restarts it.
+    const flash = fresh.at[n] != null ? "f" + fresh.seq : null;
+    return { ...c, now, flash, delta: now != null && prev != null ? now - prev : null };
   });
 
   return (
     <Section index={${i}} w={w} h={h} title="Live" loading={loading} error={error}>
       <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
         {cells.map((c) => (
-          <div key={c.label} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, padding: "10px 12px" }}>
+          <div key={c.label + (c.flash || "")} className={c.flash ? "dr-fresh-cell" : undefined} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, padding: "10px 12px" }}>
             <div style={{ alignItems: "center", display: "flex", gap: 5 }}>
               <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".1em", textTransform: "uppercase" }}>{${
                 follow !== null
@@ -2219,7 +2221,7 @@ ${followSnippet(
                 <span style={{ border: "1px dashed var(--info)", borderRadius: 3, color: "var(--info)", fontFamily: "var(--mono)", fontSize: 8.5, padding: "0 3px", textTransform: "uppercase" }}>mock</span>
               )}
             </div>
-            <div style={{ color: "var(--ink)", fontSize: 22, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>
+            <div className={c.flash ? "dr-fresh-val" : undefined} style={{ color: "var(--ink)", fontSize: 22, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>
               {c.now == null ? "—" : c.now.toFixed(2)}
               <span style={{ color: "var(--faint)", fontSize: 11, marginLeft: 4 }}>{c.unit}</span>
             </div>

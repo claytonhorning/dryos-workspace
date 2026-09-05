@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { cx } from "@/components/ui";
+import { useFeedEvents } from "@/lib/useFeedEvents";
 import { useTheme } from "@/lib/useTheme";
 import { useTimeZone } from "@/lib/useTimeZone";
 import type { TileAsk } from "@/lib/workspace/ask";
@@ -365,6 +366,24 @@ export function Runner({
     [],
   );
 
+  // A feed advancing reaches the frame the way the theme does: told, never
+  // fetched, because the frame has no network of its own. Every adopted
+  // window hears it — the incoming frame of a handover is already querying.
+  const streaming = useFeedEvents(
+    useCallback((datasets: string[] | null) => {
+      for (const w of windows.current)
+        w.postMessage({ __dryos: "advanced", datasets }, "*");
+    }, []),
+  );
+  // And whether the stream is up at all, so the tiles know how hard to poll.
+  // `live` for the usual reason: a new document has heard none of this.
+  useEffect(() => {
+    frame.current?.contentWindow?.postMessage(
+      { __dryos: "streaming", on: streaming },
+      "*",
+    );
+  }, [streaming, live]);
+
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       // Only listen to our own frames; anything else on the page is not ours.
@@ -562,6 +581,10 @@ export function Runner({
               );
               e.currentTarget.contentWindow?.postMessage(
                 { __dryos: "cursor", at: cursor ?? null },
+                "*",
+              );
+              e.currentTarget.contentWindow?.postMessage(
+                { __dryos: "streaming", on: streaming },
                 "*",
               );
               // The parser-blocking script has run: the new revision is

@@ -22,7 +22,7 @@ import { ChatDock } from "@/components/workspace/ChatDock";
 import { TileChat } from "@/components/workspace/TileChat";
 import type { TileAsk } from "@/lib/workspace/ask";
 import { WiresStrip } from "@/components/workspace/WiresStrip";
-import { FeedsPanel } from "@/components/workspace/FeedsPanel";
+import { tileUses } from "@/components/workspace/FeedsMenu";
 import {
   componentDef,
   DEFAULT_LAYOUT,
@@ -38,19 +38,20 @@ import type { App, AppSummary } from "@/lib/workspace/types";
 /**
  * What the right column is showing.
  *
- * One column, four jobs, and they are not used together: you build by hand,
- * you build by conversation, you read what happened, or you check what the
- * screen is reading. Stacked, none had room. The chat lives here rather than
- * under the screen because a conversation reads top-down — a wide two-line
- * strip was the worst shape for one. Cost used to be a turn here too; spending
- * lives in the navbar's usage dock now, so the panel no longer repeats it.
+ * One column, three jobs, and they are not used together: you build by hand,
+ * you build by conversation, or you read what happened. Stacked, none had
+ * room. The chat lives here rather than under the screen because a
+ * conversation reads top-down — a wide two-line strip was the worst shape for
+ * one. Cost and Feeds used to be turns here too; spending lives in the
+ * navbar's usage dock and the feeds behind the status dot beside the page's
+ * tab, so the panel repeats neither — both are questions asked of a launched
+ * screen at least as often as of one being edited.
  */
-type PanelMode = "build" | "chat" | "changes" | "feeds";
+type PanelMode = "build" | "chat" | "changes";
 
 const PANELS: { id: PanelMode; label: string }[] = [
   { id: "build", label: "Build" },
   { id: "chat", label: "Chat" },
-  { id: "feeds", label: "Feeds" },
   { id: "changes", label: "History" },
 ];
 
@@ -394,6 +395,19 @@ export default function AppPage() {
     window.dispatchEvent(
       new CustomEvent("dryos:blank", {
         detail: app ? app.manifest?.length === 0 : false,
+      }),
+    );
+  }, [app]);
+
+  /*
+    What the page reads, for the nav's feeds dot — the same channel. Sent on
+    every change to the app, because a placed tile is a new stream to watch.
+  */
+  useEffect(() => {
+    if (!app) return;
+    window.dispatchEvent(
+      new CustomEvent("dryos:feeds", {
+        detail: tileUses(app.manifest, app.history),
       }),
     );
   }, [app]);
@@ -1169,15 +1183,6 @@ export default function AppPage() {
                       ))}
                     </ol>
                   </div>
-                )}
-
-                {/*
-                  Mounted only while open, unlike the chat below it: it polls
-                  the delivery API every 20 seconds, and a pane nobody is
-                  reading should not keep asking.
-                */}
-                {panel === "feeds" && (
-                  <FeedsPanel manifest={app.manifest} history={app.history} />
                 )}
 
                 {/*

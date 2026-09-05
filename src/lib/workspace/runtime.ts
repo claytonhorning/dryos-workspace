@@ -79,6 +79,24 @@ export const RUNTIME_SHIM = String.raw`
       window.dispatchEvent(new Event("dryos:cursor"));
       return;
     }
+    if (m && m.__dryos === "advanced") {
+      // A collector landed rows. The host heard which dataset on the API's
+      // event stream and passes the name in; hooks reading it refetch now
+      // rather than on their next tick. No rows arrive this way — the refetch
+      // is the ordinary metered query. A null list means "everything": the
+      // stream fell too far behind to say what was missed.
+      window.dispatchEvent(new CustomEvent("dryos:advanced", {
+        detail: { datasets: Array.isArray(m.datasets) ? m.datasets : null }
+      }));
+      return;
+    }
+    if (m && m.__dryos === "streaming") {
+      // Whether the host is on that stream at all. Hooks poll at a fraction of
+      // their cadence while it is, and are back on cadence the tick after it
+      // drops — polling is the floor, the stream only raises it.
+      if (window.dryos) window.dryos.streaming = Boolean(m.on);
+      return;
+    }
     if (!m || m.__dryos !== "result") return;
     var p = pending[m.id];
     if (!p) return;
@@ -124,6 +142,8 @@ export const RUNTIME_SHIM = String.raw`
     query: function (opts) { return call("query", atCursor(opts || {})); },
     /** The instant the page is showing, or null for live. Read, do not assign. */
     cursor: null,
+    /** Whether the host is on the API's event stream. Read, do not assign. */
+    streaming: false,
     /*
       Move the page's cursor from inside a tile.
 
@@ -331,6 +351,26 @@ th { font-family: var(--mono); font-size:10px; letter-spacing:.12em; text-transf
 .recharts-wrapper, .recharts-wrapper *:focus, .recharts-surface:focus { outline: none; }
 /* A dropped tile's gap breathes while its revision composes — see Ghost. */
 @keyframes dr-ghost { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+/*
+  New data. A load that brought a newer interval rings the chart's newest
+  point and lifts a ticker's value to the accent, three beats and gone — see
+  useSeries's \`fresh\` and freshDot in compose. The ring scales rather than
+  animating \`r\`, which Safari only recently learned to animate; transform-box
+  makes the scale grow from the circle's own centre rather than the SVG's.
+*/
+@keyframes dr-fresh-ring {
+  0%   { transform: scale(1); opacity: 1; }
+  100% { transform: scale(3); opacity: 0; }
+}
+@keyframes dr-fresh-val { 0%, 100% { color: var(--ink); } 30% { color: var(--accent); } }
+@keyframes dr-fresh-cell {
+  0%   { box-shadow: 0 0 0 0 var(--accent); }
+  100% { box-shadow: 0 0 0 7px transparent; }
+}
+.dr-fresh-ring { transform-box: fill-box; transform-origin: center; animation: dr-fresh-ring 1.1s ease-out 3; }
+.dr-fresh-val  { animation: dr-fresh-val 1.1s ease-out 3; }
+.dr-fresh-cell { animation: dr-fresh-cell 1.1s ease-out 3; }
 
 /*
   The empty screen in the editor, which is the one screen with nothing to say

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   DatasetPreview,
   PreviewInterval,
@@ -9,7 +10,7 @@ import { DISPLAY_TZ_LABEL, clock } from "@/lib/time";
 import { cx } from "./ui";
 
 /**
- * The per-interval delivery graph the Feeds pane audits a screen with. It
+ * The per-interval delivery graph the feeds menu audits a screen with. It
  * lived on the dataset landing pages first; the pane kept it when they went,
  * because "did every expected interval arrive" is the pane's whole question.
  */
@@ -174,7 +175,14 @@ export function CollectionGraph({
           />
         ))}
       </div>
-      {hover && hc && (
+      {/*
+        Portalled to the body: the feeds menu is a fixed, overflow-hidden box
+        that arrives on a transform, and a fixed readout rendered inside it is
+        positioned against — and clipped by — the menu rather than the window,
+        which cut the box off at the menu's right edge for every cell near
+        it. Hover is null on the server, so the portal never renders there.
+      */}
+      {hover && hc && createPortal(
         <div
           className="pointer-events-none fixed top-0 left-0 z-60 max-w-[220px] rounded-md border border-line-strong bg-surface-2 px-2.5 py-1.5 shadow-[0_6px_20px_rgba(0,0,0,.45)]"
           style={{
@@ -220,7 +228,8 @@ export function CollectionGraph({
               ? `posted +${fmt(hc.interval.postLagSeconds)} · collected +${fmt(hc.interval.collectLagSeconds)}`
               : "no data collected for this interval"}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       <p className="mt-3 text-[12px] text-muted">
         {onTime} on time

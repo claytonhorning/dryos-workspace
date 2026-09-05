@@ -10,6 +10,7 @@ import { useSelectOnMount } from "@/lib/useSelectOnMount";
 import { AccountButton } from "./AccountButton";
 import { TimeSelect } from "./TimeSelect";
 import { UsageDock } from "@/components/workspace/UsageDock";
+import { FeedsMenu, type FeedsDetail } from "@/components/workspace/FeedsMenu";
 
 /**
  * The navbar, once you are inside a workspace.
@@ -79,6 +80,24 @@ export function SpaceNav({
 
   // The flag belongs to the open page; switching tabs clears it.
   useEffect(() => setBlank(false), [pageId]);
+
+  /**
+   * What the open page reads (`dryos:feeds`), for the status dot beside its
+   * tab. Held here rather than in the dot because the dot mounts with the
+   * tabs, after the workspace fetch, and the page's announcement can arrive
+   * before that — the nav itself is listening from the first render.
+   */
+  const [feeds, setFeeds] = useState<FeedsDetail | null>(null);
+
+  useEffect(() => {
+    const h = (e: Event) =>
+      setFeeds((e as CustomEvent<FeedsDetail>).detail ?? null);
+    window.addEventListener("dryos:feeds", h);
+    return () => window.removeEventListener("dryos:feeds", h);
+  }, []);
+
+  // The record belongs to the open page; switching tabs clears it.
+  useEffect(() => setFeeds(null), [pageId]);
 
   useEffect(() => {
     let live = true;
@@ -330,27 +349,34 @@ export function SpaceNav({
               editMode && "cursor-grab active:cursor-grabbing",
             );
 
+            // The open page wears the feeds dot beside its name: whether
+            // what this screen reads is arriving, and the delivery record
+            // behind it. Beside the name rather than in the right cluster
+            // because the claim is about this page, and the name is the
+            // one thing in the bar that means this page.
             if (on) {
               return (
-                <button
-                  key={p.id}
-                  {...dnd}
-                  onClick={() => {
-                    setDraft(p.name);
-                    setEditing(p.id);
-                  }}
-                  title={
-                    editMode
-                      ? "Drag to reorder · click to rename"
-                      : "Click to rename this page"
-                  }
-                  className={cx(
-                    "flex shrink-0 items-center border-b-2 border-accent px-3 text-[13px] whitespace-nowrap text-ink",
-                    shift,
-                  )}
-                >
-                  {p.name}
-                </button>
+                <span key={p.id} className="flex shrink-0 items-stretch">
+                  <button
+                    {...dnd}
+                    onClick={() => {
+                      setDraft(p.name);
+                      setEditing(p.id);
+                    }}
+                    title={
+                      editMode
+                        ? "Drag to reorder · click to rename"
+                        : "Click to rename this page"
+                    }
+                    className={cx(
+                      "flex shrink-0 items-center border-b-2 border-accent px-3 text-[13px] whitespace-nowrap text-ink",
+                      shift,
+                    )}
+                  >
+                    {p.name}
+                  </button>
+                  <FeedsMenu feeds={feeds} />
+                </span>
               );
             }
 
