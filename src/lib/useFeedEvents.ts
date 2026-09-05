@@ -30,6 +30,8 @@ const API = process.env.NEXT_PUBLIC_DRYOS_API_URL ?? null;
  * never is, and every tile simply polls as it always has.
  */
 const STALE_MS = 60_000;
+/** The server's keepalive interval — `PING_SECONDS` in events.py. */
+const PING_MS = 20_000;
 
 export function useFeedEvents(
   onAdvanced: (datasets: string[] | null) => void,
@@ -74,14 +76,24 @@ export function useFeedEvents(
       });
     };
     open();
-    const watchdog = setInterval(() => {
-      if (Date.now() - heard > STALE_MS) {
-        setConnected(false);
-        open();
-      }
-    }, STALE_MS / 4);
+    const stale = (ms: number) => {
+      if (Date.now() - heard <= ms) return;
+      setConnected(false);
+      open();
+    };
+    const watchdog = setInterval(() => stale(STALE_MS), STALE_MS / 4);
+    // Coming back from sleep or from offline, do not wait the minute: a
+    // missed beat is enough to reopen, so the tiles hear about the present
+    // as soon as anyone is looking again.
+    const back = () => {
+      if (document.visibilityState === "visible") stale(PING_MS * 1.5);
+    };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("online", back);
     return () => {
       clearInterval(watchdog);
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("online", back);
       es?.close();
       setConnected(false);
     };

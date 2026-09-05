@@ -91,6 +91,12 @@ function useSeries(queries, refreshMs, cursor) {
   const [fresh, setFresh] = useState({ seq: 0, at: [] });
   const newest = useRef([]);
   const freshTimer = useRef(null);
+  // The rows as last delivered, for the failure path: a tile that has numbers
+  // keeps them through a failed refetch rather than swapping them for the
+  // error, and the retry is what puts things right.
+  const have = useRef(false);
+  const retry = useRef({ timer: null, n: 0 });
+  const lastLoad = useRef(0);
 
   // Which tile this belongs to, and one slot per hook so a component that
   // calls this twice registers both. Null outside a slot — a preview has no
@@ -121,11 +127,14 @@ function useSeries(queries, refreshMs, cursor) {
     // A new query set (a wire retarget, a scrub) starts a new baseline.
     newest.current = [];
     async function load() {
+      lastLoad.current = Date.now();
       try {
         const out = await Promise.all(queries.map((q) => dryos.query(atInstant(q))));
         if (!live) return;
         setRows(out.map((r) => r.rows));
         setError(null);
+        have.current = out.some((r) => r.rows && r.rows.length);
+        retry.current.n = 0;
         const seen = out.map((r) =>
           (r.rows || []).reduce((m, x) => {
             const t = Date.parse(x.interval_start_utc);
@@ -144,10 +153,24 @@ function useSeries(queries, refreshMs, cursor) {
           }, FRESH_MS);
         }
       } catch (e) {
-        if (live) setError(e && e.message ? e.message : String(e));
-      } finally {
-        if (live) setLoading(false);
+        if (!live) return;
+        /*
+          A failed fetch is what a laptop coming back from sleep looks like —
+          the request left before the network did — and with the stream up
+          there is no poll to try again, so the failure would sit there until
+          the next event, an hour away on a slow feed. Retry on a short
+          backoff instead. A tile that already has numbers keeps them and
+          wears the header's loading mark while it retries; only a tile with
+          nothing to show gets the error in the body.
+        */
+        if (have.current) setLoading(true);
+        else setError(e && e.message ? e.message : String(e));
+        const n = retry.current.n++;
+        clearTimeout(retry.current.timer);
+        retry.current.timer = setTimeout(load, Math.min(5000 * 2 ** n, 60000));
+        return;
       }
+      setLoading(false);
     }
     load();
     // While the host is on the API's event stream, a feed advancing arrives as
@@ -168,6 +191,17 @@ function useSeries(queries, refreshMs, cursor) {
       if (!hit || queries.some((q) => hit.includes(q.dataset || "ercot-realtime-lmp"))) load();
     }
     window.addEventListener("dryos:advanced", advanced);
+    // Coming back — the tab fronted again, the network returned — reloads at
+    // once if the last load is more than half a minute old, so a screen left
+    // for a while shows the present the moment it is looked at rather than
+    // whenever its next event or tick happens to land. Half a minute keeps a
+    // tab flickering between windows from firing a request per flicker.
+    function back() {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastLoad.current > 30000) load();
+    }
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("online", back);
     // The shim fires this when the page's time cursor moves (a shared ?t=
     // link). Without it a tile on a five-minute poll would keep showing the
     // instant you scrubbed away from for another five minutes, and a screen
@@ -178,8 +212,11 @@ function useSeries(queries, refreshMs, cursor) {
       live = false;
       clearInterval(id);
       if (freshTimer.current) clearTimeout(freshTimer.current);
+      clearTimeout(retry.current.timer);
       window.removeEventListener("dryos:cursor", load);
       window.removeEventListener("dryos:advanced", advanced);
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("online", back);
     };
     // Stringified because a wired tile (see \`followSnippet\`) swaps its
     // queries when another tile's selection changes — the array is a new
