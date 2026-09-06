@@ -163,14 +163,6 @@ export interface TrayPayload {
    * are what land.
    */
   group?: StagedComponent[];
-  /**
-   * The preview box as it was on screen when the drag began, in CSS pixels.
-   * The page converts it through the canvas's own scale into columns and
-   * pixels, so the tile lands at exactly the size it was being looked at —
-   * `layout` above is only the fallback for when there is no fit to convert
-   * through.
-   */
-  px?: { w: number; h: number };
 }
 
 /**
@@ -492,22 +484,21 @@ export function BuildPanel({
             previewOpts,
           )}:${previewRefs.map((r) => r.schemaId + r.label).join("|")}`}
           frameRef={previewFrame}
-          onDragStart={(e, box) => {
+          onDragStart={(e) => {
             e.dataTransfer.setData(DRAG_TYPE, "1");
             e.dataTransfer.effectAllowed = "copy";
             setDragged(true);
             setHint(false);
-            // What lands is what was being looked at — including its size, so
-            // the frame is measured as the hand takes it. The frame, not the
-            // box around it: the box also holds the grab bar, and a tile
-            // twenty-two pixels taller than the preview is not what was shown.
+            // What lands is what was being looked at — settings, data, source.
+            // Not its size: the page swaps in the shape's default, because the
+            // preview is as wide as the panel so it can be judged, and a
+            // dropped tile is one of several.
             onDragStateChange({
               kind: preview.def.kind,
               options: previewOpts,
               custom: preview.custom,
               refs: previewRefs,
               layout: preview.layout,
-              px: { w: box.width, h: box.height },
             });
           }}
           onDragEnd={() => onDragStateChange(null)}

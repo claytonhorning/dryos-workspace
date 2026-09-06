@@ -3872,7 +3872,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             continuous scale with no key is decoration.
 
             Drawn with the stops spaced evenly rather than by value: the values
-            are deliberately non-linear ($0, $25, $50, $100, $250, $1000), and
+            are deliberately non-linear ($0 … $70, $100, $250, $1000), and
             spacing them to scale would compress everything below $250 into a
             sliver — which is the failure this whole change is undoing.
           */}

@@ -26,7 +26,6 @@ import { tileUses } from "@/components/workspace/FeedsMenu";
 import {
   componentDef,
   DEFAULT_LAYOUT,
-  GRID,
   type ComponentSpec,
 } from "@/lib/workspace/components";
 import { readNdjson } from "@/lib/workspace/ndjson";
@@ -328,34 +327,23 @@ export default function AppPage() {
   const { box: canvasBox, fit } = useScreenFit(asideOpen, Boolean(app));
 
   /**
-   * A drag begins: size the incoming tile to the preview it was taken from.
+   * A drag begins: the incoming tile takes its shape's default size.
    *
-   * The payload carries the preview box's on-screen pixels, and the canvas is
-   * the launched screen scaled down — so dividing by the fit's scale and
-   * snapping to the grid gives the tile that *looks* exactly as big as the
-   * thing being dragged. What lands is what you saw, size included; the
-   * shape's default layout is only the fallback for when there is nothing to
-   * measure against.
+   * It used to take the preview's own on-screen pixels, divided by the fit's
+   * scale, on the argument that what lands should be what was looked at. The
+   * preview spans the whole panel so the shape can be judged, and a panel's
+   * width divided by a canvas scaled to half is most of the screen — every
+   * drop arrived as a full-width tile that had to be shrunk before the next
+   * one fit. The settings still land exactly as previewed; only the size is
+   * the shape's default, which is sized to be one tile among several.
    */
   const beginDrag = useCallback(
     (payload: TrayPayload | null) => {
-      if (payload?.px && fit) {
-        // The frame's #root keeps 16px of padding on each side, so the grid is
-        // that much narrower than the launched width.
-        const canvasW = fit.w - 32;
-        const col = (canvasW - (GRID.cols - 1) * GRID.gap) / GRID.cols;
-        const stride = col + GRID.gap;
-        const w = Math.min(
-          GRID.cols,
-          Math.max(2, Math.round((payload.px.w / fit.scale + GRID.gap) / stride)),
-        );
-        const h = Math.max(120, Math.round(payload.px.h / fit.scale));
-        setDragging({ ...payload, layout: { w, h } });
-      } else {
-        setDragging(payload);
-      }
+      setDragging(
+        payload ? { ...payload, layout: DEFAULT_LAYOUT[payload.kind] } : payload,
+      );
     },
-    [fit],
+    [],
   );
 
   useEffect(() => {

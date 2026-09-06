@@ -237,19 +237,32 @@ export const SCHEMAS: Schema[] = [
         description:
           "The settled price. The only price field ERCOT populates.",
         // Set from the distribution, not by eye — see the Variable.scale note.
-        // p50 sits near $28 and p90 near $68 over a fortnight, >$100 is 4% of
-        // readings and >$500 is half a percent. So the ramp is dense through
-        // the ordinary range and keeps its loudest colors for the exceptions,
-        // which is the whole point: a node at $100 has to be visible at a
-        // glance, and it cannot be if $40 is already orange.
+        // Over a fortnight (2026-09-05, 2.7M rows) p10 is $21, p25 $25, p50
+        // $31, p75 $45, p90 $70, p95 $96; >$100 is 4.5% of readings, >$250 is
+        // 2%, negative 0.4%. Stops sit at those quantiles, so the band where
+        // two thirds of readings live ($20–$70) gets four steps rather than
+        // one — the old $25/$50/$100 stepping painted $45 and $60 alike.
+        //
+        // Lightness climbs with the value, monotonically (OKLCH L .52 → .94,
+        // designed in that space and converted): the hotter the price, the
+        // brighter the dot, so the exceptions are the brightest marks on a
+        // dark basemap. The old ramp peaked at chartreuse ($50) and *dimmed*
+        // toward red ($1000), which made a cap-price node less visible than
+        // an ordinary one. Negative is cyan, off the ramp entirely — an
+        // oversupplied node is a different state, not a cheap one. Known
+        // gap: on a light basemap the top of the ramp fades to the ground
+        // and only the dark stroke holds the dot; the scale is not
+        // theme-aware yet.
         scale: [
-          { at: -50, color: "#a78bfa", label: "negative" },
-          { at: 0, color: "#2b6cb0" },
-          { at: 25, color: "#7dd3fc" },
-          { at: 50, color: "#e8ff3d" },
-          { at: 100, color: "#fbbf24" },
-          { at: 250, color: "#fb8b5c" },
-          { at: 1000, color: "#f4666b", label: "cap" },
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
         ],
         // Preview-only. The data route never generates this schema — it is
         // collected — but a thumbnail has no host to answer its queries, so the
@@ -294,20 +307,18 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description:
           "Hourly day-ahead clearing price for the bus.",
-        // Set from the distribution, not by eye — see the Variable.scale note.
-        // p50 sits near $28 and p90 near $68 over a fortnight, >$100 is 4% of
-        // readings and >$500 is half a percent. So the ramp is dense through
-        // the ordinary range and keeps its loudest colors for the exceptions,
-        // which is the whole point: a node at $100 has to be visible at a
-        // glance, and it cannot be if $40 is already orange.
+        // The real-time ramp, stop for stop — one price, one color, whichever
+        // market it cleared in. Its numbers and design are on that schema.
         scale: [
-          { at: -50, color: "#a78bfa", label: "negative" },
-          { at: 0, color: "#2b6cb0" },
-          { at: 25, color: "#7dd3fc" },
-          { at: 50, color: "#e8ff3d" },
-          { at: 100, color: "#fbbf24" },
-          { at: 250, color: "#fb8b5c" },
-          { at: 1000, color: "#f4666b", label: "cap" },
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
         ],
         // Preview-only — see the note on the real-time schema.
         mock: { base: 34, swing: 16, noise: 4 },
