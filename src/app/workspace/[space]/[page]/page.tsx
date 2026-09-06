@@ -2,7 +2,12 @@
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DataExplorer } from "@/components/workspace/DataExplorer";
+import {
+  DataExplorer,
+  DomainSelect,
+  defaultDomain,
+  knownDomain,
+} from "@/components/workspace/DataExplorer";
 import {
   AvailabilityBadge,
   SelectionStrip,
@@ -255,6 +260,16 @@ export default function AppPage() {
    * question with no bearing on the answer.
    */
   const [shelf, setShelf] = useState<"data" | "community">("data");
+  /**
+   * The subject the panel is narrowed to. Lives here rather than in the
+   * explorer because the select sits in the panel's tab row and both shelves
+   * read it: the catalogue filters by it, and so does what is published. It
+   * opens on the workspace's own domain once that has been fetched.
+   */
+  const [domain, setDomain] = useState<string>(() => defaultDomain());
+  useEffect(() => {
+    if (knownDomain(spaceDomain)) setDomain(spaceDomain);
+  }, [spaceDomain]);
   const [pending, setPending] = useState(false);
   /**
    * The panel's width, draggable at its left edge. Judging a preview in a
@@ -1239,6 +1254,20 @@ export default function AppPage() {
                         </button>
                       );
                     })}
+                    {/*
+                      The domain at the row's far end. It narrows both shelves,
+                      so it belongs to the row that switches between them —
+                      and it names itself, so it carries no label.
+                    */}
+                    <span className="flex-1" />
+                    <span className="flex items-center pb-1">
+                      <DomainSelect
+                        value={domain}
+                        onChange={setDomain}
+                        size="sm"
+                        align="right"
+                      />
+                    </span>
                   </div>
 
                   {shelf === "community" ? (
@@ -1250,6 +1279,7 @@ export default function AppPage() {
                     <div className="min-h-0 flex-1">
                       <BuildPanel
                         shelf="community"
+                        domain={domain}
                         refs={attached}
                         onDragStateChange={beginDrag}
                         manifest={app.manifest}
@@ -1266,7 +1296,8 @@ export default function AppPage() {
                     */
                     <div className="min-h-0 flex-1">
                       <DataExplorer
-                        initialDomain={spaceDomain}
+                        domain={domain}
+                        onDomainChange={setDomain}
                         selected={attached}
                         onToggle={toggle}
                         onClear={() => setAttached([])}

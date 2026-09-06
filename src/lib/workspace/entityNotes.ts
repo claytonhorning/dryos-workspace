@@ -35,6 +35,19 @@ export const ENTITY_NOTES: Record<string, string> = {
   DC_N: "North DC tie — to the Eastern Interconnection via Oklahoma.",
   DC_R: "Railroad DC tie — to Mexico (CFE).",
   DC_S: "Eagle Pass DC tie — to Mexico (CFE).",
+
+  // MISO trading hubs — the eight prices the Midcontinent market quotes.
+  // MISO types 424 aggregates as "Hub"; these are the ones people mean.
+  "INDIANA.HUB": "Indiana hub — the most-traded MISO hub; the benchmark for the north.",
+  "ILLINOIS.HUB": "Illinois hub — Chicago-area price, the other northern benchmark.",
+  "MICHIGAN.HUB": "Michigan hub — the Lower Peninsula.",
+  "MINN.HUB": "Minnesota hub — the wind-heavy northwest of the footprint.",
+  "ARKANSAS.HUB": "Arkansas hub — the north end of MISO South.",
+  "LOUISIANA.HUB": "Louisiana hub — the Gulf Coast load pocket.",
+  "MS.HUB": "Mississippi hub.",
+  "TEXAS.HUB": "Texas hub — MISO's East Texas footprint, not ERCOT.",
+  SWPP: "The SPP interface — the price at the seam with the Southwest Power Pool.",
+  PJM: "The PJM interface — the price at the eastern seam.",
 };
 
 export function entityNote(node: string): string | undefined {

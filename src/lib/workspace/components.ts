@@ -2227,7 +2227,7 @@ ${followSnippet(
   return (
     <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} title={${
       follow !== null ? "picked ?? cells[0].label" : "cells[0].label"
-    }} sub={${JSON.stringify(s[0]?.streamShort ?? "Ticker")}} loading={loading} error={error} fill minH={${TICKER_MIN_H}} minW={${TICKER_MIN_W}} headerAsOf={false}>
+    }} sub={${JSON.stringify(s[0]?.streamShort ?? "Ticker")}} loading={loading} error={error} fill minH={${TICKER_MIN_H}} minW={${TICKER_MIN_W}} headerAsOf={false} expand={false}>
       {/* The number is the tile: named once in the header — the entity
           leads, since it is what tells two tickers apart — it takes the
           whole box as one em-scaled unit, so a bigger tile is a bigger

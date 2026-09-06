@@ -19,7 +19,7 @@ import {
   type ComponentSpec,
   withDefaults,
 } from "@/lib/workspace/components";
-import { type DataRef } from "@/lib/workspace/catalog";
+import { type DataRef, domainOf, schemaById } from "@/lib/workspace/catalog";
 import {
   communityComponents,
   communityGroups,
@@ -208,6 +208,7 @@ export function BuildPanel({
   onDragStateChange,
   manifest,
   shelf = "shapes",
+  domain,
 }: {
   refs: DataRef[];
   onDragStateChange: (payload: TrayPayload | null) => void;
@@ -215,6 +216,12 @@ export function BuildPanel({
   manifest?: ComponentSpec[];
   /** Which shelf to show. The page decides, from its own tabs. */
   shelf?: ShelfTab;
+  /**
+   * The domain the panel's tab row is narrowed to, or `"all"`. A published
+   * component brings its own data, so the domain it belongs to is the domain
+   * of the streams it reads; the community shelf shows only those.
+   */
+  domain?: string;
 }) {
   const tab = shelf;
   /**
@@ -225,8 +232,27 @@ export function BuildPanel({
   const [group, setGroup] = useState<PublishedGroup | null>(null);
   // Rebuilt from today's catalogue on every read, which is cheap and is the
   // point — a recipe is a stream and a shape, never a frozen chip.
-  const published = useMemo(() => communityComponents(), []);
-  const groups = useMemo(() => communityGroups(), []);
+  const inDomain = (rs: DataRef[] | undefined) =>
+    !domain ||
+    domain === "all" ||
+    (rs ?? []).some((r) => {
+      const schema = schemaById(r.schemaId);
+      return schema !== undefined && domainOf(schema) === domain;
+    });
+  const published = useMemo(
+    () => communityComponents().filter((c) => inDomain(c.refs)),
+    // `inDomain` closes over `domain` and nothing else that changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [domain],
+  );
+  const groups = useMemo(
+    () =>
+      communityGroups().filter((g) =>
+        g.members.some((m) => inDomain(m.refs)),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [domain],
+  );
   /**
    * The component being previewed, in the shelf's own place. Clicking a card
    * runs the real thing — the preview route composes a one-tile app on live

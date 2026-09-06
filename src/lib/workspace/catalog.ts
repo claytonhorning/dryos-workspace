@@ -119,6 +119,13 @@ export interface Schema {
    */
   sourceTz?: string;
   /**
+   * Which grid operator an Energy stream comes from — ERCOT, MISO — where the
+   * collector slug does not already say. The explorer narrows Energy by it.
+   * Read through `isoOf`, which derives it from the slug prefix otherwise, the
+   * same rule the API's collectors page uses.
+   */
+  iso?: string;
+  /**
    * Entities a fan-out must leave behind: the aggregate rows the source
    * publishes alongside the parts. Stacking TOTAL on top of the zones it sums
    * counts everything twice.
@@ -1543,6 +1550,361 @@ export const SCHEMAS: Schema[] = [
   // ── Weather ──────────────────────────────────────────────────────────
   // The second domain, and the first data in the catalogue that is not
   // ERCOT's. Both streams carry their own coordinates, so both are `located`.
+  // ── MISO ───────────────────────────────────────────────────────────────
+  // Eight streams, one per collector, landed 2026-09-06. Every one reads
+  // MISO's public dashboard API — the only intraday source, since the keyed
+  // Data Exchange serves a market day only once it is over — and every one
+  // is Eastern Standard Time all year, which `sourceTzOf` knows. Same
+  // sectors as ERCOT on purpose: the chips are the question, the ISO select
+  // is where.
+  {
+    id: "energy.miso.realtime",
+    path: ["Energy", "Pricing", "Real-time"],
+    name: "MISO real-time LMP",
+    short: "RT · LMP",
+    dataset: "miso-realtime-lmp",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 1,
+    entities: {
+      count: 2628,
+      label: "pricing nodes",
+      sample: ["INDIANA.HUB", "ILLINOIS.HUB", "MICHIGAN.HUB"],
+    },
+    // No coordinates published, and `geoMock` invents Texas — so no map for
+    // now rather than a wrong one.
+    blurb:
+      "Preliminary ex-post prices for every MISO commercial pricing node — hubs, " +
+      "load zones, generator nodes and interfaces — with the congestion and loss " +
+      "components, every five minutes. Collected from MISO's public real-time " +
+      "feed and checked against the Data Exchange copy of the same day.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 6),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The five-minute preliminary ex-post price at the node.",
+        // The ERCOT ramp, stop for stop — one price, one color, whichever
+        // market it cleared in.
+        scale: [
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
+        ],
+        mock: { base: 28, swing: 10, noise: 2.5 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 6, noise: 1.5 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: -0.5, swing: 1.2, noise: 0.3 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "System marginal energy cost — the same number at every node in an " +
+          "interval. Derived as LMP minus congestion minus losses, MISO's own identity.",
+        mock: { base: 28, swing: 9, noise: 2 },
+      },
+    ],
+  },
+  {
+    id: "energy.miso.exante",
+    path: ["Energy", "Pricing", "Ex-ante hubs"],
+    name: "MISO ex-ante hub LMP",
+    short: "Ex-ante · LMP",
+    dataset: "miso-exante-lmp",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 9,
+      label: "hubs and interfaces",
+      sample: ["INDIANA.HUB", "ILLINOIS.HUB", "SWPP"],
+    },
+    entityKey: "node",
+    blurb:
+      "The forward-looking price at MISO's eight trading hubs and the SPP seam: " +
+      "what the next dispatch is about to clear at, published just before each " +
+      "interval. Beside the ex-post price it is the market's forecast error, five " +
+      "minutes at a time.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 6),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Ex-ante LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The ex-ante price for the coming interval.",
+        scale: [
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
+        ],
+        mock: { base: 28, swing: 10, noise: 2.5 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component.",
+        mock: { base: 0, swing: 4, noise: 1 },
+      },
+    ],
+  },
+  {
+    id: "energy.miso.ancillary",
+    path: ["Energy", "Ancillary", "Clearing prices"],
+    name: "MISO ancillary clearing prices",
+    short: "MCP",
+    dataset: "miso-ancillary-mcp",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 9,
+      label: "products",
+      sample: ["GEN_REG", "GEN_SPIN", "STR"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "Market clearing prices for regulation, spinning, supplemental, short-term " +
+      "and ramp reserves, real-time every five minutes and day-ahead by the hour, " +
+      "in each of MISO's eight reserve zones. The zones price alike nearly always; " +
+      "a product is one series here, and a row carries which zone and market it is.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 6),
+    },
+    variables: [
+      {
+        key: "mcp",
+        label: "Clearing price",
+        unit: "$/MW",
+        availability: "live",
+        description: "The clearing price for the product, $/MW per hour.",
+        mock: { base: 6, swing: 5, noise: 1.5, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.miso.genmix",
+    path: ["Energy", "Generation", "Fuel mix"],
+    name: "MISO fuel mix",
+    short: "Fuel mix",
+    dataset: "miso-fuel-mix",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.75,
+    entities: {
+      count: 8,
+      label: "fuel categories",
+      sample: ["NATURAL_GAS", "COAL", "WIND"],
+    },
+    entityKey: "fuel",
+    blurb:
+      "Output by fuel category across the Midcontinent footprint every five " +
+      "minutes — coal, gas, nuclear, wind, solar, storage, imports and other. " +
+      "From MISO's own dashboard feed, which keeps two days; the history exists " +
+      "because this collector keeps running.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 6),
+    },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Output",
+        unit: "MW",
+        availability: "live",
+        description:
+          "Generation for the category at the reading. Imports is net " +
+          "interchange counted as supply, so it runs negative on export.",
+        mock: { base: 12_000, swing: 9_000, noise: 400, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.miso.load",
+    path: ["Energy", "Load", "System demand"],
+    name: "MISO system load",
+    short: "Demand",
+    dataset: "miso-system-load",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: [],
+    },
+    blurb:
+      "MISO-wide real-time demand every five minutes — the number behind the " +
+      "Current Demand tile on MISO's front page. The feed keeps only today, so " +
+      "yesterday is here because it was collected.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 6),
+    },
+    variables: [
+      {
+        key: "demand_mw",
+        label: "Demand",
+        unit: "MW",
+        availability: "live",
+        description: "MISO-wide demand at the reading.",
+        mock: { base: 82_000, swing: 22_000, noise: 700, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.miso.windsolar",
+    path: ["Energy", "Generation", "Wind and solar"],
+    name: "MISO wind and solar",
+    short: "Wind · solar",
+    dataset: "miso-wind-solar",
+    availability: "live",
+    cadence: { label: "hourly, two days ahead", seconds: 3600 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: {
+      count: 2,
+      label: "resources",
+      sample: ["WIND", "SOLAR"],
+    },
+    entityKey: "resource",
+    blurb:
+      "Hourly wind and solar output against MISO's own forecast for today and " +
+      "tomorrow, republished every hour and kept as vintages — so a forecast " +
+      "can be scored against what it said at the time, not only what it says now.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 6),
+    },
+    variables: [
+      {
+        key: "actual_mw",
+        label: "Actual",
+        unit: "MW",
+        availability: "live",
+        description:
+          "Metered output for the hour. Empty for hours that have not " +
+          "happened; slightly negative for solar at night, which is the plants' own load.",
+        mock: { base: 9_000, swing: 7_000, noise: 500, floor: 0 },
+      },
+      {
+        key: "forecast_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "MISO's forecast for the hour, as of this vintage.",
+        mock: { base: 9_500, swing: 7_000, noise: 200, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.miso.nai",
+    path: ["Energy", "Grid", "Net interchange"],
+    name: "MISO net actual interchange",
+    short: "NAI",
+    dataset: "miso-net-interchange",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: [],
+    },
+    blurb:
+      "What is actually flowing across MISO's borders every five minutes, net. " +
+      "Negative is a net import. A rolling day at the source; the rest is collected.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 6),
+    },
+    variables: [
+      {
+        key: "nai_mw",
+        label: "Net interchange",
+        unit: "MW",
+        availability: "live",
+        description: "Net actual interchange; negative is a net import into MISO.",
+        mock: { base: -1_500, swing: 1_800, noise: 200 },
+      },
+    ],
+  },
+  {
+    id: "energy.miso.nsi",
+    path: ["Energy", "Grid", "Scheduled interchange"],
+    name: "MISO scheduled interchange",
+    short: "NSI",
+    dataset: "miso-scheduled-interchange",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 10,
+      label: "counterparties",
+      sample: ["PJM", "SWPP", "TVA"],
+    },
+    entityKey: "counterparty",
+    // The MISO row is the total of the other nine; stacking it on them
+    // counts everything twice.
+    entityOmit: ["MISO"],
+    blurb:
+      "Scheduled interchange with each neighbouring balancing authority every " +
+      "five minutes — PJM, SPP, TVA, AECI, Ontario, Manitoba and the rest — plus " +
+      "the MISO total. Negative is a net import.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 6),
+    },
+    variables: [
+      {
+        key: "nsi_mw",
+        label: "Scheduled",
+        unit: "MW",
+        availability: "live",
+        description: "Net scheduled interchange with the counterparty; negative is an import.",
+        mock: { base: -800, swing: 1_500, noise: 150 },
+      },
+    ],
+  },
   {
     id: "weather.observations.surface",
     path: ["Weather", "Observations", "Surface"],
@@ -2100,12 +2462,38 @@ export function domainOf(schema: Schema): string {
  * domain declares `sourceTz` and wins.
  */
 export function sourceTzOf(schema: Schema): string {
-  return (
-    schema.sourceTz ??
-    (domainOf(schema) === "Energy"
-      ? "America/Chicago"
-      : "UTC")
-  );
+  if (schema.sourceTz) return schema.sourceTz;
+  if (domainOf(schema) !== "Energy") return "UTC";
+  // MISO runs its markets on Eastern Standard Time all year, never EDT: a
+  // daylight-saving zone would read its labels an hour wrong from March to
+  // November. "EST" is the IANA fixed-offset zone, not an abbreviation.
+  return isoOf(schema) === "MISO" ? "EST" : "America/Chicago";
+}
+
+/**
+ * The grid operator behind an Energy stream, or null outside Energy.
+ *
+ * Off the collector slug's prefix unless the stream says otherwise — the
+ * rule `status.py` uses for the collectors page, so the two cannot disagree
+ * about which ISO a feed belongs to.
+ */
+const ISO_BY_PREFIX: Record<string, string> = { ercot: "ERCOT", miso: "MISO" };
+
+export function isoOf(schema: Schema): string | null {
+  if (schema.iso) return schema.iso;
+  const prefix = schema.dataset?.split("-", 1)[0] ?? "";
+  return ISO_BY_PREFIX[prefix] ?? null;
+}
+
+/** Grid operators inside one domain, in catalogue order. Empty for Weather. */
+export function isos(domain?: string): string[] {
+  return [
+    ...new Set(
+      SCHEMAS.filter((s) => !domain || domainOf(s) === domain)
+        .map(isoOf)
+        .filter((i): i is string => i !== null),
+    ),
+  ];
 }
 
 export function categoryOf(schema: Schema): string {

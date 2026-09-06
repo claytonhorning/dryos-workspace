@@ -25,6 +25,8 @@ import {
   domains,
   entityCountLabel,
   entityRef,
+  isoOf,
+  isos,
   streamRef,
 } from "@/lib/workspace/catalog";
 import { entityNote } from "@/lib/workspace/entityNotes";
@@ -50,7 +52,49 @@ import { entityNote } from "@/lib/workspace/entityNotes";
 const ALL = "All";
 
 /** The domain select's last option: every domain at once. */
-const EVERYTHING = "all";
+export const EVERYTHING = "all";
+
+/** A domain name the catalogue has, or the blend. */
+export function knownDomain(d?: string): d is string {
+  return d === EVERYTHING || (d !== undefined && domains().includes(d));
+}
+
+/** What the explorer opens on: the workspace's subject if it has one. */
+export function defaultDomain(initial?: string): string {
+  return knownDomain(initial) ? initial : (domains()[0] ?? "Energy");
+}
+
+/**
+ * The domain select — Energy, Weather, Everything. One component so the tab
+ * row above the panel and the explorer's own fallback draw the same control.
+ */
+export function DomainSelect({
+  value,
+  onChange,
+  size = "md",
+  align = "left",
+}: {
+  value: string;
+  onChange: (domain: string) => void;
+  size?: "md" | "sm";
+  align?: "left" | "right";
+}) {
+  const all = useMemo(() => domains(), []);
+  return (
+    <Select
+      value={value}
+      onChange={onChange}
+      options={[
+        ...all.map((d) => ({ value: d, label: d })),
+        { value: EVERYTHING, label: "Everything" },
+      ]}
+      aria-label="Domain"
+      size={size}
+      align={align}
+      className="shrink-0"
+    />
+  );
+}
 
 export function DataExplorer({
   selected,
@@ -58,8 +102,19 @@ export function DataExplorer({
   onClear,
   onNext,
   initialDomain,
+  domain: controlled,
+  onDomainChange,
 }: {
   selected: DataRef[];
+  /**
+   * The domain, when the parent owns it. The build panel's tab row carries
+   * the select — it is a setting about the whole panel, not about the search
+   * under it — and hands the value down; the explorer then draws no domain
+   * control of its own. Absent, the explorer keeps one, for the places that
+   * mount it with no tab row above (the tile editor's data stage).
+   */
+  domain?: string;
+  onDomainChange?: (domain: string) => void;
   /**
    * The workspace's subject, if it has one — a domain name or `"all"`. The
    * explorer opens on it and then belongs to the reader; it arrives after
@@ -79,20 +134,21 @@ export function DataExplorer({
    */
   onNext?: () => void;
 }) {
-  const all = useMemo(() => domains(), []);
-  const known = (d?: string) => d === EVERYTHING || (d !== undefined && all.includes(d));
-  const [domain, setDomain] = useState(
-    known(initialDomain) ? initialDomain! : (all[0] ?? "Energy"),
-  );
+  const [own, setOwn] = useState(() => defaultDomain(initialDomain));
+  const domain = controlled ?? own;
+  const setDomain = onDomainChange ?? setOwn;
   const [category, setCategory] = useState(ALL);
+  /** Grid operator within the domain, or ALL. Only Energy has any. */
+  const [iso, setIso] = useState(ALL);
   useEffect(() => {
-    if (known(initialDomain)) {
-      setDomain(initialDomain!);
-      setCategory(ALL);
-    }
-    // `all` is the catalogue, fixed for the life of the page.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialDomain]);
+    if (controlled === undefined && knownDomain(initialDomain)) setOwn(initialDomain!);
+  }, [initialDomain, controlled]);
+  // A new domain is a new question: the chip and the operator start over,
+  // whichever side of the panel changed it.
+  useEffect(() => {
+    setCategory(ALL);
+    setIso(ALL);
+  }, [domain]);
   const everything = domain === EVERYTHING;
   const [query, setQuery] = useState("");
   /** The set being read at level two, or null for the catalogue. */
@@ -101,6 +157,12 @@ export function DataExplorer({
   const refs = useMemo(() => catalogRefs(), []);
   const cats = useMemo(
     () => [ALL, ...categories(everything ? undefined : domain)],
+    [domain, everything],
+  );
+  // Which grid operators the domain has. Weather has none, and the blend
+  // offers none either: an ISO is a way of narrowing Energy, not the world.
+  const operators = useMemo(
+    () => (everything ? [] : isos(domain)),
     [domain, everything],
   );
 
@@ -125,6 +187,7 @@ export function DataExplorer({
     for (const s of SCHEMAS) {
       if (
         (!everything && domainOf(s) !== domain) ||
+        (iso !== ALL && isoOf(s) !== iso) ||
         (category !== ALL && categoryOf(s) !== category) ||
         (q &&
           !s.name.toLowerCase().includes(q) &&
@@ -153,7 +216,7 @@ export function DataExplorer({
     return [...bySection.entries()].map(
       ([heading, entries]) => ({ heading, entries }),
     );
-  }, [refs, domain, everything, category, query]);
+  }, [refs, domain, everything, iso, category, query]);
 
   const shown = groups.length;
 
@@ -200,10 +263,17 @@ export function DataExplorer({
       */}
       <div className="flex flex-col gap-2 border-b border-line px-2.5 py-2">
         {/*
-          Search and domain on one line: both narrow what is on screen, and the
-          domain is the coarser of the two — the subject you work in, chosen
-          once, so it stays a select rather than becoming another chip.
+          Three rows, coarse to fine. The domain first and alone: it is the
+          subject you work in, chosen once, and it decides what the two rows
+          under it can offer. Then search beside the grid operator, which is
+          where the domain was — both narrow what is on screen, and inside
+          Energy the operator is the coarser of the two. Then the chips.
         */}
+        {controlled === undefined && (
+          <div className="flex">
+            <DomainSelect value={domain} onChange={setDomain} />
+          </div>
+        )}
         <div className="flex items-stretch gap-1.5">
           <input
             value={query}
@@ -211,20 +281,27 @@ export function DataExplorer({
             placeholder="Search data…"
             className="w-full min-w-0 rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
           />
-          <Select
-            value={domain}
-            onChange={(d) => {
-              setDomain(d);
-              setCategory(ALL);
-            }}
-            options={[
-              ...all.map((d) => ({ value: d, label: d })),
-              { value: EVERYTHING, label: "Everything" },
-            ]}
-            aria-label="Domain"
-            align="right"
-            className="shrink-0"
-          />
+          {/*
+            The operator only exists once a domain that has any is chosen —
+            offered on Weather it would be a select with one answer, and on
+            the blend it would narrow the weather to nothing.
+          */}
+          {operators.length > 0 && (
+            <Select
+              value={iso}
+              onChange={(i) => {
+                setIso(i);
+                setCategory(ALL);
+              }}
+              options={[
+                { value: ALL, label: "All ISOs" },
+                ...operators.map((i) => ({ value: i, label: i })),
+              ]}
+              aria-label="Grid operator"
+              align="right"
+              className="shrink-0"
+            />
+          )}
         </div>
         <div className="dr-scroll flex gap-1 overflow-x-auto">
           {cats.map((c) => (
@@ -509,6 +586,8 @@ function SetView({
   /** The fetch has delivered — before that, an empty list means "still
    *  looking", not "nothing matches". */
   const [settled, setSettled] = useState(false);
+  /** Why the entity list could not be read, or null. Shown in place of it. */
+  const [failed, setFailed] = useState<string | null>(null);
   /**
    * Matches from past the cap, and the query they answer. Only a stream too
    * big to hold whole ever has any; they land underneath, labelled, without
@@ -536,10 +615,15 @@ function SetView({
         const json = await res.json();
         if (!live) return;
         if (!res.ok) {
+          // Say so. Rendered as an empty set, an API that does not know the
+          // dataset reads as a stream with nothing in it — a 404 dressed as
+          // "Nothing matches".
+          setFailed(json.error ?? `HTTP ${res.status}`);
           setAll([]);
           setSettled(true);
           return;
         }
+        setFailed(null);
         if (json.facets) {
           setFacets(json.facets);
           // Open on the smallest readable tier — the hubs, not an
@@ -558,6 +642,7 @@ function SetView({
         setSettled(true);
       } catch {
         if (!live) return;
+        setFailed("The delivery API is not reachable.");
         setAll([]);
         setSettled(true);
       }
@@ -787,13 +872,19 @@ function SetView({
           </p>
         ) : (
           <>
-            {here.length === 0 &&
+            {failed ? (
+              <p className="px-1 py-1.5 text-[11.5px] text-warn">
+                Couldn&rsquo;t list the entities: {failed}
+              </p>
+            ) : (
+              here.length === 0 &&
               elsewhere.length === 0 &&
               !farBusy && (
                 <p className="px-1 py-1.5 text-[11.5px] text-faint">
-                  Nothing matches “{q}”.
+                  {q ? <>Nothing matches “{q}”.</> : "Nothing collected yet."}
                 </p>
-              )}
+              )
+            )}
 
             {here.map((row) => (
               <EntityButton
@@ -866,59 +957,66 @@ function EntityButton({
     <button
       onClick={() => onToggle(ref)}
       className={cx(
-        "flex w-full flex-col gap-0.5 rounded px-1.5 py-1.5 text-left transition-colors",
+        "flex w-full flex-col gap-0.5 rounded px-1.5 py-1 text-left transition-colors",
         picked ? "bg-accent-dim" : "hover:bg-surface-2",
       )}
     >
+      {/*
+        One line per entity: the name and its tier on the left, what is on
+        offer on the right. Stacked, the count and the freshness took a
+        second line under every row and the right half of the panel held
+        nothing, so a set of thousands showed a dozen at a time. The note,
+        where there is one, is the only thing that earns a second line.
+      */}
       <span className="flex w-full items-baseline gap-2">
         <span
           className={cx(
-            "font-mono text-[12px]",
+            "shrink-0 font-mono text-[12px]",
             picked ? "text-accent" : "text-ink",
           )}
         >
           {row.node}
         </span>
         {row.nodeType && (
-          <span className="text-[10px] text-faint">
+          <span className="min-w-0 truncate text-[10px] text-faint">
             {row.nodeType}
           </span>
         )}
+        {/*
+          What you are actually being offered: how much of it there is, and
+          whether it is still coming. "obs" said neither — it was a count with
+          no noun and no time attached to it.
+        */}
+        <span
+          title={
+            row.firstSeen
+              ? `${row.observations.toLocaleString()} readings from ${new Date(
+                  row.firstSeen,
+                ).toLocaleString()} to ${new Date(row.lastSeen ?? row.firstSeen).toLocaleString()}`
+              : undefined
+          }
+          className="ml-auto flex shrink-0 items-baseline gap-1.5 whitespace-nowrap font-mono text-[9.5px] text-faint"
+        >
+          <span>
+            {row.observations.toLocaleString()} readings
+          </span>
+          {fresh && (
+            <>
+              <span className="text-line-strong">·</span>
+              <span
+                className={cx(fresh.stale && "text-warn")}
+              >
+                last collected {fresh.short}
+              </span>
+            </>
+          )}
+        </span>
       </span>
       {note && (
         <span className="text-[11px] leading-snug text-muted">
           {note}
         </span>
       )}
-      {/*
-        What you are actually being offered: how much of it there is, and
-        whether it is still coming. "obs" said neither — it was a count with no
-        noun and no time attached to it.
-      */}
-      <span
-        title={
-          row.firstSeen
-            ? `${row.observations.toLocaleString()} readings from ${new Date(
-                row.firstSeen,
-              ).toLocaleString()} to ${new Date(row.lastSeen ?? row.firstSeen).toLocaleString()}`
-            : undefined
-        }
-        className="flex w-full items-baseline gap-1.5 font-mono text-[9.5px] text-faint"
-      >
-        <span>
-          {row.observations.toLocaleString()} readings
-        </span>
-        {fresh && (
-          <>
-            <span className="text-line-strong">·</span>
-            <span
-              className={cx(fresh.stale && "text-warn")}
-            >
-              last collected {fresh.short}
-            </span>
-          </>
-        )}
-      </span>
     </button>
   );
 }

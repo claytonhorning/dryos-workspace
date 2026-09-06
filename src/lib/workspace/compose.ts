@@ -638,7 +638,9 @@ function askPayload(index, target, x, y) {
 // \`sub\` is the entity beside the title — "HB_NORTH" after "RT · LMP" — in
 // the header's quieter voice, so a ticker's tile carries its name once and
 // the number gets the rest of the box.
-function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, minW, sourceTz, headerAsOf, children }) {
+// \`expand\` off hides the ⤢ full-screen control: a ticker is one number, and
+// a number that already fills its tile has nothing to gain from the screen.
+function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, minW, sourceTz, headerAsOf, expand, children }) {
   const MIN_H = minH || 120;
   const MIN_W = minW || 2;
   const box = useRef(null);
@@ -988,14 +990,18 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
           ⠿
         </span>
         )}
-        {/* Title, stream and unit flow as one group: beside each other while
-            the row has room, and on a tile too narrow for that the stream
-            drops under the entity rather than being cut short. The group
-            wraps; the words inside it never do. */}
-        <div style={{ alignItems: "baseline", columnGap: 8, display: "flex", flexWrap: "wrap", minWidth: 0, rowGap: 2 }}>
-          <h2 style={{ color: "var(--ink)", fontSize: narrow ? 12 : 13, fontWeight: 600, margin: 0, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</h2>
-          {sub && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".08em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{sub}</span>}
-          {unit && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, whiteSpace: "nowrap" }}>{unit}</span>}
+        {/* Title, stream and unit flow as one group. Only the one-column
+            form wraps, dropping the stream under the entity; everywhere
+            else the row stays one line and the stream ellipsizes first, the
+            entity only once it is alone and still too long. A header that
+            wrapped whenever the row ran a few pixels short cost the tile a
+            line of height, and on a ticker the number is sized to the box
+            left over — two tickers of the same size drew two sizes of
+            number, the one with the longer name smaller. */}
+        <div style={{ alignItems: "baseline", columnGap: 8, display: "flex", flexWrap: narrow ? "wrap" : "nowrap", minWidth: 0, rowGap: 2 }}>
+          <h2 style={{ color: "var(--ink)", flexShrink: narrow ? 1 : 0, fontSize: narrow ? 12 : 13, fontWeight: 600, margin: 0, maxWidth: "100%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</h2>
+          {sub && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".08em", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textTransform: "uppercase", whiteSpace: "nowrap" }}>{sub}</span>}
+          {unit && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{unit}</span>}
           {/* In the info blue rather than the accent: the accent already
               means "new" on this screen, and amber means "late" in the
               feeds menu. This is neither — it is when. */}
@@ -1035,6 +1041,7 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
               : {}),
           }}
         >
+        {expand !== false && (
         <button
           onClick={() => setFull((v) => !v)}
           title={full ? "Back to the dashboard (Esc)" : "Fill the screen"}
@@ -1051,6 +1058,7 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
         >
           {full ? "✕" : "⤢"}
         </button>
+        )}
         {/*
           No ⚙. The tile is its own button while the page is being edited —
           clicking anywhere on it opens its settings — so a control that meant
