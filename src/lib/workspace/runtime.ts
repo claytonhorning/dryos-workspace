@@ -347,6 +347,23 @@ body {
   font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased;
 }
 #root { min-height: 100%; padding: 16px; }
+/* The scrollbar is drawn classic, not as the overlay macOS hides until it is
+   touched: a screen taller than the window has to say so at rest, and the
+   default overflow (auto) is what keeps it off a screen that fits. Styling
+   the -webkit- pseudo is what opts out of the overlay; Chrome drops those
+   rules the moment scrollbar-width or scrollbar-color is set on the same
+   element, so the standard properties are fenced to browsers without the
+   pseudo (Firefox), where they are the only styling there is. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--faint); background-clip: padding-box;
+  border: 3px solid transparent; border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--ink); }
+@supports not selector(::-webkit-scrollbar) {
+  html { scrollbar-width: thin; scrollbar-color: var(--faint) transparent; }
+}
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { text-align:left; padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
 th { font-family: var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); font-weight:400; }
@@ -555,7 +572,12 @@ export function buildDocument(
 
   // The document's own gutter goes with the tile's: naked, the widget is meant
   // to reach the edges of the pane it is framed in.
-  const nakedCss = naked ? "#root{padding:0;min-height:0}" : "";
+  // A bare frame is looked at, never scrolled — a thumbnail, a preview, the
+  // tile being carried — so the document scrollbar the launched screen wears
+  // is hidden there rather than drawn across a postcard.
+  const nakedCss =
+    (naked ? "#root{padding:0;min-height:0}" : "") +
+    (opts?.bare || naked ? "html{overflow:hidden}" : "");
 
   return `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}${nakedCss}</style></head><body><div id="root"></div>${bare}<script>${THEME_SHIM}</script><script>${shim}</script>${grant}<script src="${src}"></script></body></html>`;
 }
