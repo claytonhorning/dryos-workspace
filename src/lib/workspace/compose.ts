@@ -1775,9 +1775,12 @@ export default function App() {
     // Deep enough for everything on it, and never shallower than the frame:
     // the canvas is the drop target, so ground you can see but cannot drop on
     // is ground the arrangement does not have. The extra strip past the last
-    // tile is what a page grows into.
+    // tile is what a page grows into — and it exists only while editing.
+    // Launched, nothing is dropped and nothing is resized, so the strip was
+    // 120px of overflow: a tile ending near the fold put a scrollbar on a
+    // screen with nothing below it.
     `      style={{`,
-    `        height: bottom + (bare ? 0 : 120),`,
+    `        height: bottom + (edit && !bare ? 120 : 0),`,
     `        minHeight: bare ? undefined : "calc(100vh - 32px)",`,
     `        position: "relative",`,
     `        width: "100%",`,
