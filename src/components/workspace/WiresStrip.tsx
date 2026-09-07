@@ -14,12 +14,18 @@ import {
   COMPONENTS,
   DEFAULT_LAYOUT,
   GRID,
+  componentDef,
   emitsPicks,
   followable,
+  withDefaults,
   type ComponentKind,
   type ComponentSpec,
 } from "@/lib/workspace/components";
-import type { DataRef } from "@/lib/workspace/catalog";
+import {
+  schemaById,
+  streamRef,
+  type DataRef,
+} from "@/lib/workspace/catalog";
 import { SERIES_PALETTE } from "@/lib/workspace/palette";
 import { useTheme } from "@/lib/useTheme";
 import {
@@ -265,6 +271,7 @@ export function WiresStrip({
         onConnect={onConnect}
         staged={staged}
         setStaged={setStaged}
+        nextId={() => `d${++seq.current}`}
         drafting={drafting}
         setDrafting={setDrafting}
         pick={pick}
@@ -315,7 +322,6 @@ function itemName(m: {
 const GLYPH: Partial<Record<ComponentKind, string>> = {
   chart: "∿",
   scatter: "⁘",
-  distribution: "▲",
   bar: "▮",
   heatmap: "▩",
   ticker: "●",
@@ -397,10 +403,14 @@ const groupData = (g: WireGroup) =>
  * A new group starts from **New wired group**, which arms the boundary: the
  * whole strip lights, and running previews dropped anywhere on it join the
  * draft in the order they land. Every chart and ticker follows the first
- * source in it — a map, or a search over the stream's own names
- * — computed, not stored, so reordering re-derives it rather than leaving a
- * stale index behind. Right is the **widget**: the group named as a list, and
- * the only thing in the pane that can be dragged onto the screen.
+ * source in it — computed, not stored, so reordering re-derives it rather
+ * than leaving a stale index behind. **The source is set in the draft**: a
+ * map dropped or marked in counts, and otherwise the draft offers the two
+ * kinds of source over the stream its members read — a map, or a search over
+ * the stream's own names — and adds the one chosen at the top of the stack.
+ * The search exists only this way (`sourceOnly`): alone it is a box nothing
+ * hears. Right is the **widget**: the group named as a list, and the only
+ * thing in the pane that can be dragged onto the screen.
  *
  * **There is no Connect control.** Two selects and a button asked somebody to
  * name two tiles by number and then assert a relationship between them; a
@@ -411,6 +421,7 @@ function WiresPane({
   onConnect,
   staged,
   setStaged,
+  nextId,
   drafting,
   setDrafting,
   pick,
@@ -428,6 +439,8 @@ function WiresPane({
   ) => Promise<void> | void;
   staged: StagedItem[];
   setStaged: Dispatch<SetStateAction<StagedItem[]>>;
+  /** A fresh id for a member the pane adds itself — the source it sets. */
+  nextId: () => string;
   /** A new group is being assembled. */
   drafting: boolean;
   setDrafting: Dispatch<SetStateAction<boolean>>;
@@ -508,13 +521,48 @@ function WiresPane({
    * of the stream's own names.
    */
   const firstSource = open ? open.parts.findIndex(emitsPicks) : -1;
-  /** Whether every part reads the same stream — what makes a search sensible. */
+  /**
+   * The one stream every part reads, if there is one. A source drives its
+   * followers by naming an entity, and a name out of one stream means
+   * nothing to a tile reading another — so this is what a source can be
+   * offered over, and its absence is why one cannot.
+   */
+  const streams = new Set(
+    (open?.parts ?? []).flatMap((p) =>
+      (p.refs ?? []).map((r) => r.schemaId),
+    ),
+  );
   const oneStream =
-    new Set(
-      (open?.parts ?? []).flatMap((p) =>
-        (p.refs ?? []).map((r) => r.schemaId),
-      ),
-    ).size === 1;
+    streams.size === 1 ? schemaById([...streams][0]) : undefined;
+  /**
+   * The two kinds of source, each as the component it would add over that
+   * stream. The map answers to its own `accepts` — a stream nothing places
+   * cannot be a map, and the button says so in the map's words.
+   */
+  const sources = (["map", "picker"] as const).map((kind) => {
+    const def = componentDef(kind)!;
+    const refs = oneStream ? [streamRef(oneStream)] : [];
+    const verdict = oneStream
+      ? def.accepts(refs)
+      : { ok: false, why: "Everything in the group has to read one stream." };
+    return { kind, def, refs, verdict };
+  });
+
+  /** Put the chosen source at the top of the draft; the rule wires the rest. */
+  function setSource(kind: "map" | "picker") {
+    const src = sources.find((x) => x.kind === kind);
+    if (!src || !src.verdict.ok) return;
+    setStaged((prev) => [
+      {
+        id: nextId(),
+        kind,
+        options: withDefaults(src.def),
+        refs: src.refs,
+        layout: { ...DEFAULT_LAYOUT[kind] },
+      },
+      ...prev,
+    ]);
+  }
   const wiring = (open?.parts ?? []).map((p, i) => {
     if (open?.origin === "wire")
       return i === 0 ? undefined : 0;
@@ -617,12 +665,18 @@ function WiresPane({
     if (!open || !onConnect || busy || !wireable) return;
     const src = open.parts[firstSource]?.slot;
     if (src === undefined) return;
+    // A source that already has followers is already a group with a color;
+    // a tile joining it wears that color, not the next one, or the map ends
+    // up bordered in one blue beside a chart in another.
+    const joined = wires.find((w) => w.wireSlots?.source === src);
+    const color =
+      joined?.colorSlot !== undefined ? String(joined.colorSlot) : nextSlot;
     setBusy(true);
     try {
       for (let i = 0; i < open.parts.length; i++) {
         const slot = open.parts[i].slot;
         if (wiring[i] === undefined || slot === undefined) continue;
-        await onConnect(slot, src, nextSlot);
+        await onConnect(slot, src, color);
       }
       // The wire now reads back out of the manifest as a real group, and the
       // draft that made it would only stand beside it saying "draft".
@@ -791,8 +845,9 @@ function WiresPane({
           <p className="px-0.5 text-[11px] leading-relaxed text-faint">
             Shift-click tiles on the screen, or drag a running preview
             anywhere onto this box. They stack in the order they arrive, and
-            every chart and ticker follows the first source in it — the map,
-            or a search over the stream&rsquo;s own names.
+            every chart and ticker follows the group&rsquo;s source — a map,
+            or a search over the stream&rsquo;s own names, set here once
+            there is something for it to drive.
           </p>
         ) : (
           <>
@@ -880,17 +935,39 @@ function WiresPane({
 
             {/*
               A group with nothing driving it is the one state the auto-wiring
-              cannot fix by itself, and the answer depends on the data: when
-              everything here reads one stream, a search over that stream's
-              names is a source the screen may not have room for as a map.
+              cannot fix by itself, so the draft asks: a map over the stream
+              the members read, or a search over its names. Either is added
+              at the top of the stack and the rule does the rest. A draft of
+              tiles already on the screen cannot take one — the source would
+              not exist yet, and nothing on the screen can follow a preview —
+              so that draft is told to mark a source instead.
             */}
             {open.origin === "draft" && firstSource === -1 && (
-              <p className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-[11px] leading-relaxed text-faint">
-                Nothing here drives the others yet.{" "}
-                {oneStream
-                  ? "Everything in this group reads one stream, so a Node search over it — or a map — will drive them all."
-                  : "A group needs a map or a Node search as its source."}
-              </p>
+              <div className="flex flex-col gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1.5">
+                <span className="text-[11px] leading-relaxed text-faint">
+                  {onScreen.length > 0
+                    ? "Nothing here drives the others. Shift-click a map on the screen to make it the source."
+                    : oneStream
+                      ? "Set the source — what the others follow:"
+                      : "Nothing here drives the others, and a source needs every member reading one stream."}
+                </span>
+                {onScreen.length === 0 && oneStream && (
+                  <span className="flex flex-wrap gap-1.5">
+                    {sources.map(({ kind, def, verdict }) => (
+                      <button
+                        key={kind}
+                        onClick={() => setSource(kind)}
+                        disabled={!verdict.ok}
+                        title={verdict.ok ? def.blurb : verdict.why}
+                        className="flex items-center gap-1.5 rounded-md border border-accent-line bg-accent-dim px-2 py-1 font-mono text-[10px] tracking-[0.08em] text-accent uppercase transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-faint"
+                      >
+                        <span aria-hidden="true">{GLYPH[kind]}</span>
+                        {def.name}
+                      </button>
+                    ))}
+                  </span>
+                )}
+              </div>
             )}
 
             {open.origin === "draft" ? (

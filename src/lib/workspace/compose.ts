@@ -273,6 +273,66 @@ function freshDot(fresh, ...indexes) {
 }
 
 /**
+ * While the newest point is ringed, show its readout too — the same hover
+ * the reader would get by pointing at it, at the point, for as long as the
+ * ring lasts — so a screen left on a wall says what just arrived and not only
+ * that something did.
+ *
+ * It is recharts's own hover, driven rather than imitated: a synthetic
+ * \`mousemove\` at the ring's position goes up to the chart wrapper, which
+ * reads \`clientX\`/\`clientY\` against its own rect like any real move, and a
+ * \`mouseout\` whose relatedTarget is outside the chart is what React turns
+ * into the wrapper's \`onMouseLeave\`. Nothing here knows the tooltip's index
+ * arithmetic, and a second tooltip drawn by hand would be a second thing to
+ * keep looking like the first.
+ *
+ * The ring is found in the DOM rather than handed over, and not on the first
+ * try: the rows reach recharts's store one render after the hook has them,
+ * so the point flashing with the new timestamp does not exist yet when this
+ * effect first runs. A few frames of looking is the whole of the wait.
+ *
+ * A pointer already on the tile wins, both ways: nothing is sent while the
+ * reader is hovering (they are reading something), and the trailing leave is
+ * skipped if they arrived during the flash — their own move has taken the
+ * tooltip over, and their own leave will end it. Only \`mousemove\` is sent,
+ * never \`mouseover\`, so the tile's hover chrome does not light for a pointer
+ * that is not there.
+ */
+function useFreshPeek(box, fresh) {
+  useEffect(() => {
+    if (!fresh.at.some((t) => t != null)) return;
+    const el = box.current;
+    if (!el || el.matches(":hover")) return;
+    let tries = 12, raf = 0, timer = 0, shown = false;
+    const wrap = () => el.querySelector(".recharts-wrapper");
+    const look = () => {
+      const ring = el.querySelector(".dr-fresh-ring");
+      const w = wrap();
+      if (ring && w) {
+        const r = ring.getBoundingClientRect();
+        w.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+        shown = true;
+        timer = setTimeout(leave, FRESH_MS);
+      } else if (--tries > 0) {
+        raf = requestAnimationFrame(look);
+      }
+    };
+    const leave = () => {
+      const w = wrap();
+      if (!shown || !w || el.matches(":hover")) return;
+      shown = false;
+      w.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+    };
+    look();
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      leave();
+    };
+  }, [fresh.seq]);
+}
+
+/**
  * Mapbox GL, loaded at runtime rather than bundled.
  *
  * The app runs in an opaque origin with no credentials, so the token is handed
@@ -415,11 +475,15 @@ function Clock() {
  * squeezed to a strip keeps its number and loses its "since last" line, then
  * its unit, rather than keeping everything at a size nothing can be read at.
  */
-function FitText({ children, tiers, min, max, floor, style }) {
+function FitText({ children, tiers, min, max, floor, wrap, style }) {
   const alts = tiers || [children];
   const box = useRef(null);
   const probes = useRef([]);
-  const [fit, setFit] = useState({ tier: 0, size: floor || 12 });
+  // \`tight\` is the floor having won: the sparsest tier still does not fit on
+  // one line at the smallest size worth drawing. With \`wrap\` the visible
+  // copy then folds into lines at the floor rather than running off the
+  // edge — a title clipped mid-word says less than one on two lines.
+  const [fit, setFit] = useState({ tier: 0, size: floor || 12, tight: false });
   useEffect(() => {
     const b = box.current;
     if (!b) return;
@@ -428,18 +492,39 @@ function FitText({ children, tiers, min, max, floor, style }) {
       if (!bw || !bh) return;
       let tier = alts.length - 1;
       let size = floor || 12;
+      let tight = false;
+      // The size a probe predicts, then confirmed at that size. Text is not
+      // linear in its font size: an optically sized face (the system font
+      // is one) sets a 12px line wider per pixel than a 100px one, by 13%
+      // measured, so a size read straight off the probe overflowed at
+      // exactly the small sizes a short tile asks for. Each pass re-measures
+      // the probe at the candidate and scales down by what it finds; two
+      // passes have always landed, three is the cap.
+      const fitted = (p) => {
+        let s = Math.floor(100 * Math.min(bw / p.offsetWidth, bh / p.offsetHeight));
+        for (let pass = 0; pass < 3 && s > 0; pass++) {
+          p.style.fontSize = s + "px";
+          const pw = p.offsetWidth, ph = p.offsetHeight;
+          const r = Math.min(bw / pw, bh / ph);
+          if (r >= 1) break;
+          s = Math.floor(s * r);
+        }
+        p.style.fontSize = "100px";
+        return s;
+      };
       for (let i = 0; i < alts.length; i++) {
         const p = probes.current[i];
         if (!p || !p.offsetWidth || !p.offsetHeight) continue;
-        const s = Math.floor(100 * Math.min(bw / p.offsetWidth, bh / p.offsetHeight));
+        const s = fitted(p);
         const need = Array.isArray(min) ? (min[i] ?? min[min.length - 1] ?? 12) : (min || 12);
         if (s >= need || i === alts.length - 1) {
           tier = i;
           size = Math.max(floor || 12, Math.min(max || 400, s));
+          tight = s < (floor || 12);
           break;
         }
       }
-      setFit((f) => (f.tier === tier && f.size === size ? f : { tier, size }));
+      setFit((f) => (f.tier === tier && f.size === size && f.tight === tight ? f : { tier, size, tight }));
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -454,7 +539,7 @@ function FitText({ children, tiers, min, max, floor, style }) {
           {alt}
         </div>
       ))}
-      <div style={{ fontSize: fit.size, lineHeight: 1, whiteSpace: "nowrap" }}>{alts[Math.min(fit.tier, alts.length - 1)]}</div>
+      <div style={{ fontSize: fit.size, lineHeight: wrap && fit.tight ? 1.1 : 1, maxHeight: "100%", overflow: "hidden", whiteSpace: wrap && fit.tight ? "normal" : "nowrap" }}>{alts[Math.min(fit.tier, alts.length - 1)]}</div>
     </div>
   );
 }
@@ -640,7 +725,7 @@ function askPayload(index, target, x, y) {
 // the number gets the rest of the box.
 // \`expand\` off hides the ⤢ full-screen control: a ticker is one number, and
 // a number that already fills its tile has nothing to gain from the screen.
-function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, minW, sourceTz, headerAsOf, expand, children }) {
+function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, minW, sourceTz, headerAsOf, expand, plain, children }) {
   const MIN_H = minH || 120;
   const MIN_W = minW || 2;
   const box = useRef(null);
@@ -697,9 +782,17 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
      at, and a single click that opens a window is a window that opens while
      somebody is only pointing. */
   const askable =
-    !bare && !edit && typeof window !== "undefined" && window.parent !== window;
+    !bare && !edit && !plain && typeof window !== "undefined" && window.parent !== window;
   /** Where the pointer went down, so a drag is never mistaken for a click. */
   const from = useRef(null);
+  /* Three things a click here is not: a press of the tile's own chrome, a
+     control inside the component, or the tail of a drag — a map panned by
+     six pixels ends in a click event like any other. */
+  const isTileClick = (e) => {
+    if (e.target.closest && e.target.closest("button, a, input, select, textarea, [data-nopick]")) return false;
+    const d = from.current;
+    return !(d && Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 6);
+  };
 
   // What this tile is called, for the ask payload of any tile on the screen.
   useEffect(() => {
@@ -857,13 +950,23 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
         zIndex: 50,
       }
     : {
-        background: "var(--surface)",
+        // Plain, the tile is its words and nothing else: no ground, and a
+        // border only while editing or under the pointer — dashed, so it
+        // reads as a place on the canvas rather than a card — kept at one
+        // pixel otherwise so nothing shifts when the mode does. Launched,
+        // the hover outline is what says the words can be picked up, the
+        // same as any tile.
+        background: plain ? "transparent" : "var(--surface)",
         // A preview is one component inside a box that already has a border;
         // drawing the tile's own inside it reads as a frame around a frame.
         border: bare || naked
           ? "none"
-          : "1px solid " +
-            (dragging || picked === index || inGroup
+          : plain && !edit && !dragging && !hover
+            ? "1px solid transparent"
+            : (plain && !(dragging || picked === index || inGroup) ? "1px dashed " : "1px solid ") +
+            (inGroup
+              ? "var(--info)"
+              : dragging || picked === index
               ? "var(--accent)"
               : over
                 ? "var(--info)"
@@ -874,10 +977,13 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
         // The picked tile is the one the panel is talking about, so it is
         // stated twice — a second ring, because one hairline of accent is the
         // same weight as the hover it has to be told apart from.
-        // A tile marked for a group wears the same ring, only solid: it is
-        // one of several, and a dim halo reads as "the one".
+        // A tile marked for a group wears a solid ring in the info blue, not
+        // the accent: the accent is the tile the editor is open on, and a
+        // second yellow ring read as a second tile being edited. Blue is
+        // the frame's other voice — the drop target's border, the as-of
+        // clock — and it says "chosen" without saying "open".
         boxShadow: inGroup
-          ? "0 0 0 2px var(--accent)"
+          ? "0 0 0 2px var(--info)"
           : picked === index
             ? "0 0 0 2px var(--accent-dim)"
             : "none",
@@ -904,18 +1010,22 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
       // answer for a click on the tile next door.
       onMouseLeave={() => { setHover(false); window.__dryosHover = null; }}
       onPointerDown={(e) => { from.current = { x: e.clientX, y: e.clientY }; }}
-      onClick={(e) => {
-        if (!selectable) return;
-        /* Three things a click here is not: a press of the tile's own chrome,
-           a control inside the component, or the tail of a drag — a map panned
-           by six pixels ends in a click event like any other. */
-        if (e.target.closest && e.target.closest("button, a, input, select, textarea, [data-nopick]")) return;
-        const d = from.current;
-        if (d && Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 6) return;
-        // Shift is "this one too": the host adds the tile to the wired group
-        // being built instead of opening its settings.
+      /* Shift is "this one too": the host adds the tile to the wired group
+         being built instead of opening its settings. It is read off the
+         pointer's release rather than the click, because a shift-press on a
+         map is Mapbox's box-zoom and no click event follows it at all — the
+         one tile a group is usually built around was the one that could not
+         be marked by its body. */
+      onPointerUp={(e) => {
+        if (!selectable || !e.shiftKey || !isTileClick(e)) return;
         window.dispatchEvent(
-          new CustomEvent("dryos:tileconfigure", { detail: { index, shift: e.shiftKey } }),
+          new CustomEvent("dryos:tileconfigure", { detail: { index, shift: true } }),
+        );
+      }}
+      onClick={(e) => {
+        if (!selectable || e.shiftKey || !isTileClick(e)) return;
+        window.dispatchEvent(
+          new CustomEvent("dryos:tileconfigure", { detail: { index, shift: false } }),
         );
       }}
       onDoubleClick={(e) => {
@@ -975,9 +1085,28 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
           gap: 8,
           marginBottom: 8,
           userSelect: "none",
+          // Plain, the header is a strip floated over the top of the text,
+          // there on hover in either mode: the words are the tile, and a
+          // bar above them would be the card the shape exists to not be.
+          // It is still the whole width, so the handle is the same target
+          // it is anywhere — and launched, a title moves the way every
+          // other tile does.
+          ...(plain
+            ? {
+                left: 0,
+                margin: 0,
+                opacity: hover || dragging ? 1 : 0,
+                padding: "4px 8px",
+                position: "absolute",
+                right: 0,
+                top: 0,
+                transition: "opacity .12s",
+                zIndex: 2,
+              }
+            : {}),
         }}
       >
-        {!bare && !narrow && (
+        {!bare && (!narrow || plain) && (
         <span
           aria-hidden="true"
           style={{
@@ -998,6 +1127,7 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
             line of height, and on a ticker the number is sized to the box
             left over — two tickers of the same size drew two sizes of
             number, the one with the longer name smaller. */}
+        {!plain && (
         <div style={{ alignItems: "baseline", columnGap: 8, display: "flex", flexWrap: narrow ? "wrap" : "nowrap", minWidth: 0, rowGap: 2 }}>
           <h2 style={{ color: "var(--ink)", flexShrink: narrow ? 1 : 0, fontSize: narrow ? 12 : 13, fontWeight: 600, margin: 0, maxWidth: "100%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</h2>
           {sub && <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".08em", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textTransform: "uppercase", whiteSpace: "nowrap" }}>{sub}</span>}
@@ -1015,6 +1145,7 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
             </span>
           )}
         </div>
+        )}
         {loading && <span style={{ color: "var(--accent)", fontFamily: "var(--mono)", fontSize: 10 }}>loading…</span>}
         {/*
           On a one-column tile the two controls are wider than the name
@@ -1028,7 +1159,7 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
             display: "flex",
             gap: 4,
             marginLeft: "auto",
-            ...(narrow
+            ...(narrow && !plain
               ? {
                   background: "var(--surface)",
                   opacity: hover || full ? 1 : 0,
@@ -1132,6 +1263,9 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
             bottom: 2,
             color: dragging ? "var(--accent)" : "var(--line-strong)",
             cursor: "nwse-resize",
+            // On a plain tile the corner comes with the outline, on hover:
+            // a glyph beside words on an empty canvas is a stray mark.
+            opacity: plain && !hover && !dragging && !edit ? 0 : 1,
             fontSize: 11,
             lineHeight: 1,
             padding: 4,
@@ -1570,19 +1704,30 @@ export default function App() {
     means accent) and computed here because only the whole manifest knows
     which tile is somebody's source. Validated to an integer before it is
     written into TSX — anything else falls back to the accent.
+
+    A source and everything following it is one group and wears one color:
+    the first follower's, which is the slot the wires pane reads as the
+    group's and rewrites on every follower when its swatch is clicked. Taken
+    per receiver, a map with two receivers wired at different times wore
+    the last one's color and matched only one of its partners — a title in
+    one blue over a map and chart in another, reading as a heavier border
+    rather than a different pair.
   */
   const wireBorders: Record<number, string> = {};
+  const groupColor: Record<number, string> = {};
   manifest.forEach((spec, i) => {
     const f = Number(spec.options?.follow);
     if (!Number.isInteger(f) || f < 0 || !manifest[f])
       return;
-    const slot = Number(spec.options?.wireColor);
-    const color =
-      Number.isInteger(slot) && slot >= 1 && slot <= 8
-        ? `var(--s${slot})`
-        : "var(--accent)";
-    wireBorders[i] = color;
-    wireBorders[f] = color;
+    if (!groupColor[f]) {
+      const slot = Number(spec.options?.wireColor);
+      groupColor[f] =
+        Number.isInteger(slot) && slot >= 1 && slot <= 8
+          ? `var(--s${slot})`
+          : "var(--accent)";
+    }
+    wireBorders[i] = groupColor[f];
+    wireBorders[f] = groupColor[f];
   });
 
   return [

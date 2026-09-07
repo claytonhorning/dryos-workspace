@@ -3,15 +3,10 @@
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  DataExplorer,
-  DomainSelect,
   defaultDomain,
   knownDomain,
 } from "@/components/workspace/DataExplorer";
-import {
-  AvailabilityBadge,
-  SelectionStrip,
-} from "@/components/workspace/DataChip";
+import { AvailabilityBadge } from "@/components/workspace/DataChip";
 import { Runner } from "@/components/workspace/Runner";
 import { Button, cx } from "@/components/ui";
 import { ScreenSkeleton } from "@/components/Skeleton";
@@ -246,25 +241,16 @@ export default function AppPage() {
   const asideOpen = search.get("edit") === "1";
   const [panel, setPanel] = useState<PanelMode>("build");
   /**
-   * Data and Build are one panel taken in two steps: choose what, then choose
-   * how. Each step gets the whole column — split in half, neither had room —
-   * and each ends in the way on: the explorer's own footer, then the shelf.
+   * Bumped when a drop lands, on the canvas or in the wires tray. The build
+   * panel owns its own stages — shelf, data, preview — and reads this to go
+   * back to the shelf: a landed drop ends the build it was part of.
    */
-  const [stage, setStage] = useState<"data" | "build">("data");
-  /**
-   * The two ways into the build panel. **From data** is the explorer and
-   * then the shapes — choose what, then choose how. **Community** is what
-   * other people published, and it comes first in the reading order because
-   * a published component or group already carries its data: asking someone
-   * to pick a stream before they can see a shelf that ignores the pick is a
-   * question with no bearing on the answer.
-   */
-  const [shelf, setShelf] = useState<"data" | "community">("data");
+  const [builtTick, setBuiltTick] = useState(0);
   /**
    * The subject the panel is narrowed to. Lives here rather than in the
-   * explorer because the select sits in the panel's tab row and both shelves
-   * read it: the catalogue filters by it, and so does what is published. It
-   * opens on the workspace's own domain once that has been fetched.
+   * panel because the workspace's own domain arrives after the panel mounts,
+   * and both the shelf and the explorer read it: the catalogue filters by
+   * it, and so does what is published.
    */
   const [domain, setDomain] = useState<string>(() => defaultDomain());
   useEffect(() => {
@@ -509,8 +495,8 @@ export default function AppPage() {
               // see is one more thing to read and then dismiss.
               //
               // The panel goes back to the beginning: a landed drop ends the
-              // build it was part of, and the next thing starts from data.
-              setStage("data");
+              // build it was part of, and the next thing starts from the shelf.
+              setBuiltTick((n) => n + 1);
               break;
             case "failed":
             case "error":
@@ -753,6 +739,13 @@ export default function AppPage() {
             ? prev.filter((i) => i !== index)
             : [...prev, index],
         );
+        // A tile marked for a group is not the one being edited: if the
+        // editor happens to be open on it, it closes, so the tile wears one
+        // ring with one meaning rather than the edit ring under the mark.
+        if (replaceIndex === index) {
+          setReplaceIndex(null);
+          setEditing(null);
+        }
         return;
       }
       setReplaceIndex(index);
@@ -764,7 +757,7 @@ export default function AppPage() {
         name: spec.custom?.name,
       });
     },
-    [app],
+    [app, replaceIndex],
   );
 
   async function revert(revisionId: string) {
@@ -980,7 +973,7 @@ export default function AppPage() {
                 placedTick={placedTick}
                 manifest={app.manifest}
                 carrying={dragging}
-                onStaged={() => setStage("data")}
+                onStaged={() => setBuiltTick((n) => n + 1)}
                 marked={marked}
                 onMarkedChange={setMarked}
                 onConnect={async (t, from, color) => {
@@ -1226,120 +1219,23 @@ export default function AppPage() {
                   )}
 
                   {/*
-                    The panel's own tabs, above whichever stage is showing.
-                    An underline at the bottom of the row, the idiom the
-                    workspace nav uses for its pages.
+                    One panel, three stages, and the panel owns them: the
+                    shelf, the explorer for the shape chosen there, and the
+                    preview. The page only says what is selected and when a
+                    drop has landed.
                   */}
-                  <div className="flex shrink-0 items-stretch gap-3 border-b border-line px-1">
-                    {(
-                      [
-                        { id: "data", label: "From data" },
-                        { id: "community", label: "Community" },
-                      ] as const
-                    ).map((t) => {
-                      const on = shelf === t.id;
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => setShelf(t.id)}
-                          aria-pressed={on}
-                          className={cx(
-                            "-mb-px border-b-2 px-1 pt-1 pb-1.5 font-mono text-[10px] tracking-[0.14em] uppercase transition-colors",
-                            on
-                              ? "border-accent text-ink"
-                              : "border-transparent text-faint hover:text-ink",
-                          )}
-                        >
-                          {t.label}
-                        </button>
-                      );
-                    })}
-                    {/*
-                      The domain at the row's far end. It narrows both shelves,
-                      so it belongs to the row that switches between them —
-                      and it names itself, so it carries no label.
-                    */}
-                    <span className="flex-1" />
-                    <span className="flex items-center pb-1">
-                      <DomainSelect
-                        value={domain}
-                        onChange={setDomain}
-                        size="sm"
-                        align="right"
-                      />
-                    </span>
+                  <div className="min-h-0 flex-1">
+                    <BuildPanel
+                      refs={attached}
+                      onToggle={toggle}
+                      onClear={() => setAttached([])}
+                      onDragStateChange={beginDrag}
+                      manifest={app.manifest}
+                      domain={domain}
+                      onDomainChange={setDomain}
+                      resetTick={builtTick}
+                    />
                   </div>
-
-                  {shelf === "community" ? (
-                    /*
-                      Published components and wired groups, each with its
-                      own data. No explorer and no selection strip: the pick
-                      would change nothing here.
-                    */
-                    <div className="min-h-0 flex-1">
-                      <BuildPanel
-                        shelf="community"
-                        domain={domain}
-                        refs={attached}
-                        onDragStateChange={beginDrag}
-                        manifest={app.manifest}
-                      />
-                    </div>
-                  ) : stage === "data" ? (
-                    /*
-                      The explorer is the whole stage now. The bar that used to
-                      sit under it held the selection, the count and the way on
-                      — all three of which the panel was already showing one
-                      line further up, so it was furniture repeating what it
-                      framed. The chips moved to the top beside the heading and
-                      the button to the line that counts them.
-                    */
-                    <div className="min-h-0 flex-1">
-                      <DataExplorer
-                        domain={domain}
-                        onDomainChange={setDomain}
-                        selected={attached}
-                        onToggle={toggle}
-                        onClear={() => setAttached([])}
-                        onNext={() => setStage("build")}
-                      />
-                    </div>
-                  ) : (
-                    <>
-                      {/*
-                        Going forward used to take the selection off the screen:
-                        the chips lived in the explorer, and the step where you
-                        choose what to draw with them showed a count. The shapes
-                        on the shelf are offered or refused on the strength of
-                        this exact list, so it stays visible — one line, the same
-                        chips, removable, one step back at the left.
-                      */}
-                      <div className="flex shrink-0 flex-col gap-1.5 rounded-lg border border-line bg-surface px-3 py-2">
-                        <button
-                          onClick={() => setStage("data")}
-                          className="flex items-center gap-2 text-left text-[12px] text-muted transition-colors hover:text-ink"
-                        >
-                          ‹ Data
-                          <span className="font-mono text-[10px] text-faint">
-                            {attached.length} selected
-                          </span>
-                        </button>
-                        <SelectionStrip
-                          selected={attached}
-                          onRemove={toggle}
-                          onClear={() => setAttached([])}
-                        />
-                      </div>
-                      <div className="min-h-0 flex-1">
-                        <BuildPanel
-                          shelf="shapes"
-                          refs={attached}
-                          onDragStateChange={beginDrag}
-                          manifest={app.manifest}
-                        />
-                      </div>
-                    </>
-                  )}
                 </div>
               </>
             )}

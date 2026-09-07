@@ -21,6 +21,11 @@ import {
 } from "@/lib/workspace/components";
 import { type DataRef, domainOf, schemaById } from "@/lib/workspace/catalog";
 import {
+  DataExplorer,
+  DomainSelect,
+} from "@/components/workspace/DataExplorer";
+import { SelectionStrip } from "@/components/workspace/DataChip";
+import {
   communityComponents,
   communityGroups,
   type PublishedGroup,
@@ -32,16 +37,15 @@ import { SeriesStyles } from "@/components/workspace/SeriesStyles";
 /**
  * The shelf of things a screen can be built from, and the preview of one.
  *
- * It renders one of two shelves, chosen by the page. **Shapes** is the base
- * shapes, offered or refused on the strength of the explorer's selection —
- * the second step of building from data. **Community** is what was published
- * (`lib/workspace/community.ts`): single components and wired groups of them,
- * each bringing its own data and ignoring the selection entirely, which is
- * why the page offers it *before* the explorer rather than after it. A
- * published component previews and drags like a shape; a published group
- * opens as its members in stacking order, with the wiring written on the
- * rows, and drags as one drop the way a staged group does from the wires
- * strip. Your saved components are not on the shelf today.
+ * One shelf, the **Library**, in three sections: the base shapes, then what
+ * was published (`lib/workspace/community.ts`) — single components and wired
+ * groups of them. **The shape is chosen first and its data second.** A card
+ * on the shelf opens the explorer with the shape named above it, the
+ * explorer's Next answers to that shape's `accepts`, and the pane comes back
+ * as the real thing running on the selection. A published component or
+ * group brings its own data, so it skips the explorer and opens on its
+ * preview; so does a shape that reads no data at all. Your saved components
+ * are not on the shelf today.
  *
  * **A card is not draggable; the bar above the running preview is.** One
  * gesture used to mean two things: dragging a card placed the shape
@@ -60,9 +64,6 @@ import { SeriesStyles } from "@/components/workspace/SeriesStyles";
  * The sentence for the thing no shape covers is not here either: the chat
  * lives under the screen (`ChatDock`), because it is a request about the
  * dashboard rather than one more choice about a component.
- *
- * Every path reads the same selection from the explorer, so the data is chosen
- * once and the only remaining question is what to do with it.
  */
 export const DRAG_TYPE = "application/x-dryos-component";
 
@@ -133,7 +134,10 @@ export const GRAB_BAR = 22;
 export function previewLayout(kind: ComponentKind) {
   return {
     w: 12,
-    h: kind === "ticker" ? DEFAULT_LAYOUT.ticker.h : 272,
+    h:
+      kind === "ticker" || kind === "text"
+        ? DEFAULT_LAYOUT[kind].h
+        : 272,
   };
 }
 
@@ -182,8 +186,15 @@ export interface EditorStart {
 /** Which shelf a card came from. It decides how the preview addresses it. */
 type Shelf = "base" | "saved" | "community";
 
-/** Which of the two shelves the panel is showing. */
-export type ShelfTab = "shapes" | "community";
+/**
+ * What the shelf is called, in the heading and on every way back to it.
+ *
+ * Not "Shapes": the base shapes are one section of it, beside what other
+ * people published. Not "Components": that is the word for a tile on a
+ * page, and the shelf also holds groups of them. A library is the thing
+ * you take something from to build with, which is what this is.
+ */
+const SHELF = "Library";
 
 /**
  * The component running in the shelf's place.
@@ -205,25 +216,43 @@ interface Preview {
 
 export function BuildPanel({
   refs,
+  onToggle,
+  onClear,
   onDragStateChange,
   manifest,
-  shelf = "shapes",
   domain,
+  onDomainChange,
+  resetTick = 0,
 }: {
+  /** The explorer's selection: what a shape taken from the shelf is drawn on. */
   refs: DataRef[];
+  onToggle: (ref: DataRef) => void;
+  onClear: () => void;
   onDragStateChange: (payload: TrayPayload | null) => void;
   /** The page's manifest, so a landing group takes the next free wire color. */
   manifest?: ComponentSpec[];
-  /** Which shelf to show. The page decides, from its own tabs. */
-  shelf?: ShelfTab;
   /**
-   * The domain the panel's tab row is narrowed to, or `"all"`. A published
-   * component brings its own data, so the domain it belongs to is the domain
-   * of the streams it reads; the community shelf shows only those.
+   * The subject the panel is narrowed to, or `"all"`. The shelf and the
+   * explorer both read it: the catalogue filters by it, and so does what is
+   * published, since a published component belongs to the domain of the
+   * streams it reads. The page owns it, because the workspace's own subject
+   * arrives after the panel mounts.
    */
-  domain?: string;
+  domain: string;
+  onDomainChange: (domain: string) => void;
+  /**
+   * Bumped by the page when a drop lands. A landed drop ends the build it
+   * was part of, so the panel goes back to the shelf for the next one.
+   */
+  resetTick?: number;
 }) {
-  const tab = shelf;
+  /**
+   * Where in the build you are. The shelf is the beginning; `data` is the
+   * explorer, open because a shape was chosen and it needs something to draw.
+   * The preview has no stage of its own: it is the shelf state with a
+   * component chosen, the way it always was.
+   */
+  const [stage, setStage] = useState<"shelf" | "data">("shelf");
   /**
    * A published group, open in the shelf's place. It is not a `Preview`: a
    * group has no single frame to run, so it opens as its members listed in
@@ -254,10 +283,11 @@ export function BuildPanel({
     [domain],
   );
   /**
-   * The component being previewed, in the shelf's own place. Clicking a card
-   * runs the real thing — the preview route composes a one-tile app on live
-   * data — with its settings above it, so judging a component never means
-   * leaving the panel, and switching cards switches the preview.
+   * The component chosen from the shelf. A base shape is chosen *before* its
+   * data, so it is held here through the explorer stage and previewed once
+   * the explorer's Next brings the pane back — the preview route composes a
+   * one-tile app on live data, with its settings above it, so judging a
+   * component never means leaving the panel.
    */
   const [preview, setPreview] = useState<Preview | null>(
     null,
@@ -295,23 +325,19 @@ export function BuildPanel({
     }
   }, []);
 
-  /*
-    A shape the selection has moved past leaves the shelf rather than greying on
-    it. Only the ticker does this today: everything else that cannot take the
-    selection has a reason worth reading, and greying carries the reason.
-  */
-  const offered = COMPONENTS.filter(
-    (c) => c.offered?.(refs) ?? true,
-  );
-  /** A stable identity for that list — the array itself is new every render. */
-  const offeredKey = offered.map((c) => c.kind).join("|");
+  // A landed drop ends the build it was part of.
+  useEffect(() => {
+    if (!resetTick) return;
+    setPreview(null);
+    setGroup(null);
+    setStage("shelf");
+  }, [resetTick]);
 
   /*
     A base shape is previewed *against the explorer*, so its references are read
     live rather than snapshotted when the card was clicked — change the
-    selection and the preview redraws on it, which is the whole reason it is
-    down there. A saved or published component brings its own data and ignores
-    the selection entirely.
+    selection and the preview redraws on it. A saved or published component
+    brings its own data and ignores the selection entirely.
   */
   const previewRefs = preview
     ? preview.shelf === "base"
@@ -322,53 +348,60 @@ export function BuildPanel({
     ? preview.def.accepts(previewRefs)
     : null;
   const previewLive = Boolean(verdict?.ok);
-
-  // A shape the selection has moved past is gone from the shelf, so leaving its
-  // preview open would leave a component on screen with no card behind it.
-  useEffect(() => {
-    if (
-      preview?.shelf === "base" &&
-      !offeredKey.split("|").includes(preview.id)
-    ) {
-      setPreview(null);
-    }
-  }, [preview, offeredKey]);
+  /** The preview is on screen: chosen, and not behind the explorer. */
+  const showingPreview = preview !== null && stage === "shelf";
 
   useEffect(() => {
-    if (!previewLive || hintsOff || dragged) {
+    if (!showingPreview || !previewLive || hintsOff || dragged) {
       setHint(false);
       return;
     }
     const t = setTimeout(() => setHint(true), HINT_DELAY);
     return () => clearTimeout(t);
-  }, [previewLive, preview?.id, hintsOff, dragged]);
+  }, [showingPreview, previewLive, preview?.id, hintsOff, dragged]);
+
+  /** Back to the shelf, with nothing chosen. */
+  function toShelf() {
+    setPreview(null);
+    setGroup(null);
+    setStage("shelf");
+  }
 
   /**
-   * Which card the preview belongs to. Shelf and id together, because ids are
-   * only unique within a shelf — a published component is free to be called
-   * `chart`, and it must not light up the base shape of that name.
+   * A base shape is chosen first and its data second, so picking one opens
+   * the explorer. The one exception is a shape that accepts an empty
+   * selection — a title reads no data — which has nothing to pick and goes
+   * straight to its preview.
    */
-  const isOpen = (shelf: Shelf, id: string) =>
-    preview?.shelf === shelf && preview.id === id;
+  function pickShape(c: ComponentDef) {
+    setGroup(null);
+    setPreview({
+      id: c.kind,
+      shelf: "base",
+      def: c,
+      name: c.name,
+      refs,
+      layout: DEFAULT_LAYOUT[c.kind],
+    });
+    setPreviewOpts(withDefaults(c));
+    setStage(c.accepts([]).ok ? "shelf" : "data");
+  }
 
-  /** Clicking the open card puts the preview away; any other card swaps it. */
+  /** A published component brings its own data, so it opens on its preview. */
   function show(
     next: Preview,
     options: Record<string, string>,
   ) {
     setGroup(null);
-    if (isOpen(next.shelf, next.id)) {
-      setPreview(null);
-      return;
-    }
     setPreview(next);
     setPreviewOpts(options);
+    setStage("shelf");
   }
 
-  /** Same gesture for a group: the open one closes, any other one opens. */
   function showGroup(next: PublishedGroup) {
     setPreview(null);
-    setGroup((cur) => (cur?.id === next.id ? null : next));
+    setGroup(next);
+    setStage("shelf");
   }
 
   /**
@@ -450,97 +483,191 @@ export function BuildPanel({
   /* A frozen source ignores settings, so offering selects would be a lie. */
   const tunable = preview ? !preview.custom : false;
 
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
-      {/*
-        One pane, two states. The preview used to open as a second panel below
-        the shelf, which left both of them short: a shelf you had to scroll past
-        to reach the thing you were looking at, and a preview in the last third
-        of the column. Choosing a component and judging it are consecutive, not
-        simultaneous — so the preview takes the pane, and going back is one
-        control in the same place the heading was.
-      */}
-      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
-        {preview || group ? (
-          <>
-            <button
-              onClick={() => {
-                setPreview(null);
-                setGroup(null);
-              }}
-              className="-ml-1 shrink-0 rounded px-1 font-mono text-[10px] tracking-[0.14em] text-faint uppercase transition-colors hover:text-ink"
-            >
-              ‹ {tab === "shapes" ? "Shapes" : "Community"}
-            </button>
-            <span className="ml-auto truncate font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-              {preview ? preview.name : group?.name}
+  /*
+    The explorer, with the chosen shape named above it. It takes the whole
+    column the way it does inside the tile editor; the strip is the way back
+    to the shelf and the reminder of what the data is for, and the explorer's
+    own Next — answering to the shape's `accepts` — is the way on.
+  */
+  if (stage === "data" && preview) {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-2">
+        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
+          <button
+            onClick={toShelf}
+            className="flex items-center gap-2 text-left text-[12px] text-muted transition-colors hover:text-ink"
+          >
+            ‹ {SHELF}
+          </button>
+          <span className="ml-auto flex min-w-0 items-center gap-1.5">
+            <Glyph kind={preview.def.kind} on />
+            <span className="truncate text-[12px] font-medium text-ink">
+              {preview.name}
             </span>
-          </>
-        ) : (
-          /*
-            The heading alone: the page's tab above already said which way
-            you are building, so the bar names the shelf and nothing else.
-          */
-          <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
-            {tab === "shapes" ? "Shapes" : "Community"}
+            <span className="font-mono text-[10px] text-faint">
+              · pick its data
+            </span>
           </span>
-        )}
+        </div>
+        <div className="min-h-0 flex-1">
+          <DataExplorer
+            domain={domain}
+            onDomainChange={onDomainChange}
+            selected={refs}
+            onToggle={onToggle}
+            onClear={onClear}
+            verdict={preview.def.accepts(refs)}
+            onNext={() => setStage("shelf")}
+          />
+        </div>
       </div>
+    );
+  }
 
-      {preview ? (
-        <PreviewPane
-          def={preview.def}
-          refs={previewRefs}
-          live={previewLive}
-          why={verdict?.why}
-          tunable={tunable}
-          options={previewOpts}
-          onOption={(key, value) =>
-            setPreviewOpts((prev) => ({
-              ...prev,
-              [key]: value,
-            }))
-          }
-          src={previewSrc(
-            preview,
-            previewOpts,
-            previewRefs,
+  /*
+    A base shape's selection stays in view above its preview — the same
+    bordered strip the tile editor wears: the way back to the data, the
+    count, the chips removable in place. A published component brings its
+    own data and a title reads none, so neither shows it.
+  */
+  const withData =
+    showingPreview &&
+    preview!.shelf === "base" &&
+    !preview!.def.accepts([]).ok;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {withData && (
+        <div className="flex shrink-0 flex-col gap-1.5 rounded-lg border border-line bg-surface px-3 py-2">
+          <button
+            onClick={() => setStage("data")}
+            className="flex items-center gap-2 text-left text-[12px] text-muted transition-colors hover:text-ink"
+          >
+            ‹ Data
+            <span className="font-mono text-[10px] text-faint">
+              {refs.length} selected
+            </span>
+          </button>
+          <SelectionStrip
+            selected={refs}
+            onRemove={onToggle}
+            onClear={onClear}
+          />
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-surface">
+        {/*
+          One pane, two states. The preview used to open as a second panel
+          below the shelf, which left both of them short: a shelf you had to
+          scroll past to reach the thing you were looking at, and a preview in
+          the last third of the column. Choosing a component and judging it are
+          consecutive, not simultaneous — so the preview takes the pane, and
+          going back is one control in the same place the heading was.
+        */}
+        <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+          {preview || group ? (
+            <>
+              <button
+                onClick={toShelf}
+                className="-ml-1 shrink-0 rounded px-1 font-mono text-[10px] tracking-[0.14em] text-faint uppercase transition-colors hover:text-ink"
+              >
+                ‹ {SHELF}
+              </button>
+              <span className="ml-auto truncate font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+                {preview ? preview.name : group?.name}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
+                {SHELF}
+              </span>
+              {/*
+                The domain at the row's far end. It narrows what is published,
+                and it is the same value the explorer opens on — and it names
+                itself, so it carries no label.
+              */}
+              <span className="ml-auto flex items-center">
+                <DomainSelect
+                  value={domain}
+                  onChange={onDomainChange}
+                  size="sm"
+                  align="right"
+                />
+              </span>
+            </>
           )}
-          frameKey={`${preview.shelf}:${preview.id}:${JSON.stringify(
-            previewOpts,
-          )}:${previewRefs.map((r) => r.schemaId + r.label).join("|")}`}
-          frameRef={previewFrame}
-          onDragStart={(e) => {
-            e.dataTransfer.setData(DRAG_TYPE, "1");
-            e.dataTransfer.effectAllowed = "copy";
-            setDragged(true);
-            setHint(false);
-            // What lands is what was being looked at — settings, data, source.
-            // Not its size: the page swaps in the shape's default, because the
-            // preview is as wide as the panel so it can be judged, and a
-            // dropped tile is one of several.
-            onDragStateChange({
-              kind: preview.def.kind,
-              options: previewOpts,
-              custom: preview.custom,
-              refs: previewRefs,
-              layout: preview.layout,
-            });
-          }}
-          onDragEnd={() => onDragStateChange(null)}
-        />
-      ) : group ? (
-        <GroupPane
-          group={group}
-          onDragStart={(e) => grabGroup(e, group)}
-          onDragEnd={() => onDragStateChange(null)}
-        />
-      ) : tab === "community" ? (
-        <>
-          {/* ── Published: components, then wired groups ─────────────────── */}
+        </div>
+
+        {preview ? (
+          <PreviewPane
+            def={preview.def}
+            refs={previewRefs}
+            live={previewLive}
+            why={verdict?.why}
+            tunable={tunable}
+            options={previewOpts}
+            onOption={(key, value) =>
+              setPreviewOpts((prev) => ({
+                ...prev,
+                [key]: value,
+              }))
+            }
+            src={previewSrc(
+              preview,
+              previewOpts,
+              previewRefs,
+            )}
+            frameKey={`${preview.shelf}:${preview.id}:${JSON.stringify(
+              previewOpts,
+            )}:${previewRefs.map((r) => r.schemaId + r.label).join("|")}`}
+            frameRef={previewFrame}
+            onDragStart={(e) => {
+              e.dataTransfer.setData(DRAG_TYPE, "1");
+              e.dataTransfer.effectAllowed = "copy";
+              setDragged(true);
+              setHint(false);
+              // What lands is what was being looked at — settings, data, source.
+              // Not its size: the page swaps in the shape's default, because the
+              // preview is as wide as the panel so it can be judged, and a
+              // dropped tile is one of several.
+              onDragStateChange({
+                kind: preview.def.kind,
+                options: previewOpts,
+                custom: preview.custom,
+                refs: previewRefs,
+                layout: preview.layout,
+              });
+            }}
+            onDragEnd={() => onDragStateChange(null)}
+          />
+        ) : group ? (
+          <GroupPane
+            group={group}
+            onDragStart={(e) => grabGroup(e, group)}
+            onDragEnd={() => onDragStateChange(null)}
+          />
+        ) : (
           <div className="dr-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-2 pb-2">
+            {/* ── The base shapes: chosen first, drawn on data chosen next ── */}
             <Section
               title="Components"
+              note="click one, then pick its data"
+            >
+              {COMPONENTS.filter((c) => !c.sourceOnly).map((c) => (
+                <Card
+                  key={c.kind}
+                  kind={c.kind}
+                  title={c.name}
+                  body={c.blurb}
+                  onOpen={() => pickShape(c)}
+                />
+              ))}
+            </Section>
+            {/* ── Published: components, then wired groups ───────────────── */}
+            <Section
+              title="From the community"
               note="each brings its own data"
             >
               {published.map((c) => {
@@ -553,9 +680,7 @@ export function BuildPanel({
                     title={c.name}
                     body={c.blurb}
                     meta={c.author}
-                    enabled
                     accent
-                    open={isOpen("community", c.id)}
                     onOpen={() =>
                       show(
                         {
@@ -587,45 +712,8 @@ export function BuildPanel({
               ))}
             </Section>
           </div>
-        </>
-      ) : (
-        <>
-          {/* ── The base shapes ──────────────────────────────────────────── */}
-          <div className="dr-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-2 pb-2">
-            <Section
-              title="Components"
-              note="click one to see it on your data"
-            >
-              {offered.map((c) => {
-                const v = c.accepts(refs);
-                return (
-                  <Card
-                    key={c.kind}
-                    kind={c.kind}
-                    title={c.name}
-                    body={v.ok ? c.blurb : v.why!}
-                    enabled={v.ok}
-                    open={isOpen("base", c.kind)}
-                    onOpen={() =>
-                      show(
-                        {
-                          id: c.kind,
-                          shelf: "base",
-                          def: c,
-                          name: c.name,
-                          refs,
-                          layout: DEFAULT_LAYOUT[c.kind],
-                        },
-                        withDefaults(c),
-                      )
-                    }
-                  />
-                );
-              })}
-            </Section>
-          </div>
-        </>
-      )}
+        )}
+      </div>
 
       {/*
         The corner, not the widget: a hint that lived on the preview competed
@@ -732,6 +820,20 @@ export function PreviewPane({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pt-2.5 pb-3">
+      {/*
+        The words themselves, for the one shape whose setting is not a choice
+        from a list. It rides in `options.text` undeclared, the way the
+        per-series styles do, so every route carries it without learning it.
+      */}
+      {tunable && def.kind === "text" && (
+        <input
+          value={options.text ?? ""}
+          onChange={(e) => onOption("text", e.target.value)}
+          placeholder="Title"
+          title="{pick} is replaced by the node picked on the tile this is wired to"
+          className="w-full shrink-0 rounded-md border border-line bg-surface px-2 py-1 text-[12.5px] text-ink outline-none placeholder:text-faint focus:border-accent"
+        />
+      )}
       {tunable && def.options.length > 0 && (
         <div className="flex shrink-0 flex-wrap gap-1.5">
           {def.options.map((o) => (
@@ -771,7 +873,7 @@ export function PreviewPane({
         Frozen source is exempt for the same reason the selects above are: a
         refined component ignores its settings, so offering them would be a lie.
       */}
-      {live && tunable && (
+      {live && tunable && def.kind !== "text" && (
         <div className="dr-scroll min-h-0 flex-1 overflow-y-auto">
           {def.kind === "map" ? (
             (layersEditor ?? <MapLayers refs={refs} />)
@@ -1090,9 +1192,7 @@ function Card({
   title,
   body,
   meta,
-  enabled,
   accent,
-  open,
   onOpen,
   onDelete,
 }: {
@@ -1101,45 +1201,31 @@ function Card({
   body: string;
   /** A word about where it came from — an author, or that it was refined. */
   meta?: string;
-  enabled: boolean;
   /** Saved and published components wear the accent; the base shapes do not. */
   accent?: boolean;
-  /** Its preview is the one currently open. */
-  open?: boolean;
   onOpen: () => void;
   /** Saved components can leave the shelf; shapes and published ones cannot. */
   onDelete?: () => void;
 }) {
-  const act = enabled ? onOpen : undefined;
   return (
     <div
-      onClick={act}
+      onClick={onOpen}
       onKeyDown={(e) => {
-        if (act && (e.key === "Enter" || e.key === " ")) {
+        if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          act();
+          onOpen();
         }
       }}
-      role={act ? "button" : undefined}
-      tabIndex={act ? 0 : undefined}
-      aria-pressed={act ? Boolean(open) : undefined}
+      role="button"
+      tabIndex={0}
       title={body}
       className={cx(
-        "min-w-0 rounded-md border px-2.5 py-2 text-left transition-colors outline-none",
-        enabled
-          ? "cursor-pointer bg-surface-2 hover:border-accent-line focus-visible:border-accent-line"
-          : "cursor-not-allowed border-dashed border-line bg-surface-2 opacity-45",
-        enabled &&
-          (accent
-            ? "border-accent-line/60"
-            : "border-line"),
-        // The open card stays lit while its preview is below, so the two read
-        // as one thing rather than as a card and an unrelated widget.
-        open && "border-accent bg-accent-dim",
+        "min-w-0 cursor-pointer rounded-md border bg-surface-2 px-2.5 py-2 text-left transition-colors outline-none hover:border-accent-line focus-visible:border-accent-line",
+        accent ? "border-accent-line/60" : "border-line",
       )}
     >
       <div className="flex items-center gap-1.5">
-        <Glyph kind={kind} on={Boolean(accent || open)} />
+        <Glyph kind={kind} on={Boolean(accent)} />
         <span className="truncate text-[12px] font-medium text-ink">
           {title}
         </span>
@@ -1218,16 +1304,6 @@ function Glyph({
           ))}
         </>
       )}
-      {/* The duration curve's own shape: high on the left, a long tail. */}
-      {kind === "distribution" && (
-        <path
-          d="M1 3 C 4 3.4, 5 9, 13 10.5"
-          stroke={stroke}
-          strokeWidth="1.3"
-          strokeLinecap="round"
-          fill="none"
-        />
-      )}
       {kind === "bar" && (
         <>
           <path
@@ -1304,6 +1380,14 @@ function Glyph({
             strokeWidth="1.1"
           />
         </>
+      )}
+      {kind === "text" && (
+        <path
+          d="M2.5 3.5 H11.5 M7 3.5 V11.5"
+          stroke={stroke}
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
       )}
       {kind === "picker" && (
         <>

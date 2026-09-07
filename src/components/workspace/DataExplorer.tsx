@@ -101,20 +101,27 @@ export function DataExplorer({
   onToggle,
   onClear,
   onNext,
+  verdict,
   initialDomain,
   domain: controlled,
   onDomainChange,
 }: {
   selected: DataRef[];
   /**
-   * The domain, when the parent owns it. The build panel's tab row carries
-   * the select — it is a setting about the whole panel, not about the search
-   * under it — and hands the value down; the explorer then draws no domain
-   * control of its own. Absent, the explorer keeps one, for the places that
-   * mount it with no tab row above (the tile editor's data stage).
+   * The domain, when the parent owns it. The build panel's shelf shows the
+   * same select in its heading and filters what is published by it, so the
+   * page holds the value and the two controls read one setting. Absent, the
+   * explorer keeps its own, for the tile editor's data stage. Either way the
+   * explorer draws the control: it is the coarsest filter over the list.
    */
   domain?: string;
   onDomainChange?: (domain: string) => void;
+  /**
+   * What the selection is for, when a shape was chosen first: its `accepts`
+   * verdict on the selection so far. The footer reads the reason out while
+   * it refuses, and Next waits until it does not.
+   */
+  verdict?: { ok: boolean; why?: string };
   /**
    * The workspace's subject, if it has one — a domain name or `"all"`. The
    * explorer opens on it and then belongs to the reader; it arrives after
@@ -245,6 +252,7 @@ export function DataExplorer({
               ? "picks from other sets are kept"
               : "Pick entities to build with"
           }
+          verdict={verdict}
           onNext={onNext}
         />
       </div>
@@ -269,11 +277,9 @@ export function DataExplorer({
           where the domain was — both narrow what is on screen, and inside
           Energy the operator is the coarser of the two. Then the chips.
         */}
-        {controlled === undefined && (
-          <div className="flex">
-            <DomainSelect value={domain} onChange={setDomain} />
-          </div>
-        )}
+        <div className="flex">
+          <DomainSelect value={domain} onChange={setDomain} />
+        </div>
         <div className="flex items-stretch gap-1.5">
           <input
             value={query}
@@ -390,6 +396,7 @@ export function DataExplorer({
             ? "click again to remove"
             : "Click a box to select it"
         }
+        verdict={verdict}
         onNext={onNext}
       />
     </div>
@@ -407,25 +414,40 @@ export function DataExplorer({
 function Footer({
   count,
   hint,
+  verdict,
   onNext,
 }: {
   count: number;
   hint: string;
+  verdict?: { ok: boolean; why?: string };
   onNext?: () => void;
 }) {
+  /*
+    The shape's own reason, while there is one: "pick exactly two series" is
+    the instruction, and it belongs on the line that counts what is picked.
+    Next is disabled rather than hidden so the way on is always in the same
+    place — it only waits.
+  */
+  const refused = verdict !== undefined && !verdict.ok;
+  const line = refused ? verdict.why! : hint;
   return (
     <div className="flex items-center gap-2 border-t border-line px-3 py-1.5">
-      <p className="min-w-0 truncate font-mono text-[9.5px] text-faint">
-        {count > 0 ? `${count} selected · ${hint}` : hint}
+      <p
+        className={cx(
+          "min-w-0 truncate font-mono text-[9.5px]",
+          refused ? "text-muted" : "text-faint",
+        )}
+      >
+        {count > 0 ? `${count} selected · ${line}` : line}
       </p>
       {onNext && (
         <button
           onClick={onNext}
-          disabled={count === 0}
+          disabled={refused}
           className={cx(
             "ml-auto shrink-0 rounded-md border px-2.5 py-1 text-[12px] transition-colors",
-            count === 0
-              ? "border-line text-faint"
+            refused
+              ? "cursor-not-allowed border-line text-faint"
               : "border-accent-line bg-accent-dim text-accent hover:brightness-110",
           )}
         >

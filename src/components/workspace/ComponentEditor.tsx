@@ -178,6 +178,7 @@ export function ComponentEditor({
             setLayers([]);
             setCode(null);
           }}
+          verdict={verdict}
           onNext={() => setStage("preview")}
         />
       </div>
@@ -217,6 +218,21 @@ export function ComponentEditor({
           <span className="ml-auto truncate font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
             {name}
           </span>
+          {/*
+            Duplicate lives up here, beside the tile's name, not in the footer:
+            the footer is the tile's own verdict (keep the change, take it off,
+            or walk away), and a copy is none of those — it acts on the canvas.
+            Same quiet voice as Back, so it reads as a thing the header offers
+            rather than a fourth answer to the footer's question.
+          */}
+          {onDuplicate && (
+            <button
+              onClick={() => onDuplicate(spec)}
+              className="shrink-0 font-mono text-[10px] tracking-[0.14em] text-faint uppercase hover:text-ink"
+            >
+              Duplicate
+            </button>
+          )}
         </div>
 
         <PreviewPane
@@ -243,21 +259,19 @@ export function ComponentEditor({
           Two footers, because there are two situations and they are not the
           same question. Building something new asks "where does this go" —
           onto the screen, or into your components for next time. Editing a
-          tile that is already on the screen asks: copy it, keep the change,
-          or take the tile off. Duplicate alone at the left — it acts on the
-          canvas, not on this tile — and the tile's own pair at the right,
-          the way a dialog ends. Remove wears `danger` like every other
-          control that takes something away: it is the one act here that is
-          not undone by pressing the other button.
+          tile that is already on the screen asks: keep the change, take the
+          tile off, or walk away. Cancel alone at the left — it is the one
+          that changes nothing — and the tile's own pair at the right, the
+          way a dialog ends. Remove wears `danger` like every other control
+          that takes something away: it is the one act here that is not
+          undone by pressing the other button.
         */}
         <div className="flex items-center gap-2 border-t border-line px-3 py-2.5">
           {onDelete ? (
             <>
-              {onDuplicate && (
-                <Button size="sm" onClick={() => onDuplicate(spec)}>
-                  Duplicate
-                </Button>
-              )}
+              <Button size="sm" onClick={onClose}>
+                Cancel
+              </Button>
               <div className="ml-auto flex items-center gap-2">
                 <Button tone="danger" size="sm" onClick={onDelete}>
                   Remove

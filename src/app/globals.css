@@ -302,6 +302,53 @@ body {
   }
 }
 
+/* The sheet that dims a page around the one thing being asked for. */
+@keyframes dr-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.dr-fade {
+  animation: dr-fade 0.32s ease-out both;
+}
+
+/*
+ * The lit object under that sheet: an accent halo that breathes once and
+ * settles, so the eye is drawn and then left alone. Colour-only, so it reads
+ * the same on either ground and never moves the field.
+ */
+@keyframes dr-spotlight {
+  0% {
+    box-shadow:
+      0 0 0 0 var(--color-accent),
+      0 0 0 var(--color-accent);
+  }
+  40% {
+    box-shadow:
+      0 0 0 6px var(--color-accent-dim),
+      0 0 36px 6px var(--color-accent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 3px var(--color-accent-dim),
+      0 0 18px 2px var(--color-accent);
+  }
+}
+.dr-spotlight {
+  animation: dr-spotlight 0.9s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dr-spotlight {
+    animation: none;
+    box-shadow:
+      0 0 0 3px var(--color-accent-dim),
+      0 0 18px 2px var(--color-accent);
+  }
+}
+
 /*
  * The wordmark: the word, set heavy and tight, and nothing else.
  *

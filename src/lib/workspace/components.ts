@@ -35,13 +35,13 @@ import { SERIES_PALETTE } from "./palette";
 export type ComponentKind =
   | "chart"
   | "scatter"
-  | "distribution"
   | "bar"
   | "heatmap"
   | "ticker"
   | "table"
   | "map"
-  | "picker";
+  | "picker"
+  | "text";
 
 export interface ComponentSpec {
   kind: ComponentKind;
@@ -109,16 +109,11 @@ export interface ComponentDef {
     why?: string;
   };
   /**
-   * Whether this shape is on the table for the selection at all.
-   *
-   * Different from `accepts`, and the difference is whether there is anything
-   * worth reading. A shape that fails `accepts` stays on the shelf greyed, with
-   * its reason — "four series is the most one chart reads well" is information.
-   * A shape that is not offered is one the selection has simply moved past: a
-   * ticker beside three series is not a rejected ticker, it is the answer to a
-   * question nobody asked, and greying it out only makes the shelf longer.
+   * Only ever the source of a wired group, never a tile of its own. A search
+   * that nothing follows is a box that does nothing, so it is not on the
+   * Library; the wires strip adds it to a draft as the group's source.
    */
-  offered?: (refs: DataRef[]) => boolean;
+  sourceOnly?: boolean;
   emit: (
     refs: DataRef[],
     index: number,
@@ -397,8 +392,6 @@ export function seriesControls(kind: ComponentKind): {
   // panel additionally hides the control for the stacked shape.
   if (kind === "chart")
     return { color: true, line: true, axis: true };
-  if (kind === "distribution")
-    return { color: true, line: true, axis: false };
   // A bar is a color and a length, and a scatter is a cloud of dots; neither
   // has a stroke to dash.
   if (kind === "bar" || kind === "scatter") {
@@ -464,9 +457,12 @@ function followOf(
  * so a wire to any of them would silently do nothing — greying is honest.
  */
 export function followable(spec: ComponentSpec): boolean {
+  if (spec.custom) return false;
+  // A title reads no data, so it has nothing to retarget — it follows by
+  // naming the pick in its own words, and needs no reference to do it.
+  if (spec.kind === "text") return true;
   if (spec.kind !== "chart" && spec.kind !== "ticker")
     return false;
-  if (spec.custom) return false;
   const refs = spec.refs ?? [];
   if (refs.length === 0) return false;
   if (
@@ -1024,6 +1020,8 @@ ${orderMemo}
     setPlotW(el.clientWidth);
     return () => ro.disconnect();
   }, []);
+  // New data: the newest point's readout shows for as long as its ring does.
+  useFreshPeek(plotBox, fresh);
   const { ticks: TICKS, labels: TICKLABELS, tall: TICKTALL } = React.useMemo(() => {
     if (merged.length < 2) return { ticks: undefined, labels: null, tall: false };
     const lo = merged[0].t, hi = merged[merged.length - 1].t;
@@ -1151,8 +1149,6 @@ const scatter: ComponentDef = {
           ok: false,
           why: "Pick exactly two series — the first is the x-axis, the second the y.",
         },
-  // Beside anything else it is not a rejected scatter, it is the wrong question.
-  offered: (refs) => refs.length === 2,
   emit(refs, i, o) {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
@@ -1319,228 +1315,6 @@ ${
   },
 };
 
-/**
- * How often, not when.
- *
- * A line chart answers "what did the price do"; neither it nor a heatmap
- * answers "how often is it above $100", which is the question a hedge, a
- * battery dispatch or a budget is actually built on. Two views of the same
- * arithmetic:
- *
- *   · **Duration curve** — every reading sorted highest to lowest against the
- *     share of the window it holds. The standard artifact in power: read across
- *     at a price to get the percentage of hours above it. Several series
- *     overlay cleanly, because each is its own sorted line.
- *   · **Histogram** — the same values in buckets. One series draws bars; more
- *     than one draws frequency polygons, because overlaid bars at this size are
- *     a wall nobody can read through.
- */
-const distribution: ComponentDef = {
-  kind: "distribution",
-  name: "Distribution",
-  blurb:
-    "How often a value occurs — duration curve or histogram.",
-  options: [
-    {
-      key: "window",
-      label: "Window",
-      choices: WINDOWS,
-      fallback: "-24h",
-    },
-    {
-      key: "view",
-      label: "View",
-      choices: [
-        { value: "duration", label: "Duration curve" },
-        { value: "histogram", label: "Histogram" },
-      ],
-      fallback: "duration",
-    },
-    {
-      key: "bins",
-      label: "Buckets",
-      choices: [
-        { value: "20", label: "20" },
-        { value: "40", label: "40" },
-      ],
-      fallback: "20",
-    },
-  ],
-  // Bucketing mixes nothing: two units in one distribution is two distributions
-  // drawn on top of each other.
-  accepts: (refs) =>
-    refs.length === 0
-      ? { ok: false, why: "Pick a series." }
-      : refs.length > 4
-        ? {
-            ok: false,
-            why: "Four distributions is the most one axis reads.",
-          }
-        : refs.length === 1 && fanoutOf(refs[0])
-          ? {
-              ok: false,
-              why: "A whole stream fans out to more curves than this reads — pick the entities.",
-            }
-          : uniformUnit(refs) === null
-            ? {
-                ok: false,
-                why: "One unit at a time: these mix units.",
-              }
-            : { ok: true },
-  emit(refs, i, o) {
-    const s = series(refs);
-    const anyMock = s.some((x) => x.mock);
-    const name = `Distribution${i}`;
-    const styles = readSeries(o);
-    const duration = o.view !== "histogram";
-    // Bars only for a single series; anything more overlays as outlines.
-    const bars = !duration && s.length === 1;
-    const limit = o.window === "-7d" ? 2000 : 500;
-    const queries = s.map((x) => ({
-      dataset: x.dataset,
-      node: x.node,
-      start: o.window,
-      limit,
-    }));
-    const marks = s
-      .map((x, n) => {
-        const p = paint(styles, x.key, n);
-        return duration
-          ? `<Line type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${p.color}" ${dashProp(p.dash)}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`
-          : bars
-            ? `<Bar dataKey="${x.key}" name=${JSON.stringify(x.label)} fill="${p.color}" fillOpacity={0.8} isAnimationActive={false} />`
-            : `<Line type="monotone" dataKey="${x.key}" name=${JSON.stringify(x.label)} stroke="${p.color}" ${dashProp(p.dash)}strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />`;
-      })
-      .join("\n          ");
-
-    const columns = JSON.stringify(
-      s.map((x) => ({ key: x.key, column: x.column })),
-    );
-
-    return {
-      imports: [
-        duration || !bars ? "LineChart" : "BarChart",
-        duration || !bars ? "Line" : "Bar",
-        "XAxis",
-        "YAxis",
-        "CartesianGrid",
-        "Tooltip",
-        "ResponsiveContainer",
-        ...(s.length > 1 ? ["Legend"] : []),
-      ],
-      code: `function ${name}({ w, h }) {
-  const { rows, error, loading } = useSeries(
-    ${JSON.stringify(queries, null, 2).replace(/\n/g, "\n    ")},
-    ${refreshMs(refs)},
-  );
-
-  const SERIES = ${columns};
-  const DURATION = ${JSON.stringify(duration)};
-  const BINS = ${Number(o.bins) || 20};
-
-  const data = React.useMemo(() => {
-    const values = SERIES.map((sr, n) =>
-      (rows[n] || []).map((r) => r[sr.column]).filter((v) => v != null),
-    );
-    if (!values.some((v) => v.length)) return [];
-
-    if (DURATION) {
-      /*
-        One point per percentile, not per reading: a week of five-minute data
-        is two thousand dots that draw as a solid band. A hundred steps is the
-        same curve at the resolution anybody reads it at.
-      */
-      const sorted = values.map((v) => [...v].sort((a, b) => b - a));
-      const out = [];
-      for (let p = 0; p <= 100; p++) {
-        const at = { p };
-        sorted.forEach((v, n) => {
-          if (!v.length) return;
-          at[SERIES[n].key] = v[Math.min(v.length - 1, Math.round((p / 100) * (v.length - 1)))];
-        });
-        out.push(at);
-      }
-      return out;
-    }
-
-    // One set of buckets across every series, or the bars would not line up.
-    const all = values.flat();
-    const lo = Math.min(...all);
-    const hi = Math.max(...all);
-    const step = (hi - lo) / BINS || 1;
-    const out = [];
-    for (let b = 0; b < BINS; b++) {
-      const at = { bucket: lo + step * (b + 0.5) };
-      SERIES.forEach((sr) => (at[sr.key] = 0));
-      out.push(at);
-    }
-    values.forEach((v, n) => {
-      v.forEach((x) => {
-        const b = Math.min(BINS - 1, Math.max(0, Math.floor((x - lo) / step)));
-        out[b][SERIES[n].key] += 1;
-      });
-    });
-    return out;
-  }, [rows]);
-
-  function DistTip({ active, payload, label }) {
-    // The bin being read, for the double click that asks about it
-    // (askPayload). The clear is owned — see ChartTip for why.
-    const me = React.useRef(0);
-    if (!me.current) me.current = ++SERIES_SEQ;
-    if (!active || !payload || !payload.length) {
-      if (window.__dryosHover && window.__dryosHover.owner === me.current) window.__dryosHover = null;
-      return null;
-    }
-    window.__dryosHover = {
-      owner: me.current,
-      when: null,
-      label: DURATION ? label + "% of the window at or above" : "around " + Number(label).toFixed(1) + " ${s[0].unit}",
-      values: payload.map((p) => ({ name: p.name, value: p.value, unit: DURATION ? "${s[0].unit}" : "readings" })),
-    };
-    return (
-      <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
-        <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
-          {DURATION ? label + "% of the window at or above" : "around " + Number(label).toFixed(1) + " ${s[0].unit}"}
-        </div>
-        {payload.map((p) => (
-          <div key={p.dataKey} style={{ color: "var(--ink)" }}>
-            <span style={{ color: p.stroke && p.stroke !== "var(--surface)" ? p.stroke : p.fill }}>■ </span>
-            {p.name}: <strong>{p.value == null ? "—" : Number(p.value).toFixed(DURATION ? 2 : 0)}</strong> {DURATION ? "${s[0].unit}" : "readings"}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(titleFor(refs, s))} sub={${JSON.stringify(subFor(refs, titleFor(refs, s)))}} unit=${JSON.stringify(duration ? s[0].unit : "readings")} loading={loading} error={error}>
-${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <${duration || !bars ? "LineChart" : "BarChart"} data={data} margin={{ top: 6, right: 10, bottom: 0, left: -12 }}>
-          <CartesianGrid stroke="var(--line)" vertical={false} />
-          <XAxis
-            dataKey=${duration ? '"p"' : '"bucket"'}
-            type="number"
-            domain={${duration ? "[0, 100]" : '["dataMin", "dataMax"]'}}
-            tickFormatter={${duration ? '(v) => v + "%"' : "(v) => Number(v).toFixed(0)"}}
-            tick={{ fill: "var(--faint)", fontSize: 11 }}
-            stroke="var(--line)"
-            tickLine={false}
-          />
-          <YAxis tickFormatter={axisNum} tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={46} />
-          <Tooltip content={<DistTip />} />
-${s.length > 1 ? '          {!NAKED && <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />}\n' : ""}          ${marks}
-        </${duration || !bars ? "LineChart" : "BarChart"}>
-      </ResponsiveContainer>
-      </div>
-    </Section>
-  );
-}`,
-    };
-  },
-};
-
 const bar: ComponentDef = {
   kind: "bar",
   name: "Bar",
@@ -1585,11 +1359,6 @@ const bar: ComponentDef = {
                 why: "Bars compare one unit; these mix units.",
               }
             : { ok: true },
-  // Beside a single selection a bar is not a rejected bar, it is a ticker —
-  // unless the selection is a whole stream, which fans out into a bar per
-  // entity and is exactly what this shape is for.
-  offered: (refs) =>
-    refs.length !== 1 || fanoutOf(refs[0]) !== null,
   emit(refs, i, o) {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
@@ -1820,9 +1589,6 @@ const heatmap: ComponentDef = {
                 why: "Needs intraday readings — a daily series has no hours to grid.",
               }
             : { ok: true },
-  // Beside several series a heatmap is not a rejected heatmap; the selection
-  // has simply moved past it, the same way it moves past the ticker.
-  offered: (refs) => refs.length <= 1,
   emit(refs, i, o) {
     const s = series(refs);
     const anyMock = s.some((x) => x.mock);
@@ -2176,9 +1942,6 @@ const ticker: ComponentDef = {
               ? "Pick one series."
               : "A ticker shows one series.",
         },
-  // The only shape a second selection rules out rather than merely strains, so
-  // it is the only one that leaves the shelf instead of greying on it.
-  offered: (refs) => refs.length <= 1,
   emit(refs, i, o) {
     const s = series(refs);
     const name = `Ticker${i}`;
@@ -4163,6 +3926,7 @@ const picker: ComponentDef = {
   name: "Node search",
   blurb:
     "Search one stream's entities and pick one; every tile wired to it retargets.",
+  sourceOnly: true,
   options: [
     {
       key: "sort",
@@ -4204,10 +3968,6 @@ const picker: ComponentDef = {
           why: "This selection is a single series — there is nothing to search between.",
         };
   },
-  // Anywhere it cannot search it is not a rejected search, it is an answer to
-  // a question nobody asked.
-  offered: (refs) =>
-    refs.length === 1 && searchable(refs[0]) !== null,
   emit(refs, i, o) {
     const fan = searchable(refs[0])!;
     const s = series(refs);
@@ -4354,16 +4114,135 @@ const picker: ComponentDef = {
   },
 };
 
+/*
+ * A line of text on the screen: a heading over a group of tiles, or a caption
+ * under one. It is a shape rather than a field on the page because a wire is
+ * a relationship between two tiles on the manifest — a title that is not a
+ * tile could never follow the map. As a shape it inherits the drag, the grid,
+ * the revisions, the recipes and the tray's wiring without any of them
+ * learning a new case, and Section draws it plain so none of that reads as a
+ * card around three words.
+ *
+ * The words ride in `options.text`, undeclared, the way the per-series styles
+ * ride in `series`: an Option is a select, and a title is not a choice from a
+ * list. `{pick}` in the text is the wire: a title wired to a map says the
+ * node that was clicked, and an em dash until one is.
+ */
+export const TEXT_MIN_H = 40;
+export const TEXT_MIN_W = 1;
+/*
+ * The ink, the quieter ink, or one of the eight series slots — named by hue
+ * rather than by number, since a select reads in words. Every value is a
+ * frame token, so the color follows the theme the way a series does, and a
+ * key outside this table falls back to ink: the value is written into TSX.
+ */
+const TEXT_COLORS: Record<string, string> = {
+  ink: "var(--ink)",
+  muted: "var(--muted)",
+  s1: "var(--s1)",
+  s2: "var(--s2)",
+  s3: "var(--s3)",
+  s4: "var(--s4)",
+  s5: "var(--s5)",
+  s6: "var(--s6)",
+  s7: "var(--s7)",
+  s8: "var(--s8)",
+};
+const text: ComponentDef = {
+  kind: "text",
+  name: "Title",
+  blurb:
+    "A line of text on the screen, no data behind it. Wired to a map, {pick} becomes the node that was clicked.",
+  options: [
+    {
+      key: "align",
+      label: "Align",
+      choices: [
+        { value: "left", label: "Left" },
+        { value: "center", label: "Center" },
+      ],
+      fallback: "left",
+    },
+    {
+      key: "color",
+      label: "Color",
+      choices: [
+        { value: "ink", label: "Ink" },
+        { value: "muted", label: "Muted" },
+        { value: "s1", label: "Chartreuse" },
+        { value: "s2", label: "Sky" },
+        { value: "s3", label: "Amber" },
+        { value: "s4", label: "Violet" },
+        { value: "s5", label: "Green" },
+        { value: "s6", label: "Pink" },
+        { value: "s7", label: "Orange" },
+        { value: "s8", label: "Blue" },
+      ],
+      fallback: "ink",
+    },
+  ],
+  // Nothing to refuse: it reads no data, so any selection — including none —
+  // is fine, and the selection is simply not what it is about.
+  accepts: () => ({ ok: true }),
+  emit(_refs, i, o) {
+    const name = `Text${i}`;
+    const center = o.align === "center";
+    const color = TEXT_COLORS[o.color] ?? TEXT_COLORS.ink;
+    const follow = followOf(o);
+    const raw = typeof o.text === "string" && o.text.trim() ? o.text : "Title";
+    // The words fill the box, measured the way the ticker's number is: the
+    // tile is the size control. Three fixed steps were tried first and every
+    // one of them was wrong for some tile — the largest clipped in a short
+    // tile and the smallest floated in a tall one, and a select nobody wants
+    // to visit stood between the two.
+    return {
+      imports: [],
+      code: `function ${name}({ w, h }) {
+${
+  follow !== null
+    ? `  // Wired: tile ${follow}'s pick is what {pick} says.
+  const FOLLOW = ${follow};
+  const [picked, setPicked] = useState(null);
+  useEffect(() => {
+    const h = (e) => {
+      const d = e.detail;
+      if (d && d.source === FOLLOW) setPicked(d.entity || null);
+    };
+    window.addEventListener("dryos:pick", h);
+    return () => window.removeEventListener("dryos:pick", h);
+  }, []);
+  const shown = ${JSON.stringify(raw)}.replace(/\{pick\}/g, picked || "\u2014");`
+    : `  const shown = ${JSON.stringify(raw)}.replace(/\{pick\}/g, "\u2014");`
+}
+  return (
+    <Section index={${i}} w={w} h={h} title={shown} plain fill minH={${TEXT_MIN_H}} minW={${TEXT_MIN_W}} headerAsOf={false} expand={false}>
+      {/*
+        A small vertical inset, because the fit is measured against a line
+        box one em tall and descenders hang below it: sized to the whole
+        body, a "y" or a "g" lost its tail to the overflow clip.
+      */}
+      <div style={{ inset: "4% 0", position: "absolute" }}>
+        <FitText floor={10} min={10} max={600} wrap style={{ justifyContent: ${center ? '"center"' : '"flex-start"'}, textAlign: ${center ? '"center"' : '"left"'} }}>
+          <span style={{ color: ${JSON.stringify(color)}, fontWeight: 700, letterSpacing: "-0.02em" }}>{shown}</span>
+        </FitText>
+      </div>
+    </Section>
+  );
+}`,
+    };
+  },
+};
+
 export const COMPONENTS: ComponentDef[] = [
   chart,
   scatter,
-  distribution,
   bar,
   heatmap,
   ticker,
   table,
   map,
   picker,
+  text,
 ];
 
 export function componentDef(
@@ -4389,6 +4268,7 @@ export const TICKER_MIN_H = 90;
 
 /** The shortest a tile of this kind may be: the frame's floor, the route's and the packer's, one answer. */
 export function minTileHeight(kind: ComponentKind): number {
+  if (kind === "text") return TEXT_MIN_H;
   return kind === "ticker" ? TICKER_MIN_H : 120;
 }
 
@@ -4399,6 +4279,7 @@ export function minTileHeight(kind: ComponentKind): number {
  */
 export const TICKER_MIN_W = 1;
 export function minTileWidth(kind: ComponentKind): number {
+  if (kind === "text") return TEXT_MIN_W;
   return kind === "ticker" ? TICKER_MIN_W : 2;
 }
 
@@ -4408,13 +4289,15 @@ export const DEFAULT_LAYOUT: Record<
 > = {
   chart: { w: 6, h: 240 },
   scatter: { w: 5, h: 260 },
-  distribution: { w: 5, h: 240 },
   bar: { w: 4, h: 220 },
   heatmap: { w: 6, h: 280 },
   ticker: { w: 3, h: 150 },
   table: { w: 6, h: 260 },
   map: { w: 6, h: 300 },
   picker: { w: 3, h: 260 },
+  // A line of text and the tile's own padding; the width is a guess at a
+  // heading over a pair of tiles, and the words say when to widen it.
+  text: { w: 4, h: 56 },
 };
 
 /** The canvas: twelve columns, a 12px gutter, and 10px of vertical travel. */

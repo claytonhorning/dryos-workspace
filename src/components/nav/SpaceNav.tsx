@@ -241,23 +241,47 @@ export function SpaceNav({
         <span className="flex items-center text-line-strong">/</span>
 
         {space && naming ? (
-          <input
-            ref={spaceNameField}
-            value={nameDraft ?? space.name}
-            onChange={(e) => setNameDraft(e.target.value)}
-            onBlur={() => void commitSpaceName()}
-            onKeyDown={(e) => {
-              // Enter commits through the blur, so there is one exit path.
-              if (e.key === "Enter") e.currentTarget.blur();
-              if (e.key === "Escape") {
-                setNameDraft(null);
-                disarmNaming();
-              }
-            }}
-            aria-label="Name this workspace"
-            size={Math.max(8, (nameDraft ?? space.name).length)}
-            className="my-auto shrink-0 rounded border border-line-strong bg-surface-2 px-1.5 py-1 text-[13.5px] font-medium text-ink outline-none"
-          />
+          <>
+            {/*
+              The spotlight. A field in the nav is easy to walk past — the
+              canvas and the panel are the loud things on the page — so while
+              the name is armed everything else dims and the field is the one
+              lit object. The header is `sticky z-40`, so a fixed sheet here
+              covers the page beneath it and the field only has to sit above
+              the sheet. It takes no pointer events: a click anywhere else is
+              still the blur that commits, which is the one exit path.
+            */}
+            <div
+              aria-hidden
+              className="dr-fade pointer-events-none fixed inset-0 z-[1] bg-bg/70"
+            />
+            <div className="relative z-[2] my-auto shrink-0">
+              <input
+                ref={spaceNameField}
+                value={nameDraft ?? space.name}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => void commitSpaceName()}
+                onKeyDown={(e) => {
+                  // Enter commits through the blur, so there is one exit path.
+                  if (e.key === "Enter") e.currentTarget.blur();
+                  if (e.key === "Escape") {
+                    setNameDraft(null);
+                    disarmNaming();
+                  }
+                }}
+                aria-label="Name this workspace"
+                size={Math.max(8, (nameDraft ?? space.name).length)}
+                className="dr-spotlight block rounded border border-accent bg-surface-2 px-1.5 py-1 text-[13.5px] font-medium text-ink outline-none"
+              />
+              {/* What the lit field is for, and how to leave it. */}
+              <div className="dr-rise pointer-events-none absolute left-0 top-full mt-2 whitespace-nowrap rounded border border-line bg-surface px-2.5 py-1.5 text-[12px] shadow-2xl shadow-black/60">
+                <span className="font-medium text-ink">Name your workspace</span>
+                <span className="ml-2 text-muted">
+                  Enter to keep · Esc to skip
+                </span>
+              </div>
+            </div>
+          </>
         ) : space ? (
           <Link
             href={`/workspace/${spaceId}`}
