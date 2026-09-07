@@ -2,6 +2,7 @@ import {
   DRAW_CAP,
   type DataRef,
   grainSeconds,
+  pinStreams,
   schemaFor,
   sourceTzOf,
 } from "./catalog";
@@ -2175,6 +2176,13 @@ const table: ComponentDef = {
   },
 };
 
+/**
+ * Why a second stream of pins is refused, in one voice for the map's
+ * `accepts`, the explorer's cards and the layer picker.
+ */
+export const PIN_LAYER_WHY =
+  "One layer of pins per map — a second stream of them would not draw.";
+
 const map: ComponentDef = {
   kind: "map",
   name: "Map",
@@ -2249,7 +2257,11 @@ const map: ComponentDef = {
     );
 
     if (refs.length === 0)
-      return { ok: false, why: "Pick a series." };
+      return { ok: false, why: "Pick a stream to draw." };
+    // One layer of pins per map — see `pinStreams`. Refused here so the API
+    // refuses what the explorer's cards refuse, in the same words.
+    if (pinStreams(refs).length > 1)
+      return { ok: false, why: PIN_LAYER_WHY };
     if (hasField || hasMotion || hasLocated)
       return { ok: true };
 

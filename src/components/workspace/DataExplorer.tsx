@@ -21,14 +21,22 @@ import {
   categories,
   categoryOf,
   catalogRefs,
+  coverageLabel,
   domainOf,
   domains,
   entityCountLabel,
   entityRef,
   isoOf,
   isos,
+  mapTreatment,
+  pinStreams,
   streamRef,
+  type MapTreatment,
 } from "@/lib/workspace/catalog";
+import {
+  PIN_LAYER_WHY,
+  type ComponentKind,
+} from "@/lib/workspace/components";
 import { entityNote } from "@/lib/workspace/entityNotes";
 
 /**
@@ -102,11 +110,22 @@ export function DataExplorer({
   onClear,
   onNext,
   verdict,
+  shape,
   initialDomain,
   domain: controlled,
   onDomainChange,
 }: {
   selected: DataRef[];
+  /**
+   * The shape the data is for, when one was chosen first. Most shapes read
+   * the catalogue as it is; the map reads it at a different grain. A map is
+   * a stack of layers, a layer is one stream the map can place, and "add
+   * data" on a map only ever offers spatial data — so for the map the list
+   * is filtered to what `mapTreatment` can draw, each card says how much of
+   * the stream it places, and one click takes the whole stream as a layer.
+   * Narrowing to a tier or a search is the second gesture, not the first.
+   */
+  shape?: ComponentKind;
   /**
    * The domain, when the parent owns it. The build panel's shelf shows the
    * same select in its heading and filters what is published by it, so the
@@ -157,6 +176,9 @@ export function DataExplorer({
     setIso(ALL);
   }, [domain]);
   const everything = domain === EVERYTHING;
+  const mapping = shape === "map";
+  /** The stream already drawn as pins, if any — a second one is refused. */
+  const pinsOn = useMemo(() => pinStreams(selected), [selected]);
   const [query, setQuery] = useState("");
   /** The set being read at level two, or null for the catalogue. */
   const [drill, setDrill] = useState<Schema | null>(null);
@@ -194,6 +216,7 @@ export function DataExplorer({
     for (const s of SCHEMAS) {
       if (
         (!everything && domainOf(s) !== domain) ||
+        (mapping && mapTreatment(s) === null) ||
         (iso !== ALL && isoOf(s) !== iso) ||
         (category !== ALL && categoryOf(s) !== category) ||
         (q &&
@@ -223,7 +246,7 @@ export function DataExplorer({
     return [...bySection.entries()].map(
       ([heading, entries]) => ({ heading, entries }),
     );
-  }, [refs, domain, everything, iso, category, query]);
+  }, [refs, domain, everything, iso, category, query, mapping]);
 
   const shown = groups.length;
 
@@ -339,7 +362,9 @@ export function DataExplorer({
       <div className="dr-scroll min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
         {shown === 0 ? (
           <p className="px-0.5 py-3 text-[12.5px] text-faint">
-            Nothing in {everything ? "the catalogue" : domain} matches “{query}”.
+            {mapping && !query.trim()
+              ? `Nothing in ${everything ? "the catalogue" : domain} has a place the map can draw.`
+              : `Nothing in ${everything ? "the catalogue" : domain} matches “${query}”.`}
           </p>
         ) : (
           groups.map((g) => (
@@ -358,7 +383,29 @@ export function DataExplorer({
                     nothing to choose, so its card selects directly. Same card,
                     same height — only the affordance differs. */}
                 {g.entries.map((e) =>
-                  hasEntities(e.schema) ? (
+                  mapping && e.streamRef ? (
+                    <LayerRow
+                      key={e.schema.id}
+                      schema={e.schema}
+                      treatment={mapTreatment(e.schema)!}
+                      selected={chosen.has(
+                        `${e.streamRef.snippet}::${e.streamRef.label}`,
+                      )}
+                      picked={countPicked(selected, e.schema)}
+                      blocked={
+                        pinsOn.length > 0 &&
+                        mapTreatment(e.schema)!.how === "pins" &&
+                        !pinsOn.includes(e.schema.id)
+                      }
+                      onSelect={() => onToggle(e.streamRef!)}
+                      onNarrow={
+                        hasEntities(e.schema) &&
+                        mapTreatment(e.schema)!.how === "pins"
+                          ? () => setDrill(e.schema)
+                          : undefined
+                      }
+                    />
+                  ) : hasEntities(e.schema) ? (
                     <DrillRow
                       key={e.schema.id}
                       schema={e.schema}
@@ -394,7 +441,9 @@ export function DataExplorer({
         hint={
           selected.length > 0
             ? "click again to remove"
-            : "Click a box to select it"
+            : mapping
+              ? "Click a stream to draw it as a layer"
+              : "Click a box to select it"
         }
         verdict={verdict}
         onNext={onNext}
@@ -519,6 +568,111 @@ function DrillRow({
         entities={schema.entities.count}
       />
     </button>
+  );
+}
+
+/**
+ * A stream on the map's shelf: the whole of it as one layer, in one click.
+ *
+ * The same card as `DrillRow` at a different grain. A chart is built out of
+ * rows, so a large stream opens into its entities; a map is built out of
+ * layers, so the click takes the stream whole and the drill is the second
+ * gesture — "narrow ›" — for a tier or a search of it. The coverage line is
+ * read *before* the click: "8 of 9 have known locations" and "1,118
+ * entities · invented positions" are facts to choose on, and the map's own
+ * `accepts` used to be the first place they surfaced, after the fact, on the
+ * footer.
+ *
+ * `blocked` is the second stream of pins. The map draws one layer of them
+ * (see `pinStreams`), and a card that could be clicked into a refusal is
+ * worse than one that says why it cannot be.
+ */
+function LayerRow({
+  schema,
+  treatment,
+  selected,
+  picked,
+  blocked,
+  onSelect,
+  onNarrow,
+}: {
+  schema: Schema;
+  treatment: MapTreatment;
+  selected: boolean;
+  picked: number;
+  blocked: boolean;
+  onSelect: () => void;
+  onNarrow?: () => void;
+}) {
+  return (
+    <div
+      className={cx(
+        "flex w-full flex-col rounded border transition-colors",
+        selected
+          ? "border-accent-line bg-accent-dim"
+          : blocked
+            ? "border-line bg-surface-2 opacity-50"
+            : "border-line bg-surface-2 hover:border-accent-line",
+      )}
+    >
+      <button
+        onClick={onSelect}
+        disabled={blocked}
+        title={blocked ? PIN_LAYER_WHY : undefined}
+        className="flex w-full flex-col gap-0.5 px-2 pt-1.5 text-left disabled:cursor-not-allowed"
+      >
+        <span className="flex items-center gap-1.5">
+          <span
+            className={cx(
+              "truncate font-mono text-[11px]",
+              selected ? "text-accent" : "text-ink",
+            )}
+          >
+            {schema.name}
+          </span>
+          {/* Entities picked one at a time from inside the set — a partial
+              layer, said in the same words the drill card uses. */}
+          {picked > 0 && !selected && (
+            <span className="shrink-0 rounded-full border border-accent-line bg-accent-dim px-1.5 py-px font-mono text-[9px] text-accent">
+              {picked} picked
+            </span>
+          )}
+          {selected && (
+            <span className="ml-auto shrink-0 text-[11px] text-accent">
+              ✓
+            </span>
+          )}
+        </span>
+        <span className="truncate font-mono text-[9.5px] text-faint">
+          {blurbLead(schema)}
+        </span>
+        {/* How much of it the map can place — the line this card exists for. */}
+        <span
+          className={cx(
+            "truncate font-mono text-[9.5px]",
+            treatment.invented ? "text-info" : "text-muted",
+          )}
+        >
+          {coverageLabel(treatment)}
+          {treatment.invented && " · demonstration only"}
+        </span>
+        <MetaBadges cadence={schema.cadence.label} />
+      </button>
+      <div className="flex items-center px-2 pb-1.5 pt-0.5">
+        {blocked ? (
+          <span className="truncate font-mono text-[9.5px] text-faint">
+            {PIN_LAYER_WHY}
+          </span>
+        ) : onNarrow ? (
+          <button
+            onClick={onNarrow}
+            className="font-mono text-[9.5px] text-muted transition-colors hover:text-accent"
+          >
+            narrow to a tier or a search ›
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

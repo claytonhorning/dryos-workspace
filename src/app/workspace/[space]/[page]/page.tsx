@@ -46,10 +46,11 @@ import type { App, AppSummary } from "@/lib/workspace/types";
  * tab, so the panel repeats neither — both are questions asked of a launched
  * screen at least as often as of one being edited.
  */
-type PanelMode = "build" | "chat" | "changes";
+type PanelMode = "build" | "wires" | "chat" | "changes";
 
 const PANELS: { id: PanelMode; label: string }[] = [
   { id: "build", label: "Build" },
+  { id: "wires", label: "Wires" },
   { id: "chat", label: "Chat" },
   { id: "changes", label: "History" },
 ];
@@ -89,16 +90,17 @@ const PANEL_MAX = 840;
  * weight it will have on the wall, and dragging the panel zooms the screen
  * rather than reflowing it.
  *
- * Height is the launched height for the same reason, so the canvas is the
- * whole launched screen and nothing but it — letterboxed, and the room that
- * frees below is not dead space: the chat fills all of it. Showing a strip
- * more canvas below the fold was the better use of that room when nothing
- * else wanted it; a conversation does, and it wants every pixel it can get.
+ * Height comes from the room, with the launched height as its floor. The
+ * frame is laid out as tall as the column is at that scale, so a canvas whose
+ * column runs past the launched screen shows a strip more of itself below
+ * the fold rather than a band of dead ground. It was letterboxed to the
+ * launched height for a while, when the wires strip sat under the canvas and
+ * wanted every pixel it freed; the strip is a pane in the panel column now
+ * and nothing else wants the room, so the screen takes it back.
  *
- * It returns the box to measure, the fit to apply, and the box's own height
- * (`boxH`, the launched height scaled). Measured rather than declared:
- * `aspect-ratio` takes a ratio of numbers, and this one is a ratio of two
- * lengths that both change under a window resize or a panel drag.
+ * It returns the box to measure and the fit to apply. Measured rather than
+ * declared: `aspect-ratio` takes a ratio of numbers, and this one is a ratio
+ * of two lengths that both change under a window resize or a panel drag.
  */
 function useScreenFit(active: boolean, ready: boolean) {
   const box = useRef<HTMLDivElement>(null);
@@ -106,7 +108,6 @@ function useScreenFit(active: boolean, ready: boolean) {
     w: number;
     h: number;
     scale: number;
-    boxH: number;
   } | null>(null);
 
   useEffect(() => {
@@ -127,7 +128,10 @@ function useScreenFit(active: boolean, ready: boolean) {
       // measuring it would only produce a scale to correct a moment later.
       if (w <= 0 || h <= 0 || room.width <= 0) return;
       const scale = Math.min(1, room.width / w);
-      setFit({ w, h, scale, boxH: Math.round(h * scale) });
+      // The room's own height is a fact about the column, not about the
+      // frame — the box is flex-sized by the column, so this never chases
+      // itself the way measuring the frame would.
+      setFit({ w, h: Math.max(h, Math.round(room.height / scale)), scale });
     };
     measure();
     // The panel is draggable and the window is resizable, and only one of those
@@ -300,6 +304,18 @@ export default function AppPage() {
    */
   const [marked, setMarked] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A mark is made on the screen and read in the Wires pane, so the first
+   * one brings the pane forward — a ring on a tile with nothing in the
+   * panel saying why is a ring nobody can act on. Only the first: a third
+   * shift-click while somebody is over in Build should not yank them back.
+   */
+  const wasMarked = useRef(false);
+  useEffect(() => {
+    const any = marked.length > 0;
+    if (any && !wasMarked.current) setPanel("wires");
+    wasMarked.current = any;
+  }, [marked]);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   /**
    * The chat a double click on a launched tile opened: what the frame
@@ -338,6 +354,9 @@ export default function AppPage() {
    * one fit. The settings still land exactly as previewed; only the size is
    * the shape's default, which is sized to be one tile among several.
    */
+  /** A single running preview is in flight — the Wires pane can take it. */
+  const stageable = Boolean(dragging && !dragging.group);
+
   const beginDrag = useCallback(
     (payload: TrayPayload | null) => {
       setDragging(
@@ -812,19 +831,12 @@ export default function AppPage() {
       >
         <div className="relative flex min-h-0 flex-col gap-2">
           {/*
-            Editing, the canvas is the launched screen scaled — exactly it,
-            letterboxed to its height — and everything under it belongs to the
-            chat. Until the fit is measured (and whenever the panel is closed)
-            it fills the column the way it always did.
+            Editing, the canvas is the launched screen scaled down to the
+            column's width and as tall as the column — every pixel beside
+            the panel is screen. The wires strip used to sit under it here;
+            it is a pane of the panel column now.
           */}
-          <div
-            ref={canvasBox}
-            className={cx(
-              "relative",
-              asideOpen && fit ? "shrink-0" : "min-h-0 flex-1",
-            )}
-            style={asideOpen && fit ? { height: fit.boxH } : undefined}
-          >
+          <div ref={canvasBox} className="relative min-h-0 flex-1">
             <Runner
               appId={app.id}
               version={app.updatedAt}
@@ -959,39 +971,6 @@ export default function AppPage() {
               {runtimeError}
             </p>
           )}
-
-          {/*
-            The strip under the canvas: the groups of tiles wired together on
-            this page. Connecting goes down the same replace-in-slot path the
-            tile editor's Save uses, so a wire is composed, compiled and
-            recorded like any other change.
-          */}
-          {asideOpen && (
-            <div className="min-h-0 flex-1">
-              <WiresStrip
-                onDragStateChange={beginDrag}
-                placedTick={placedTick}
-                manifest={app.manifest}
-                carrying={dragging}
-                onStaged={() => setBuiltTick((n) => n + 1)}
-                marked={marked}
-                onMarkedChange={setMarked}
-                onConnect={async (t, from, color) => {
-                  const spec = app.manifest?.[t];
-                  if (!spec) return;
-                  const options = { ...(spec.options ?? {}) };
-                  if (from === null) {
-                    delete options.follow;
-                    delete options.wireColor;
-                  } else {
-                    options.follow = String(from);
-                    if (color) options.wireColor = color;
-                  }
-                  await placeSpec({ ...spec, options }, t);
-                }}
-              />
-            </div>
-          )}
         </div>
 
         {/*
@@ -1100,11 +1079,31 @@ export default function AppPage() {
                     <button
                       key={p.id}
                       onClick={() => setPanel(p.id)}
+                      /*
+                        The Wires tab is spring-loaded: a running preview
+                        dragged over it opens the pane, and the pane is the
+                        drop target it always was. The preview it came from
+                        is hidden, not unmounted, when its pane steps back
+                        — a drag survives its source being hidden, not
+                        removed — and the pane clears the payload on drop
+                        itself rather than trusting a hidden source's
+                        dragend.
+                      */
+                      onDragOver={
+                        p.id === "wires" && stageable
+                          ? (e) => {
+                              e.preventDefault();
+                              if (panel !== "wires") setPanel("wires");
+                            }
+                          : undefined
+                      }
                       className={cx(
                         "flex-1 rounded-md px-2 py-1 text-[12px] transition-colors",
                         panel === p.id
                           ? "bg-surface-3 text-ink"
-                          : "text-muted hover:text-ink",
+                          : p.id === "wires" && stageable
+                            ? "text-accent ring-1 ring-accent/40"
+                            : "text-muted hover:text-ink",
                       )}
                     >
                       {p.label}
@@ -1182,6 +1181,43 @@ export default function AppPage() {
                 )}
 
                 {/*
+                  The groups of tiles wired together on this page, and the
+                  one being built. Kept mounted: the draft lives in the pane,
+                  and a draft that vanished when somebody went to Build to
+                  make its next member would be no way to build a group.
+                  Connecting goes down the same replace-in-slot path the
+                  tile editor's Save uses, so a wire is composed, compiled
+                  and recorded like any other change.
+                */}
+                <div
+                  hidden={panel !== "wires"}
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  <WiresStrip
+                    onDragStateChange={beginDrag}
+                    placedTick={placedTick}
+                    manifest={app.manifest}
+                    carrying={dragging}
+                    onStaged={() => setBuiltTick((n) => n + 1)}
+                    marked={marked}
+                    onMarkedChange={setMarked}
+                    onConnect={async (t, from, color) => {
+                      const spec = app.manifest?.[t];
+                      if (!spec) return;
+                      const options = { ...(spec.options ?? {}) };
+                      if (from === null) {
+                        delete options.follow;
+                        delete options.wireColor;
+                      } else {
+                        options.follow = String(from);
+                        if (color) options.wireColor = color;
+                      }
+                      await placeSpec({ ...spec, options }, t);
+                    }}
+                  />
+                </div>
+
+                {/*
                   Kept mounted, like the build pane below: a transcript that
                   vanished every time somebody glanced at History would not be
                   a conversation.
@@ -1229,6 +1265,7 @@ export default function AppPage() {
                       refs={attached}
                       onToggle={toggle}
                       onClear={() => setAttached([])}
+                      onReplace={setAttached}
                       onDragStateChange={beginDrag}
                       manifest={app.manifest}
                       domain={domain}

@@ -37,8 +37,15 @@ import {
 } from "./BuildPanel";
 
 /**
- * The strip under the screen: the groups of components wired together on this
- * page, the one you are looking at, and the widget that lands.
+ * The Wires pane of the panel column: the groups of components wired together
+ * on this page, the one you are looking at, and the widget that lands.
+ *
+ * It was a strip under the canvas, and the strip was screen the screen did
+ * not get — a band across the whole width to hold a list read a few times a
+ * session. In the column it takes a turn like Build and Chat do, and reaches
+ * the drop it exists for through the Wires tab, which springs open under a
+ * running preview dragged across it. Three columns became a stack, since the
+ * column is a third the width the strip was.
  *
  * A wire is stored on the receiver as its `follow` option — the source tile's
  * index — which is what makes it replayable like every other setting, and a
@@ -236,7 +243,7 @@ export function WiresStrip({
     >
       <div className="flex shrink-0 items-center gap-3 border-b border-line px-3 py-1.5">
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted">
-          Components wired in a group on this page
+          Groups on this page
         </span>
         {/*
           The one action the strip has, at the end of the bar that names what
@@ -257,7 +264,7 @@ export function WiresStrip({
         >
           <span aria-hidden="true">+</span>
           {drafting
-            ? "building — drop previews in, or ⇧-click tiles"
+            ? "building — drop or ⇧-click to add"
             : accepts
               ? // A drop with no draft opens one, so the button says what a
                 // release would do rather than standing there unexplained.
@@ -735,31 +742,32 @@ function WiresPane({
         <p className="max-w-[52ch] text-[11px] leading-relaxed text-faint">
           Wire components together and they answer each other — clicking a node
           on a map retargets the charts beside it. Shift-click two tiles on the
-          screen, or start a group above and drag running previews onto this
-          box.
+          screen, or start a group above and drag a running preview from Build
+          over the Wires tab to drop it in.
         </p>
       </div>
     );
 
   return (
-    <div className="flex min-h-0 flex-1 gap-2.5 px-3 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col gap-2.5 px-3 py-2.5">
       {/*
         ── The groups on this screen ──────────────────────────────────────
         A wired set is one row, because that is what it is. One selection at
-        a time: the columns beside it are this group being read, so two of
+        a time: the sections under it are this group being read, so two of
         them open at once would be two answers to the question the pane is
-        asking.
+        asking. Capped so a page of groups leaves room for the one open.
       */}
       <Column
         title="groups"
         count={groups.length}
         hint={over ? "release to add it" : undefined}
+        className="max-h-[30%] flex-none"
       >
         {groups.length === 0 ? (
           <p className="px-0.5 text-[11px] leading-relaxed text-faint">
             Nothing on this screen is wired yet. Start a
-            group, then drag running previews onto this box
-            to fill it.
+            group, then drag running previews over the Wires
+            tab to fill it.
           </p>
         ) : (
           groups.map((g) => {
@@ -838,13 +846,13 @@ function WiresPane({
       >
         {!open ? (
           <p className="px-0.5 text-[11px] leading-relaxed text-faint">
-            Pick a wired group on the left to look at it, or
+            Pick a wired group above to look at it, or
             start a new one.
           </p>
         ) : open.parts.length === 0 ? (
           <p className="px-0.5 text-[11px] leading-relaxed text-faint">
             Shift-click tiles on the screen, or drag a running preview
-            anywhere onto this box. They stack in the order they arrive, and
+            anywhere onto this pane. They stack in the order they arrive, and
             every chart and ticker follows the group&rsquo;s source — a map,
             or a search over the stream&rsquo;s own names, set here once
             there is something for it to drive.
@@ -1043,17 +1051,17 @@ function WiresPane({
         list, and what is being judged here is which components in what order
         — each one was previewed on its way in.
       */}
-      <div className="flex w-[210px] shrink-0 flex-col gap-1.5 border-l border-line pl-2.5">
+      <div className="flex max-h-[40%] flex-none flex-col gap-1.5 border-t border-line pt-2.5">
         <span className="font-mono text-[10px] tracking-[0.08em] text-faint uppercase">
           widget
         </span>
         {!open || open.parts.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-line px-3 text-center text-[11px] leading-relaxed text-faint">
+          <div className="flex items-center justify-center rounded-md border border-dashed border-line px-3 py-3 text-center text-[11px] leading-relaxed text-faint">
             A group lands as one piece. Open one and drag it
             from here.
           </div>
         ) : mixed ? (
-          <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-line px-3 text-center text-[11px] leading-relaxed text-faint">
+          <div className="flex items-center justify-center rounded-md border border-dashed border-line px-3 py-3 text-center text-[11px] leading-relaxed text-faint">
             A group is tiles already on the screen, or previews
             dropped here — not both at once. Take one kind out.
           </div>
@@ -1143,29 +1151,34 @@ function WidgetRow({ part, to }: { part: Part; to: number | undefined }) {
 }
 
 /**
- * One of the pane's three columns: a heading that counts what is in it, and a
- * list that scrolls inside its own column rather than pushing the pane.
+ * One of the pane's stacked sections: a heading that counts what is in it,
+ * and a list that scrolls inside its own section rather than pushing the
+ * pane.
  */
 function Column({
   title,
   count,
   hint,
   rule,
+  className = "flex-1",
   children,
 }: {
   title: string;
   count: number;
-  /** Replaces the count while something is happening to this column. */
+  /** Replaces the count while something is happening to this section. */
   hint?: string;
-  /** A rule on the left edge, separating it from the column before it. */
+  /** A rule along the top, separating it from the section before it. */
   rule?: boolean;
+  /** How it shares the pane's height; the open group takes what is left. */
+  className?: string;
   children: ReactNode;
 }) {
   return (
     <div
       className={cx(
-        "flex min-h-0 min-w-0 flex-1 flex-col gap-1.5",
-        rule && "border-l border-line pl-2.5",
+        "flex min-h-0 min-w-0 flex-col gap-1.5",
+        className,
+        rule && "border-t border-line pt-2",
       )}
     >
       <span className="flex items-baseline gap-1.5 font-mono text-[10px] tracking-[0.08em] uppercase">

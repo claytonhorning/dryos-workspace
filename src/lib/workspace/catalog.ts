@@ -2613,6 +2613,31 @@ export function placeableNodes(schema: Schema): string[] {
   );
 }
 
+/**
+ * The streams a selection would draw as pins, by id.
+ *
+ * The map draws **one** layer of pins. A field and a fleet each get a layer of
+ * their own, but every pin reference is merged into a single point layer whose
+ * placement rule, scale and legend swatch come from the first stream — a
+ * second stream of pins does not stack, it silently loses. So a second one is
+ * refused wherever a layer is chosen (the map's `accepts`, the explorer's
+ * cards, the layer picker), and this is the one place that decides which
+ * references count. Two entities of one stream are two pins on one layer,
+ * which is why the answer is a set of streams and not a count of references.
+ */
+export function pinStreams(refs: DataRef[]): string[] {
+  return [
+    ...new Set(
+      refs
+        .filter((r) => {
+          const s = schemaById(r.schemaId);
+          return s !== undefined && !s.field && !s.motion;
+        })
+        .map((r) => r.schemaId),
+    ),
+  ];
+}
+
 /** "1,118 placed · invented" — what the picker says under a layer's name. */
 export function coverageLabel(t: MapTreatment): string {
   if (t.how === "surface")

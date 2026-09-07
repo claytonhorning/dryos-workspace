@@ -25,6 +25,7 @@ import {
   DomainSelect,
 } from "@/components/workspace/DataExplorer";
 import { SelectionStrip } from "@/components/workspace/DataChip";
+import { MapLayers } from "@/components/workspace/MapLayers";
 import {
   communityComponents,
   communityGroups,
@@ -218,6 +219,7 @@ export function BuildPanel({
   refs,
   onToggle,
   onClear,
+  onReplace,
   onDragStateChange,
   manifest,
   domain,
@@ -228,6 +230,11 @@ export function BuildPanel({
   refs: DataRef[];
   onToggle: (ref: DataRef) => void;
   onClear: () => void;
+  /**
+   * The selection, replaced whole. A map's layers are reordered and the
+   * order is the draw order, which a toggle cannot express.
+   */
+  onReplace: (refs: DataRef[]) => void;
   onDragStateChange: (payload: TrayPayload | null) => void;
   /** The page's manifest, so a landing group takes the next free wire color. */
   manifest?: ComponentSpec[];
@@ -505,7 +512,7 @@ export function BuildPanel({
               {preview.name}
             </span>
             <span className="font-mono text-[10px] text-faint">
-              · pick its data
+              · {preview.def.kind === "map" ? "pick its layers" : "pick its data"}
             </span>
           </span>
         </div>
@@ -517,6 +524,7 @@ export function BuildPanel({
             onToggle={onToggle}
             onClear={onClear}
             verdict={preview.def.accepts(refs)}
+            shape={preview.def.kind}
             onNext={() => setStage("shelf")}
           />
         </div>
@@ -623,6 +631,15 @@ export function BuildPanel({
               previewOpts,
             )}:${previewRefs.map((r) => r.schemaId + r.label).join("|")}`}
             frameRef={previewFrame}
+            // A base map's layers are the explorer's selection, so they
+            // are edited here in place — the same list the tile editor
+            // shows, with the same order and removal. A published map
+            // brings its own and only lists them.
+            layersEditor={
+              preview.def.kind === "map" && preview.shelf === "base" ? (
+                <MapLayers layers={refs} onChange={onReplace} />
+              ) : undefined
+            }
             onDragStart={(e) => {
               e.dataTransfer.setData(DRAG_TYPE, "1");
               e.dataTransfer.effectAllowed = "copy";
@@ -866,9 +883,9 @@ export function PreviewPane({
         and a short panel is a normal combination.
 
         A map's references are layers rather than series — nothing per-row to
-        color or dash, since the measure's own scale paints the points and
-        visibility and order live on the map's own legend — so it gets the list
-        in the map's words instead.
+        color or dash, since the measure's own scale paints the points — so it
+        gets the list in the map's words instead: the stack, bottom to top,
+        editable wherever the data is the reader's to change.
 
         Frozen source is exempt for the same reason the selects above are: a
         refined component ignores its settings, so offering them would be a lie.
@@ -876,7 +893,7 @@ export function PreviewPane({
       {live && tunable && def.kind !== "text" && (
         <div className="dr-scroll min-h-0 flex-1 overflow-y-auto">
           {def.kind === "map" ? (
-            (layersEditor ?? <MapLayers refs={refs} />)
+            (layersEditor ?? <MapLayers layers={refs} />)
           ) : (
             <SeriesStyles
               refs={refs}
@@ -965,52 +982,6 @@ export function PreviewPane({
           />
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * A map's references, listed as the layers they become.
- *
- * The series list is wrong here twice over: nothing per-row is choosable (the
- * measure's declared scale colors the points, so a color picker would be
- * overridden by the data), and "series" is not what anyone calls a set of
- * things on a map. Visibility and draw order are decided on the map itself —
- * its legend is the layer switch — so this list only says what will be there.
- */
-function MapLayers({ refs }: { refs: DataRef[] }) {
-  return (
-    <div className="rounded-lg border border-line bg-surface-2/40 p-2">
-      <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-          Layers
-        </span>
-        <span className="ml-auto font-mono text-[9.5px] text-faint">
-          {refs.length} on the map
-        </span>
-      </div>
-
-      {refs.length === 0 ? (
-        <p className="mt-1.5 text-[11.5px] text-muted">
-          Nothing selected yet.
-        </p>
-      ) : (
-        <ul className="mt-1.5 flex flex-col gap-1">
-          {refs.map((r) => (
-            <li
-              key={r.schemaId + r.label}
-              className="truncate rounded-md border border-line bg-surface px-2 py-1.5 text-[11.5px] text-ink"
-            >
-              {r.label}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <p className="mt-1.5 font-mono text-[9.5px] leading-snug text-faint">
-        visibility and draw order are set on the map itself,
-        in its legend
-      </p>
     </div>
   );
 }

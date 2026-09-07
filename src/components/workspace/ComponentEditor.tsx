@@ -8,20 +8,12 @@ import {
   type ComponentSpec,
   withDefaults,
 } from "@/lib/workspace/components";
-import {
-  SCHEMAS,
-  catalogRefs,
-  coverageLabel,
-  domainOf,
-  mapTreatment,
-  schemaFor,
-  creditChip,
-  type DataRef,
-} from "@/lib/workspace/catalog";
+import { type DataRef } from "@/lib/workspace/catalog";
 import { usePreviewHost } from "@/lib/workspace/usePreviewHost";
 import { previewLayout, PreviewPane } from "@/components/workspace/BuildPanel";
 import { DataExplorer } from "@/components/workspace/DataExplorer";
 import { SelectionStrip } from "@/components/workspace/DataChip";
+import { MapLayers } from "@/components/workspace/MapLayers";
 import { useTheme } from "@/lib/useTheme";
 import { useTimeZone } from "@/lib/useTimeZone";
 
@@ -179,6 +171,7 @@ export function ComponentEditor({
             setCode(null);
           }}
           verdict={verdict}
+          shape={def.kind}
           onNext={() => setStage("preview")}
         />
       </div>
@@ -293,179 +286,6 @@ export function ComponentEditor({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * The map's layers: what is on it, and what else could be.
- *
- * Two halves, and the split matters. The top is the composition — the refs this
- * tile already draws, in the order they stack — so it is a list with removal and
- * reordering rather than a row of chips, because order is meaningful on a map in
- * a way it is not on a chart.
- *
- * The bottom is what can be added, and the filter is **drawability, never
- * domain**. Grouping is by domain, which is a different thing: the most useful
- * map in this product puts a wind field under price pins, and a picker scoped to
- * "the domain I am in" would forbid exactly the cross-domain join that makes
- * collecting weather beside ERCOT worth doing. Domain is a heading. It is not a
- * gate.
- *
- * Coverage is stated wherever it is partial. ERCOT publishes a price against a
- * name and no coordinate, so a nodal layer can only place the entities
- * `geo.ts` knows or `geoMock` invents — and "3 of 9 have known locations" is a
- * fact somebody can act on, where a layer that quietly drew a third of itself is
- * just wrong on screen with no way to tell.
- */
-export function MapLayers({
-  layers,
-  onChange,
-}: {
-  layers: DataRef[];
-  onChange: (next: DataRef[]) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-
-  const move = (i: number, by: number) => {
-    const next = [...layers];
-    const j = i + by;
-    if (j < 0 || j >= next.length) return;
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
-  };
-
-  /*
-    Every stream the map could draw, minus the ones already on it, grouped by
-    domain. Built from the schema-level refs so an added layer is the same shape
-    of reference the explorer produces — a browsed layer and a picked one have to
-    be indistinguishable downstream or the revision replays differently.
-  */
-  const available = useMemo(() => {
-    const on = new Set(layers.map((r) => r.schemaId));
-    const rows = catalogRefs()
-      .filter((r) => r.kind === "schema" && !on.has(r.schemaId))
-      .map((r) => {
-        const schema = SCHEMAS.find((s) => s.id === r.schemaId);
-        const t = schema ? mapTreatment(schema) : null;
-        return t && schema ? { ref: r, schema, t } : null;
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
-
-    const byDomain = new Map<string, typeof rows>();
-    for (const row of rows) {
-      const d = domainOf(row.schema);
-      byDomain.set(d, [...(byDomain.get(d) ?? []), row]);
-    }
-    return [...byDomain.entries()];
-  }, [layers]);
-
-  return (
-    <div className="mt-3">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
-          Layers
-        </span>
-        <span className="text-[10px] text-faint">drawn bottom to top</span>
-      </div>
-
-      <div className="mt-1.5 flex flex-col gap-1">
-        {layers.map((r, i) => {
-          const schema = schemaFor(r.schemaId);
-          const t = schema ? mapTreatment(schema) : null;
-          return (
-            <div
-              key={`${r.schemaId}-${r.label}-${i}`}
-              className="flex items-center gap-1.5 rounded border border-line bg-surface-2 px-2 py-1.5"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[12px] text-ink">{r.label}</div>
-                <div className="truncate text-[10px] text-faint">
-                  {r.path}
-                  {t ? ` · ${coverageLabel(t)}` : " · not mappable"}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => move(i, -1)}
-                  disabled={i === 0}
-                  aria-label="Move down the stack"
-                  className="rounded px-1 text-[11px] text-muted transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-muted"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  onClick={() => move(i, 1)}
-                  disabled={i === layers.length - 1}
-                  aria-label="Move up the stack"
-                  className="rounded px-1 text-[11px] text-muted transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-muted"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChange(layers.filter((_, j) => j !== i))}
-                  aria-label={`Remove ${r.label}`}
-                  className="rounded px-1 text-[11px] text-muted transition-colors hover:text-fail"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          );
-        })}
-        {layers.length === 0 && (
-          <p className="rounded border border-dashed border-line px-2 py-2 text-[11px] text-faint">
-            No layers. A map with nothing on it draws Texas and no more.
-          </p>
-        )}
-      </div>
-
-      <button
-        type="button"
-        onClick={() => setAdding((v) => !v)}
-        className="mt-1.5 w-full rounded border border-dashed border-line py-1.5 text-[11px] text-muted transition-colors hover:border-accent-line hover:text-accent"
-      >
-        {adding ? "Close" : "+ Add a layer"}
-      </button>
-
-      {adding && (
-        <div className="mt-1.5 max-h-64 overflow-y-auto rounded border border-line bg-surface-2 p-1.5">
-          {available.length === 0 && (
-            <p className="px-1 py-2 text-[11px] text-faint">
-              Everything the map can draw is already on it.
-            </p>
-          )}
-          {available.map(([domain, rows]) => (
-            <div key={domain} className="mb-1.5 last:mb-0">
-              <div className="px-1 pb-1 font-mono text-[9px] tracking-[0.13em] text-faint uppercase">
-                {domain}
-              </div>
-              {rows.map(({ ref, t }) => (
-                <button
-                  key={ref.schemaId}
-                  type="button"
-                  onClick={() => {
-                    onChange([...layers, ref]);
-                    setAdding(false);
-                  }}
-                  className="block w-full rounded px-1.5 py-1 text-left transition-colors hover:bg-surface-3"
-                >
-                  <div className="truncate text-[11.5px] text-ink">{ref.label}</div>
-                  <div className="truncate text-[10px] text-faint">
-                    {coverageLabel(t)}
-                    {t.invented && " · demonstration only"}
-                    {" · "}
-                    {creditChip(ref.tokens)}
-                  </div>
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
