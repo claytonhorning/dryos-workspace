@@ -30,18 +30,14 @@ export type Subject = {
 /**
  * What can be chosen. The live domains come from the catalogue, each
  * described by its own categories so a card cannot promise a sector nobody
- * collects; Property is declared as next; Everything is the blend, stored as
+ * collects (Property joined on 2026-09-07 with its first permit stream); a
+ * subject with no streams yet is declared here as `next`; Everything is the
+ * blend, stored as
  * `"all"` (the literal `spaces.ts` names `ALL_DOMAINS` — that module is
  * server-only).
  */
 export const SUBJECTS: Subject[] = [
   ...domains().map((d) => ({ id: d, label: d, blurb: categories(d).join(" · ") })),
-  {
-    id: "Property",
-    label: "Property",
-    blurb: "Assessments · Transfers · Permits · Zoning",
-    next: true,
-  },
   {
     id: ALL,
     label: "Everything",

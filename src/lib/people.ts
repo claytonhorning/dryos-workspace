@@ -50,7 +50,7 @@ export const MAINTAINERS: Maintainer[] = [
     domain: "Property",
     role: "Property data maintainer",
     blurb:
-      "County rolls, transfers and permits, one schema per county. Coming next.",
+      "Permits first, city by city — Austin is live — then county rolls and transfers, one schema per office.",
     src: "/landing/people/property.jpg",
     initials: "TR",
   },

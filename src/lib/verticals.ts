@@ -24,8 +24,8 @@ export const VERTICALS: Vertical[] = [
   {
     id: "property",
     name: "Property",
-    blurb: "Parcels, permits, assessments, zoning — county by county",
-    status: "planned",
+    blurb: "Permits, parcels, assessments, zoning — starting with Austin's permits",
+    status: "live",
     expertise:
       "Which of 3,000 county assessor portals changed its export format this quarter, and how parcel IDs survive a re-plat.",
     examples: [

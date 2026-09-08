@@ -13,9 +13,9 @@ import { CHOOSABLE, SUBJECTS, useDomain } from "@/lib/domain";
  * because it is the frame everything else sits in — the shelf says "your
  * Energy workspaces", the community panel names Energy's maintainer, a new
  * workspace is an Energy one — and a frame belongs where it is always in
- * view and always in the same place. Property is not offered: it is
- * declared, not collected, and a domain with no streams would open onto
- * an empty shelf. The shelf's own chooser shows it as coming.
+ * view and always in the same place. Only a domain with streams is
+ * offered — one with none would open onto an empty shelf — and the shelf's
+ * own chooser shows a declared-but-uncollected domain as coming.
  *
  * Hidden below `md`; the top bar carries a compact copy of the picker there.
  */

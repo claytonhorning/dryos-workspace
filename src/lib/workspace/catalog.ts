@@ -2231,6 +2231,99 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // ── Property ───────────────────────────────────────────────────────────
+  // The first Property stream, landed 2026-09-07. A permit is an event, not
+  // an interval: the row's time is the day it was issued, at Central
+  // midnight, and the entity is the ZIP — the grain hail reports and roofers
+  // both count in. Fifty ZIPs is past what a chart fans out, so there is no
+  // `entityKey` and the explorer opens the set; `entityColumn` tells the map
+  // which column names a place. Rows carry the city's own coordinates where
+  // it geocoded them (about six in ten), so the stream is `located` and the
+  // map draws what the source placed, never a guess.
+  {
+    id: "property.permits.austin",
+    path: ["Property", "Permits", "Austin"],
+    name: "Austin construction permits",
+    short: "Austin permits",
+    dataset: "austin-permits",
+    availability: "live",
+    cadence: { label: "daily", seconds: 86_400 },
+    tokens: 0.25,
+    entities: {
+      count: 50,
+      label: "ZIP codes",
+      sample: ["78704", "78745", "78744"],
+    },
+    entityColumn: "zip",
+    located: true,
+    sourceTz: "America/Chicago",
+    blurb:
+      "Every building, electrical, mechanical, plumbing and driveway permit the " +
+      "City of Austin issues, one row per permit: the work described, the " +
+      "declared value, the contracting company and the place. Read nightly from " +
+      "the city's open-data view and upserted for two weeks after issue, so a " +
+      "status that moves after the permit is pulled moves here too.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 7),
+    },
+    variables: [
+      {
+        key: "valuation_usd",
+        label: "Job valuation",
+        unit: "$",
+        availability: "live",
+        description:
+          "Total job valuation declared on the permit. Trade permits carry " +
+          "none; about one permit in six declares a value.",
+        mock: { base: 60_000, swing: 45_000, noise: 20_000, floor: 0 },
+      },
+    ],
+  },
+  // San Antonio is the roofing signal: the city issues a re-roof permit
+  // type of its own, about seventy a week, with coordinates on nine rows in
+  // ten. Same shape as Austin — event, ZIP, located — read from a CKAN
+  // datastore rather than Socrata.
+  {
+    id: "property.permits.sanantonio",
+    path: ["Property", "Permits", "San Antonio"],
+    name: "San Antonio permits",
+    short: "San Antonio permits",
+    dataset: "sanantonio-permits",
+    availability: "live",
+    cadence: { label: "daily", seconds: 86_400 },
+    tokens: 0.25,
+    entities: {
+      count: 71,
+      label: "ZIP codes",
+      sample: ["78201", "78209", "78245"],
+    },
+    entityColumn: "zip",
+    located: true,
+    sourceTz: "America/Chicago",
+    blurb:
+      "Every building and trade permit the City of San Antonio issues, one " +
+      "row per permit, with its own re-roof permit type — the number a " +
+      "roofer, an adjuster or a carrier watches the week after a hailstorm. " +
+      "Read nightly from the city's open-data file and upserted for two " +
+      "weeks after issue.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 7),
+    },
+    variables: [
+      {
+        key: "valuation_usd",
+        label: "Declared valuation",
+        unit: "$",
+        availability: "live",
+        description:
+          "Valuation declared on the permit. Filed on about two permits in a " +
+          "hundred, mostly new buildings.",
+        mock: { base: 80_000, swing: 60_000, noise: 25_000, floor: 0 },
+      },
+    ],
+  },
 ];
 
 /** The one schema with a collector behind it. */

@@ -8,9 +8,9 @@ import { Eyebrow, Heading, Lead, Section } from "./Section";
  *
  * Energy and Weather are read from the catalogue — sectors and stream counts
  * come from what is actually collected, so the card cannot outrun the
- * collectors. Property is declared here as the next one, because there is
- * nothing in the catalogue to read yet, and the card says so rather than
- * wearing a count it does not have.
+ * collectors. Property joined them on 2026-09-07 with Austin's permits and
+ * is read the same way; a vertical with nothing in the catalogue is declared
+ * `next` here and says so rather than wearing a count it does not have.
  *
  * The "at the source" lines are the real state of the real feeds — the ones
  * that cost an afternoon each in CLAUDE.md — because the claim of the section
@@ -60,11 +60,11 @@ const VERTICALS: Vertical[] = [
   },
   {
     name: "Property",
-    status: "next",
-    sectors: ["Assessments", "Transfers", "Permits", "Zoning"],
-    sources: "County appraisal districts, clerks and permitting offices",
+    status: "live",
+    ...collected("Property"),
+    sources: "City permitting offices, starting with Austin; county appraisal districts and clerks next",
     atSource:
-      "Published county by county, each in its own schema: some as spreadsheets, some as PDFs, none as an API. The same parcel described three ways by three offices.",
+      "Published city by city and county by county, each in its own schema: some as spreadsheets, some as PDFs, the best as an API that drops every null key so a renamed column and an empty one look the same. The same parcel described three ways by three offices.",
   },
 ];
 
@@ -99,7 +99,7 @@ export function TheData() {
               <h3 className="text-[22px] font-semibold tracking-[-0.02em] text-ink">{v.name}</h3>
               {v.status === "live" ? (
                 <span className="rounded border border-accent-line bg-accent-dim px-1.5 py-[2px] font-mono text-[10px] tracking-[0.12em] text-accent uppercase">
-                  {v.streams} live streams
+                  {v.streams} live {v.streams === 1 ? "stream" : "streams"}
                 </span>
               ) : (
                 <span className="rounded border border-line bg-surface-2 px-1.5 py-[2px] font-mono text-[10px] tracking-[0.12em] text-faint uppercase">
