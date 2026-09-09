@@ -9,10 +9,10 @@ import { WireDemo } from "./WireDemo";
  *
  * Every image in this section is a capture of a page composed from the
  * published recipes, compiled through the real sandbox, on the live feed — the
- * same generated source a workspace runs. Nothing is a mock-up. The one
- * exception the map itself declares: settlement points have no published
- * coordinates, so their positions are invented, and the legend in the capture
- * says so.
+ * same generated source a workspace runs. Nothing is a mock-up. The captures
+ * predate the node location table, so the map in them still shows the
+ * invented positions its legend declares; retake them (`scripts/landing-shots`)
+ * against an API serving coordinates.
  *
  */
 export function Workspaces() {

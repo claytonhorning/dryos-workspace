@@ -359,8 +359,14 @@ export default function AppPage() {
 
   const beginDrag = useCallback(
     (payload: TrayPayload | null) => {
+      // A group's footprint is the whole stack — widest member across, every
+      // member down — and the ghost has to be that, because the server lands
+      // the stack under the anchor the ghost names. Ghosted at the first
+      // member's size, the rest of the stack landed on whatever was below.
       setDragging(
-        payload ? { ...payload, layout: DEFAULT_LAYOUT[payload.kind] } : payload,
+        payload && !payload.group
+          ? { ...payload, layout: DEFAULT_LAYOUT[payload.kind] }
+          : payload,
       );
     },
     [],
@@ -927,8 +933,10 @@ export default function AppPage() {
                         hand and the overlay just snapped back. After the
                         browser has taken its drag snapshot, hiding is safe.
                       */
+                      // Straight in, not through beginDrag: the copy is
+                      // carried at the original's size, not the shape's.
                       const payload = dupe;
-                      setTimeout(() => beginDrag(payload), 0);
+                      setTimeout(() => setDragging(payload), 0);
                     }}
                     onDragEnd={() => {
                       setDupe(null);

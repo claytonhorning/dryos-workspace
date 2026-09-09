@@ -241,17 +241,22 @@ async function regenerate(
   compose: (manifest: ComponentSpec[]) => string,
   build?: Build,
 ): Promise<App | null> {
-  const source = compose(manifest);
+  // Stored as it will be drawn. The composer packs on its own, and a place
+  // the packer had to step clear of a neighbour would otherwise be saved at
+  // the overlap the screen never showed — read back by the next gesture as
+  // ground that was free.
+  const packed = packLayout(manifest);
+  const source = compose(packed);
 
   if (build) {
     const built = await build(source);
     if (!built.js) return null;
   }
 
-  app.manifest = manifest;
+  app.manifest = packed;
   app.source = source;
   if (app.history[0]) {
-    app.history[0].manifest = manifest;
+    app.history[0].manifest = packed;
     app.history[0].source = source;
   }
   return write(app);

@@ -578,8 +578,8 @@ function DrillRow({
  * rows, so a large stream opens into its entities; a map is built out of
  * layers, so the click takes the stream whole and the drill is the second
  * gesture — "narrow ›" — for a tier or a search of it. The coverage line is
- * read *before* the click: "8 of 9 have known locations" and "1,118
- * entities · invented positions" are facts to choose on, and the map's own
+ * read *before* the click: "8 of 9 have known locations" and "698 of 1,118
+ * have known locations" are facts to choose on, and the map's own
  * `accepts` used to be the first place they surfaced, after the fact, on the
  * footer.
  *
@@ -647,14 +647,8 @@ function LayerRow({
           {blurbLead(schema)}
         </span>
         {/* How much of it the map can place — the line this card exists for. */}
-        <span
-          className={cx(
-            "truncate font-mono text-[9.5px]",
-            treatment.invented ? "text-info" : "text-muted",
-          )}
-        >
+        <span className="truncate font-mono text-[9.5px] text-muted">
           {coverageLabel(treatment)}
-          {treatment.invented && " · demonstration only"}
         </span>
         <MetaBadges cadence={schema.cadence.label} />
       </button>

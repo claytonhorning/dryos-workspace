@@ -182,19 +182,20 @@ export interface Schema {
    */
   located?: boolean;
   /**
-   * The map may place this stream's entities from `geoMock`, which invents them.
-   *
-   * Separate from `availability` on purpose, because it is a different claim:
-   * the *numbers* here are live and collected, and only the *geography* is
-   * fabricated. Conflating the two would either brand real prices as mock or
-   * let invented positions inherit a live badge, and both are worse than saying
-   * exactly which half is made up.
-   *
-   * Set only on streams ERCOT publishes no coordinates for. Every surface that
-   * draws one shows the mock badge — see `geoMock.ts` for why that marking is
-   * the whole basis on which this is allowed to exist.
+   * Where a located stream's coordinates come from, when it is not the source
+   * itself. NWS puts the station on every observation and needs no note; an
+   * ERCOT settlement point is placed by the API from a reference table (EIA's
+   * plant coordinates, reached through ERCOT's unit mapping), and the legend
+   * says so, because the position is a join and not a publication.
    */
-  mockLocations?: boolean;
+  locatedBy?: string;
+  /**
+   * How many of the entities the API can place, for a located stream whose
+   * table is partial. Read from `/v1/reference/ercot-node-locations` when the
+   * catalogue was last written (`scripts/build_node_locations.py` prints it);
+   * the coverage line under a layer is this over `entities.count`.
+   */
+  locatedCount?: number;
   /**
    * Who is accountable for this feed. Absent means nobody has claimed it yet —
    * which is the honest state of every schema that has no collector, and the
@@ -226,8 +227,13 @@ export const SCHEMAS: Schema[] = [
       label: "settlement points",
       sample: ["HB_HOUSTON", "HB_NORTH", "LZ_WEST"],
     },
-    // ERCOT publishes no coordinates for these, so the map invents them.
-    mockLocations: true,
+    // ERCOT publishes no coordinates. The API places a resource node through
+    // its unit — the Settlement Points List names it, the CDR report names it
+    // in words, EIA-860M locates that plant — and puts lat/lon on every row;
+    // hubs and zones have no place and fall back to `geo.ts` centroids.
+    located: true,
+    locatedBy: "EIA-860M plant coordinates, through ERCOT's unit mapping",
+    locatedCount: 698,
     blurb:
       "Locational marginal prices from the latest SCED run, every ERCOT settlement point. " +
       "Collected from ERCOT MIS, reconciled against the source file.",
@@ -295,8 +301,9 @@ export const SCHEMAS: Schema[] = [
       label: "electrical buses",
       sample: ["CADICKS_804V", "ADICKS__138C", "ADK_V_C"],
     },
-    // ERCOT publishes no coordinates for these, so the map invents them.
-    mockLocations: true,
+    // Electrical buses, not settlement points: the node location table does
+    // not reach them yet, so this stream is not mappable. The same ERCOT file
+    // maps a bus to its substation when it is worth extending.
     entityColumn: "bus",
     blurb:
       "Hourly cleared prices from the day-ahead market for every ERCOT electrical bus, " +
@@ -485,9 +492,10 @@ export const SCHEMAS: Schema[] = [
       label: "settlement points",
       sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
     },
-    // Same settlement points as the SCED LMP, same absence of published
-    // coordinates — so the map invents them, marked mock.
-    mockLocations: true,
+    // Same settlement points as the SCED LMP, placed the same way by the API.
+    located: true,
+    locatedBy: "EIA-860M plant coordinates, through ERCOT's unit mapping",
+    locatedCount: 698,
     blurb:
       "The 15-minute price settlement actually uses, every ERCOT settlement point — the SCED LMP plus price adders. Collected from ERCOT MIS (NP6-905).",
     maintainer: {
@@ -555,8 +563,9 @@ export const SCHEMAS: Schema[] = [
       label: "electrical buses",
       sample: ["ADICKS__138C", "0001DUPV1_", "0001HWFG1"],
     },
-    // ERCOT publishes no coordinates for these, so the map invents them.
-    mockLocations: true,
+    // Electrical buses, not settlement points: the node location table does
+    // not reach them yet, so this stream is not mappable. The same ERCOT file
+    // maps a bus to its substation when it is worth extending.
     entityColumn: "bus",
     blurb:
       "Bus-level prices under the settlement points: ~19,000 electrical buses from every SCED run. The heaviest feed ERCOT publishes. Collected from ERCOT MIS (NP6-787).",
@@ -594,9 +603,10 @@ export const SCHEMAS: Schema[] = [
       label: "settlement points",
       sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
     },
-    // Same settlement points as the SCED LMP, same absence of published
-    // coordinates — so the map invents them, marked mock.
-    mockLocations: true,
+    // Same settlement points as the SCED LMP, placed the same way by the API.
+    located: true,
+    locatedBy: "EIA-860M plant coordinates, through ERCOT's unit mapping",
+    locatedCount: 698,
     blurb:
       "Where real-time prices are about to go: RTD's forward intervals for every settlement point, republished each run with every vintage kept. Collected from ERCOT MIS (NP6-970).",
     maintainer: {
@@ -1571,8 +1581,10 @@ export const SCHEMAS: Schema[] = [
       label: "pricing nodes",
       sample: ["INDIANA.HUB", "ILLINOIS.HUB", "MICHIGAN.HUB"],
     },
-    // No coordinates published, and `geoMock` invents Texas — so no map for
-    // now rather than a wrong one.
+    // No coordinates published, and the node location table is ERCOT's —
+    // so no map for now rather than a wrong one. MISO's own node reference
+    // (`aggregated-pnode`) carries no position either; EIA-860M's MISO plants
+    // would be the same chain again.
     blurb:
       "Preliminary ex-post prices for every MISO commercial pricing node — hubs, " +
       "load zones, generator nodes and interfaces — with the congestion and loss " +
@@ -2617,19 +2629,16 @@ export type MapTreatment =
       vector: boolean;
       placed: number;
       total: number;
-      invented: false;
     }
   | {
       how: "motion";
       placed: number;
       total: number;
-      invented: false;
     }
   | {
       how: "pins";
       placed: number;
       total: number;
-      invented: boolean;
     };
 
 /**
@@ -2654,36 +2663,24 @@ export function mapTreatment(
       vector: Boolean(schema.vector),
       placed: total,
       total,
-      invented: false,
     };
   if (schema.motion)
     return {
       how: "motion",
       placed: total,
       total,
-      invented: false,
     };
-  // Rows carry their own coordinates, or one is invented per entity — either
-  // way every entity has a position, and the only limit left is how many rows
-  // a single query will return.
+  // Rows carry their own coordinates — every entity the table places has a
+  // position, and the limits left are the table's reach and how many rows a
+  // single query will return.
   if (schema.located)
     return {
       how: "pins",
-      placed: Math.min(total, DRAW_CAP),
+      placed: Math.min(schema.locatedCount ?? total, DRAW_CAP),
       total,
-      invented: false,
-    };
-  if (schema.mockLocations)
-    return {
-      how: "pins",
-      placed: Math.min(total, DRAW_CAP),
-      total,
-      invented: true,
     };
   const placed = placeableNodes(schema).length;
-  return placed
-    ? { how: "pins", placed, total, invented: false }
-    : null;
+  return placed ? { how: "pins", placed, total } : null;
 }
 
 /**
@@ -2731,26 +2728,19 @@ export function pinStreams(refs: DataRef[]): string[] {
   ];
 }
 
-/** "1,118 placed · invented" — what the picker says under a layer's name. */
+/** "698 of 1,118 have known locations" — what the picker says under a layer's name. */
 export function coverageLabel(t: MapTreatment): string {
   if (t.how === "surface")
     return t.vector ? "vector field" : "scalar field";
   if (t.how === "motion") return "tracked positions";
-  const capped =
-    t.placed < t.total &&
-    (t.invented || t.placed === DRAW_CAP);
-  // Three different shortfalls, and they are not interchangeable. Capped means
+  const capped = t.placed < t.total && t.placed === DRAW_CAP;
+  // Two different shortfalls, and they are not interchangeable. Capped means
   // the query stops early. "Known locations" means the coordinates run out.
   // Saying "8 of 1,118" when the truth is "10,000 of 19,312, because that is
   // all one request returns" would send somebody hunting for missing geography
   // that is not the problem.
-  if (capped) {
-    return `${t.placed.toLocaleString()} of ${t.total.toLocaleString()} drawn${
-      t.invented ? " · invented positions" : ""
-    }`;
-  }
-  if (t.invented)
-    return `${t.total.toLocaleString()} entities · invented positions`;
+  if (capped)
+    return `${t.placed.toLocaleString()} of ${t.total.toLocaleString()} drawn`;
   if (t.placed >= t.total)
     return `${t.total.toLocaleString()} placed`;
   return `${t.placed} of ${t.total.toLocaleString()} have known locations`;

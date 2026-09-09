@@ -30,10 +30,10 @@ import { PIN_LAYER_WHY } from "@/lib/workspace/components";
  * gate.
  *
  * Coverage is stated wherever it is partial. ERCOT publishes a price against a
- * name and no coordinate, so a nodal layer can only place the entities
- * `geo.ts` knows or `geoMock` invents — and "3 of 9 have known locations" is a
- * fact somebody can act on, where a layer that quietly drew a third of itself is
- * just wrong on screen with no way to tell.
+ * name and no coordinate, so a nodal layer can only place the entities the
+ * API's reference table reaches or `geo.ts` knows — and "698 of 1,118 have
+ * known locations" is a fact somebody can act on, where a layer that quietly
+ * drew two thirds of itself is just wrong on screen with no way to tell.
  */
 export function MapLayers({
   layers,
@@ -200,7 +200,6 @@ export function MapLayers({
                   <div className="truncate text-[11.5px] text-ink">{ref.label}</div>
                   <div className="truncate text-[10px] text-faint">
                     {coverageLabel(t)}
-                    {t.invented && " · demonstration only"}
                     {" · "}
                     {creditChip(ref.tokens)}
                   </div>

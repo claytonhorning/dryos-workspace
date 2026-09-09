@@ -10,9 +10,12 @@ import {
   DEFAULT_LAYOUT,
   GRID,
   below,
+  clearOf,
   componentDef,
   packLayout,
   type ComponentKind,
+  type ComponentSpec,
+  type Placed,
 } from "@/lib/workspace/components";
 import type { DataRef } from "@/lib/workspace/catalog";
 
@@ -34,6 +37,22 @@ export const dynamic = "force-dynamic";
  * "chart this", and paying a model to retype the same forty lines is a cost with
  * no upside.
  */
+/**
+ * The one place a drop can go when it names none, or names ground that is
+ * taken: under everything, at the left. The frame's ghost is what normally
+ * decides, and it refuses a place that overlaps — but the frame that drew the
+ * ghost may be behind the store (another tab, a removal that failed to save),
+ * and a place the server cannot honour is answered the way no place is,
+ * never by putting one tile on another.
+ */
+function under(manifest: ComponentSpec[]): { x: number; y: number } {
+  return { x: 0, y: below(manifest) + (manifest.length ? GRID.gap : 0) };
+}
+
+function placedOf(manifest: ComponentSpec[]): Placed[] {
+  return manifest.map((m) => m.layout as Placed);
+}
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -104,12 +123,34 @@ export async function POST(
       send({ type: "phase", phase: "composing" });
       const manifest = packLayout(app.manifest!);
       const base = manifest.length;
-      const anchor =
+      // The stack, as it would sit under the anchor the ghost named. The
+      // whole of it has to land clear — the ghost was the group's footprint,
+      // but the store may have moved on since it was drawn — and if any
+      // member would sit on a tile, the group goes under everything instead,
+      // still stacked, still in order.
+      const stack = (anchor: { x: number; y: number }): Placed[] => {
+        let down = 0;
+        return group.map((m) => {
+          const box = {
+            x: Math.max(0, Math.min(anchor.x, GRID.cols - m.layout.w)),
+            y: anchor.y + down,
+            w: m.layout.w,
+            h: m.layout.h,
+          };
+          down += m.layout.h + GRID.gap;
+          return box;
+        });
+      };
+      const taken = placedOf(manifest);
+      const named =
         typeof layout?.x === "number" && typeof layout?.y === "number"
-          ? { x: layout.x, y: layout.y }
-          : { x: 0, y: below(manifest) + (manifest.length ? GRID.gap : 0) };
-      let down = 0;
-      for (const m of group) {
+          ? stack({ x: layout.x, y: layout.y })
+          : null;
+      const boxes =
+        named && named.every((b) => clearOf(b, taken))
+          ? named
+          : stack(under(manifest));
+      group.forEach((m, i) => {
         const opts = { ...(m.options ?? {}) };
         if (m.wireTo != null && group[m.wireTo]) {
           opts.follow = String(base + m.wireTo);
@@ -119,16 +160,14 @@ export async function POST(
           refs: m.refs ?? [],
           options: opts,
           custom: m.custom,
-          layout: {
-            x: Math.max(0, Math.min(anchor.x, GRID.cols - m.layout.w)),
-            y: anchor.y + down,
-            w: m.layout.w,
-            h: m.layout.h,
-          },
+          layout: boxes[i],
         });
-        down += m.layout.h + GRID.gap;
-      }
-      const source = composeApp(manifest);
+      });
+      // Packed once more so what is stored is what is drawn — the composer
+      // packs on its own, and a manifest saved unpacked can carry ground the
+      // screen never showed.
+      const placed = packLayout(manifest);
+      const source = composeApp(placed);
 
       send({ type: "phase", phase: "compiling" });
       const built = await compile(source);
@@ -142,7 +181,7 @@ export async function POST(
         refs: group.flatMap((m) => m.refs ?? []).length
           ? group.flatMap((m) => m.refs ?? [])
           : undefined,
-        manifest,
+        manifest: placed,
         source,
         author: "you",
         note: "Built from typed components — no model was used.",
@@ -199,20 +238,27 @@ export async function POST(
         });
       } else {
         const size = layout ?? DEFAULT_LAYOUT[def.kind];
+        // No place named — or a place already taken — and the only honest
+        // answer is under everything else, which is where a page grows.
+        const named =
+          typeof size.x === "number" && typeof size.y === "number"
+            ? { x: size.x, y: size.y, w: size.w, h: size.h }
+            : null;
         manifest.push({
           kind: def.kind,
           refs: chosen,
           options,
           custom,
-          // No place named — the only honest answer is under everything else,
-          // which is where a page grows.
           layout:
-            typeof size.x === "number" && typeof size.y === "number"
-              ? size
-              : { ...size, x: 0, y: below(manifest) + (manifest.length ? GRID.gap : 0) },
+            named && clearOf(named, placedOf(manifest))
+              ? named
+              : { w: size.w, h: size.h, ...under(manifest) },
         });
       }
-      const source = composeApp(manifest);
+      // A reconfigured tile may have grown to its new kind's minimum, so the
+      // pack is what settles it clear of a neighbour before it is stored.
+      const placed = packLayout(manifest);
+      const source = composeApp(placed);
 
       // Gated exactly like a model's output. A generator can be wrong too, and
       // the rule is the same either way: nothing is saved unless it builds.
@@ -233,7 +279,7 @@ export async function POST(
             ? `Add the “${custom.name}” component.`
             : describeComponent(def.kind, chosen),
         refs: chosen.length ? chosen : undefined,
-        manifest,
+        manifest: placed,
         source,
         author: "you",
         note: "Built from a typed component — no model was used.",

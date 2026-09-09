@@ -11,7 +11,6 @@ import {
   ERCOT_VIEW,
   hasGeography,
 } from "./geo";
-import { MOCK_POINT_SOURCE } from "./geoMock";
 import { schemaById } from "./catalog";
 import { SERIES_PALETTE } from "./palette";
 
@@ -2235,14 +2234,11 @@ const map: ComponentDef = {
 
       A gridded field, a moving fleet and a located stream all carry their own
       position — the grid in its cell id, the fleet and the located stream in
-      every row — and a schema declaring `mockLocations` invents one per
-      entity, marked mock on every surface that draws it. So none of those is
-      asked whether we happen to know where its entities are. Only named
-      places are, and for those the answer really is no when we do not.
-      (`mockLocations` was missing from this list once: the emitter placed
-      every settlement point while accepts refused any node that was not a
-      hub, so the map greyed out for exactly the streams the invented
-      positions were built for.)
+      every row — so none of those is asked whether we happen to know where
+      its entities are. Only named places are, and for those the answer
+      really is no when we do not. (The ERCOT price streams used to be a
+      fourth kind, with invented positions; the API places them on the row
+      now, so they are simply located.)
     */
     const hasField = refs.some(
       (r) => schemaById(r.schemaId)?.field,
@@ -2251,9 +2247,7 @@ const map: ComponentDef = {
       (r) => schemaById(r.schemaId)?.motion,
     );
     const hasLocated = refs.some(
-      (r) =>
-        schemaById(r.schemaId)?.located ||
-        schemaById(r.schemaId)?.mockLocations,
+      (r) => schemaById(r.schemaId)?.located,
     );
 
     if (refs.length === 0)
@@ -2306,9 +2300,7 @@ const map: ComponentDef = {
       different component — so the located ref wins the layer outright.
     */
     const locatedRef = pointRefs.find(
-      (r) =>
-        schemaById(r.schemaId)?.located ||
-        schemaById(r.schemaId)?.mockLocations,
+      (r) => schemaById(r.schemaId)?.located,
     );
     const locatedSchema = locatedRef
       ? schemaById(locatedRef.schemaId)
@@ -2321,16 +2313,13 @@ const map: ComponentDef = {
       locatedSchema?.entityKey ??
       "node";
     /*
-      Invented geography, carried through rather than decided once and forgotten.
-
-      This flag is the entire basis on which `geoMock` is allowed to exist: it
-      reaches the badge, the popup and the legend, so a map of positions nobody
-      published cannot be mistaken for one of positions somebody did. Note it is
-      separate from `anyMock`, which is about the numbers — here the prices are
-      real and only the places are made up, and saying which half is fabricated
-      is more useful than branding the whole tile.
+      A located stream whose table is partial (it declares `locatedCount`)
+      is an ERCOT one, and its rows for a hub or a load zone carry no
+      coordinate because an aggregate has no place. Those fall back to the
+      `geo.ts` centroids, compiled in below, and wear the approximate caveat
+      the centroids always did — so HB_NORTH alone on a map still draws.
     */
-    const invented = Boolean(locatedSchema?.mockLocations);
+    const partial = locatedSchema?.locatedCount !== undefined;
     /*
       Past a few hundred entities a pin stops being a pin.
 
@@ -2347,7 +2336,9 @@ const map: ComponentDef = {
         0) > 200;
 
     const nodes = locatedRef
-      ? []
+      ? partial
+        ? Object.keys(ERCOT_POINTS)
+        : []
       : [
           ...new Set(
             pointRefs.flatMap((r) => {
@@ -2418,11 +2409,10 @@ const map: ComponentDef = {
   const COLUMN = ${JSON.stringify(s[0]?.column ?? "")};
   const UNIT = ${JSON.stringify(s[0]?.unit ?? "")};
   const STYLE = ${JSON.stringify(o.style)};
-  const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label, invented, dense }) : "null"};
+  const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label, dense }) : "null"};
   // Absolute color stops for the point layer's measure, when its variable
   // declares them. Null falls back to percentiles of whatever is on screen.
   const SCALE = ${JSON.stringify(pointScale(pointRefs.length ? pointRefs : refs))};
-${locatedRef && invented ? MOCK_POINT_SOURCE : ""}
   const FIELD = ${showField ? JSON.stringify({ dataset: fieldDataset, column: fieldColumn, unit: fieldUnit, mode: fieldMode, label: fieldRef!.label, entity: fieldEntity, direction: vector?.direction ?? null }) : "null"};
   const MOTION = ${motionRef ? JSON.stringify({ dataset: motionDataset, trails, label: motionRef.label }) : "null"};
 
@@ -2541,18 +2531,15 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       pointRows.forEach((r) => {
         const id = r[LOCATED.entity];
         if (id == null || out[id]) return;
-        // Two sources of position, and which applies is a fact about the stream
-        // rather than about the row: coordinates the source published, or ones
-        // derived from the id because it published none.
-        let lon = r.lon, lat = r.lat;
-        if (LOCATED.invented && (typeof lat !== "number" || typeof lon !== "number")) {
-          const p = mockPoint(String(id));
-          lat = p.lat; lon = p.lon;
+        // The row's own coordinate first; an aggregate row (a hub, a zone)
+        // carries none and takes the centroid compiled in, which is not exact
+        // and says so in its popup.
+        let lon = r.lon, lat = r.lat, exact = true;
+        if ((typeof lat !== "number" || typeof lon !== "number") && POINTS[id]) {
+          lat = POINTS[id].lat; lon = POINTS[id].lon; exact = false;
         }
         if (typeof lat !== "number" || typeof lon !== "number") return;
-        // exact drives the caveat, so an invented position is never exact
-        // however confidently it was computed.
-        out[id] = { lon, lat, label: String(id), value: r[COLUMN], exact: !LOCATED.invented };
+        out[id] = { lon, lat, label: String(id), value: r[COLUMN], exact };
       });
     } else {
       NODES.forEach((n) => {
@@ -2590,7 +2577,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             label: s[0]?.label ?? "Points",
             unit: s[0]?.unit ?? "",
             swatch: "#d9a441",
-            note: invented ? "invented positions" : "",
+            note: locatedSchema?.locatedBy ?? "",
           },
         ]
       : []),
@@ -2678,6 +2665,8 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       [...order].reverse().forEach((id) => {
         const layer = glFor[id];
         if (layer && m.getLayer(layer)) m.moveLayer(layer);
+        // The pin ring rides on the points and has to stay above them.
+        if (layer === "dryos-pts" && m.getLayer("dryos-pin")) m.moveLayer("dryos-pin");
       });
     } catch {
       // A restyle can land between the check and the move; the next render
@@ -2952,25 +2941,41 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     would be the same invention the whole stream exists to avoid.
   */
   const [probe, setProbe] = React.useState(null);
+  /*
+    A click on a node pins its readout: the price stays up until a click
+    lands on no node. A hover still answers for whatever the pointer is on,
+    so the pinned box gives way while the pointer is over another node and
+    comes back when it leaves. The pin holds the node, not a snapshot — the
+    value is read from the current rows at render, so a poll updates the
+    number somebody left on screen, and the box follows the node through a
+    pan or a zoom by re-projecting on every map move. The pinned node also
+    wears a ring, so the box and the dot it describes read as one thing.
+  */
+  const [pinned, setPinned] = React.useState(null);
+  const pinnedRef = React.useRef(pinned);
+  React.useEffect(() => { pinnedRef.current = pinned; }, [pinned]);
+  const readout = probe || (pinned && placed[pinned.id]
+    ? { kind: "point", id: pinned.id, value: placed[pinned.id].value, lat: pinned.lat, lon: pinned.lon, x: pinned.x, y: pinned.y, pinned: true }
+    : null);
   // The readout, for the click that asks about it (askPayload in the
-  // runtime): the node under the pointer and its value, or the wind there.
-  // The entity rides along so the ask keeps every row of that node ahead of
-  // thinning a thousand-node layer down for the wire.
+  // runtime): the node under the pointer or pinned, and its value, or the
+  // wind there. The entity rides along so the ask keeps every row of that
+  // node ahead of thinning a thousand-node layer down for the wire.
   React.useEffect(() => {
-    window.__dryosHover = !probe
+    window.__dryosHover = !readout
       ? null
-      : probe.kind === "point"
-        ? { when: null, label: probe.id, entity: probe.id, values: [{ name: probe.id, value: probe.value, unit: UNIT }] }
+      : readout.kind === "point"
+        ? { when: null, label: readout.id, entity: readout.id, values: [{ name: readout.id, value: readout.value, unit: UNIT }] }
         : {
             when: null,
-            label: "wind at " + probe.lat.toFixed(2) + ", " + probe.lon.toFixed(2),
+            label: "wind at " + readout.lat.toFixed(2) + ", " + readout.lon.toFixed(2),
             entity: null,
             values: [
-              { name: "speed", value: probe.spd, unit: FIELD ? FIELD.unit : "" },
-              { name: "from", value: probe.dir, unit: "deg" },
+              { name: "speed", value: readout.spd, unit: FIELD ? FIELD.unit : "" },
+              { name: "from", value: readout.dir, unit: "deg" },
             ],
           };
-  }, [probe]);
+  }, [probe, pinned, placed]);
   /*
     The placed nodes, in a ref rather than in the effect's dependencies.
 
@@ -3105,13 +3110,30 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         if (d < bestD) { bestD = d; best = id; }
       }
       if (best && Math.sqrt(bestD) <= reach) {
+        setPinned({ id: best, lon: p[best].lon, lat: p[best].lat, ...at(p[best].lon, p[best].lat) });
         window.dispatchEvent(new CustomEvent("dryos:pick", { detail: { source: ${i}, entity: best } }));
+      } else {
+        // A click on no node is the click away: the pinned readout goes.
+        // The wire keeps its pick — unselecting a node is not a selection.
+        setPinned(null);
       }
+    };
+    // Where a node is on screen, in the frame's own pixels — the readout is
+    // fixed-positioned, so the map's container offset is part of the answer.
+    const at = (lon, lat) => {
+      const pt = m.project([lon, lat]);
+      const r = m.getContainer().getBoundingClientRect();
+      return { x: r.left + pt.x, y: r.top + pt.y };
+    };
+    const follow = () => {
+      const pin = pinnedRef.current;
+      if (pin) setPinned({ ...pin, ...at(pin.lon, pin.lat) });
     };
     m.on("mousemove", move);
     m.on("mouseout", off);
     m.on("click", pick);
-    return () => { m.off("mousemove", move); m.off("mouseout", off); m.off("click", pick); setProbe(null); };
+    m.on("move", follow);
+    return () => { m.off("mousemove", move); m.off("mouseout", off); m.off("click", pick); m.off("move", follow); setProbe(null); };
     // Not placed: the point branch hit-tests what the map has rendered rather
     // than reading the row set, so it needs no data in scope — and adding data
     // here would rebind the handler on every poll, with a cleanup that clears
@@ -3463,6 +3485,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     markers.current.forEach((mk) => mk.remove());
     markers.current = [];
     if (m.getLayer && m.getLayer("dryos-pts")) {
+      if (m.getLayer("dryos-pin")) m.removeLayer("dryos-pin");
       m.removeLayer("dryos-pts");
       m.removeSource("dryos-pts");
     }
@@ -3538,6 +3561,22 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             "circle-stroke-color": "rgba(0,0,0,.5)",
           },
         });
+        // The pinned node's ring: the same source filtered to one id, above
+        // the dots. GL paint cannot read a CSS token, so the accent is read
+        // off the frame's root once here and falls back to the dark accent.
+        const accent = (getComputedStyle(document.documentElement).getPropertyValue("--accent") || "").trim() || "#e8ff3d";
+        m.addLayer({
+          id: "dryos-pin",
+          type: "circle",
+          source: "dryos-pts",
+          filter: ["==", ["get", "id"], (pinnedRef.current && pinnedRef.current.id) || "\u0000"],
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 6.5, 6, 9.5, 9, 14],
+            "circle-color": "rgba(0,0,0,0)",
+            "circle-stroke-width": 2,
+            "circle-stroke-color": accent,
+          },
+        });
       };
       // Called straight away and bound to both events, matching the field
       // layer. Gating the first call on isStyleLoaded() looked tidier and lost
@@ -3587,17 +3626,14 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         ";border:1px solid rgba(0,0,0,.45);border-radius:999px;color:#0d1206;display:flex;font:600 10px/1 ui-sans-serif,system-ui;" +
         "height:28px;justify-content:center;width:28px;";
       el.textContent = v.toFixed(0);
+      el.dataset.node = n;
       // The caveat is only true of a lookup. A located stream publishes where
       // it measured, so claiming that is approximate would be a lie about a
       // runway — and the caveat's whole job is to stop a centroid reading as
       // a substation.
       const popup = new window.mapboxgl.Popup({ offset: 14 }).setText(
         placed[n].label + " — " + v.toFixed(2) + " " + UNIT +
-        (placed[n].exact
-          ? ""
-          : LOCATED && LOCATED.invented
-            ? " (INVENTED POSITION — not published)"
-            : " (approximate location)")
+        (placed[n].exact ? "" : " (approximate location)")
       );
       markers.current.push(
         new window.mapboxgl.Marker({ element: el })
@@ -3607,6 +3643,21 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       );
     });
   }, [placed, ready, style, hidden]);
+
+  React.useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    if (m.getLayer && m.getLayer("dryos-pin")) {
+      m.setFilter("dryos-pin", ["==", ["get", "id"], (pinned && pinned.id) || "\u0000"]);
+    }
+    // The marker path: the pinned badge wears the ring as an outline, and
+    // every other badge takes it off.
+    markers.current.forEach((mk) => {
+      const el = mk.getElement();
+      el.style.outline = pinned && el.dataset.node === pinned.id ? "2.5px solid var(--accent)" : "";
+      el.style.outlineOffset = "2px";
+    });
+  }, [pinned, placed, ready, style, hidden]);
 
   if (ready === "no-token") {
     return (
@@ -3757,7 +3808,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         ) : null}
       </div>
       )}
-      {probe ? (
+      {readout ? (
         <div
           style={{
             /*
@@ -3774,14 +3825,14 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             top: 0,
             transform:
               "translate(" +
-              Math.min(Math.max(probe.x, 92), Math.max(92, window.innerWidth - 92)) +
+              Math.min(Math.max(readout.x, 92), Math.max(92, window.innerWidth - 92)) +
               "px, " +
-              (probe.y > 96 ? probe.y - 14 : probe.y + 14) +
+              (readout.y > 96 ? readout.y - 14 : readout.y + 14) +
               "px) translate(-50%, " +
-              (probe.y > 96 ? "-100%" : "0") +
+              (readout.y > 96 ? "-100%" : "0") +
               ")",
             background: "var(--surface-2)",
-            border: "1px solid var(--line-strong)",
+            border: "1px solid " + (readout.pinned ? "var(--accent)" : "var(--line-strong)"),
             borderRadius: 6,
             boxShadow: "0 6px 20px rgba(0,0,0,.45)",
             maxWidth: 180,
@@ -3792,33 +3843,33 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         >
           <div style={{ alignItems: "baseline", display: "flex", gap: 5 }}>
             <span style={{ color: "var(--ink)", fontSize: 19, fontWeight: 600, lineHeight: 1.15 }}>
-              {probe.kind === "point"
-                ? (typeof probe.value === "number" ? probe.value.toFixed(2) : "—")
-                : probe.spd.toFixed(1)}
+              {readout.kind === "point"
+                ? (typeof readout.value === "number" ? readout.value.toFixed(2) : "—")
+                : readout.spd.toFixed(1)}
             </span>
             {/* Each layer's own unit. A single UNIT for both read "6.3 $/MWh"
                 over a wind field on any map that also carried prices — the
                 number was right and the label belonged to the other layer. */}
             <span style={{ color: "var(--faint)", fontSize: 11 }}>
-              {probe.kind === "point" ? UNIT : FIELD ? FIELD.unit : UNIT}
+              {readout.kind === "point" ? UNIT : FIELD ? FIELD.unit : UNIT}
             </span>
           </div>
-          {probe.kind === "point" ? (
+          {readout.kind === "point" ? (
             // The node's own name, which is the thing being asked about — the
             // coordinate under a pin is the pin's, not a place worth stating,
             // and here it is invented anyway.
             <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
-              {probe.id}
+              {readout.id}
             </div>
           ) : (
             <>
               <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
-                from {CARDINALS[Math.round(((probe.dir + 360) % 360) / 22.5) % 16]}{" "}
-                {Math.round((probe.dir + 360) % 360)}°
+                from {CARDINALS[Math.round(((readout.dir + 360) % 360) / 22.5) % 16]}{" "}
+                {Math.round((readout.dir + 360) % 360)}°
               </div>
               <div style={{ color: "var(--faint)", fontSize: 10, marginTop: 2, whiteSpace: "nowrap" }}>
-                {Math.abs(probe.lat).toFixed(2)}°{probe.lat < 0 ? "S" : "N"}{" "}
-                {Math.abs(probe.lon).toFixed(2)}°{probe.lon < 0 ? "W" : "E"}
+                {Math.abs(readout.lat).toFixed(2)}°{readout.lat < 0 ? "S" : "N"}{" "}
+                {Math.abs(readout.lon).toFixed(2)}°{readout.lon < 0 ? "W" : "E"}
               </div>
             </>
           )}
@@ -3861,20 +3912,19 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           ignore the word on the maps where it matters.
         */
         /*
-          Three states, three different claims. Invented positions get the loud
-          dashed-blue MOCK treatment the catalogue uses everywhere else, because
-          "these are not where this says they are" is not something a reader
-          should have to infer from the word "approximate". A centroid is
-          approximate. A published coordinate needs no caveat at all.
+          Two states, two different claims. Mock numbers get the loud
+          dashed-blue MOCK treatment the catalogue uses everywhere else. A
+          centroid is approximate and says so quietly. A published or joined
+          coordinate needs no caveat at all.
 
           It is the one thing `NAKED` keeps, because a preview that reads as
           real is the same lie a launched tile would be telling. With the
           scrubber gone it moves up into the corner the legend vacated —
           bottom-right out there is Mapbox's own attribution button.
         */
-        invented || anyMock
+        anyMock
           ? `<p style={{ background: "var(--color-info-dim)", border: "1px dashed var(--color-info-line)", borderRadius: 4, bottom: NAKED ? "auto" : 22, top: NAKED ? 4 : "auto", color: "var(--color-info)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".08em", margin: 0, padding: "2px 6px", position: "absolute", right: 4, textTransform: "uppercase", zIndex: 2 }}>
-        ${anyMock ? "Mock data · invented positions" : "Mock positions · not published"}
+        Mock data
       </p>`
           : locatedRef || !nodes.length
             ? ""
@@ -4349,8 +4399,25 @@ export function below(manifest: ComponentSpec[]): number {
   }, 0);
 }
 
+/** Does this rectangle sit clear of every tile already placed? */
+export function clearOf(box: Placed, taken: readonly Placed[]): boolean {
+  return !taken.some((t) => overlaps(box, t));
+}
+
 /**
- * Give every tile an explicit place, without moving one that already has one.
+ * The lowest rectangle at this column that sits clear of everything placed:
+ * the box itself when it already does, otherwise stepped down until it does.
+ * Stepping only ever goes down, so it always terminates and never moves a
+ * tile off the canvas.
+ */
+export function settle(box: Placed, taken: readonly Placed[]): Placed {
+  const at = { ...box };
+  while (!clearOf(at, taken)) at.y += GRID.snap;
+  return at;
+}
+
+/**
+ * Give every tile an explicit place, and never two tiles the same ground.
  *
  * Every write goes through this, and that is the point: the first time anyone
  * touches a page written before positions existed, the arrangement it had is
@@ -4359,6 +4426,17 @@ export function below(manifest: ComponentSpec[]): number {
  * neighbour. A page that has never been rearranged therefore looks identical
  * after this change, which is the only acceptable migration for someone's
  * screen.
+ *
+ * It is also the one place that guarantees the canvas is clean. The frame
+ * refuses a drop or a resize that would overlap, but the server has to hold
+ * the same rule for whatever reaches it — a group whose ghost was only its
+ * first member, a tile reconfigured into a kind with a taller minimum, a stale
+ * client posting a place another tab already took. So placed tiles are laid
+ * in manifest order and one that lands on an earlier one is stepped down to
+ * the first clear ground under it: the earlier tile is where somebody put it,
+ * and a drop appends, so it is always the newest arrival that yields. Every
+ * composed page renders from this, which is what makes the rule hold on a
+ * screen that has not been written since the overlap got in.
  */
 export function packLayout(
   manifest: ComponentSpec[],
@@ -4371,19 +4449,25 @@ export function packLayout(
   // Everything that already has a place keeps it, and keeps it first: a page
   // caught mid-migration has both kinds in it, and the tile somebody put
   // somewhere is the one the others have to be laid around — not the reverse.
+  // Among the placed, earlier wins: a later tile on the same ground is stepped
+  // down until it is clear, so the output never carries an overlap whatever
+  // the input did.
+  const taken: Placed[] = [];
   const at: (Placed | null)[] = manifest.map((spec, i) => {
     const { x, y } = spec.layout ?? {};
     if (typeof x !== "number" || typeof y !== "number")
       return null;
-    return {
-      x: clamp(Math.round(x), 0, GRID.cols - size[i].w),
-      y: Math.max(0, Math.round(y)),
-      ...size[i],
-    };
+    const box = settle(
+      {
+        x: clamp(Math.round(x), 0, GRID.cols - size[i].w),
+        y: Math.max(0, Math.round(y)),
+        ...size[i],
+      },
+      taken,
+    );
+    taken.push(box);
+    return box;
   });
-  const taken: Placed[] = at.filter(
-    (p): p is Placed => p !== null,
-  );
 
   // The old grid's own rule for the rest: fill the row, wrap when the span no
   // longer fits, and start the next row below the tallest tile in this one.
@@ -4398,9 +4482,7 @@ export function packLayout(
       top += rowH + GRID.gap;
       rowH = 0;
     }
-    const box: Placed = { x: col, y: top, w, h };
-    while (taken.some((t) => overlaps(box, t)))
-      box.y += GRID.snap;
+    const box = settle({ x: col, y: top, w, h }, taken);
     col += w;
     rowH = Math.max(rowH, h);
     taken.push(box);
