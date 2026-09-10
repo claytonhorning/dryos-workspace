@@ -1917,6 +1917,434 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // ── PJM ────────────────────────────────────────────────────────────────
+  // Seven streams, one per collector, landed 2026-09-09. Every one reads
+  // PJM's Data Miner 2 on a key that allows six requests a minute; the
+  // collectors pace themselves. Eastern Prevailing Time, which observes
+  // daylight saving, so `sourceTzOf` answers America/New_York — and every
+  // row carries its own UTC stamp, so nothing is localised on the way in.
+  // The LMP feeds are split the way ERCOT's are: aggregates (hubs, zones,
+  // interfaces, EHV and the rest — 482 nodes) as the stream people ask for,
+  // and the 13,967 electrical buses as their own, heavier one.
+  {
+    id: "energy.pjm.realtime",
+    path: ["Energy", "Pricing", "Real-time"],
+    name: "PJM real-time LMP",
+    short: "RT · LMP",
+    dataset: "pjm-realtime-lmp",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 1,
+    entities: {
+      count: 482,
+      label: "aggregate pricing nodes",
+      sample: ["WESTERN HUB", "PJM-RTO", "COMED"],
+    },
+    // No coordinates published; the node location table is ERCOT's. PJM's
+    // pricing-node master carries a transmission zone and a voltage per bus
+    // but no position either, so no map rather than a wrong one.
+    blurb:
+      "Unverified five-minute prices at PJM's 12 trading hubs, 22 transmission " +
+      "zones, 7 interfaces and every other aggregate pricing node, with the " +
+      "congestion and loss components, about four minutes after the interval " +
+      "starts. Unverified is PJM's word: the verified copy posts the next business " +
+      "day and 28 of 14,449 nodes differed on the interval checked, most by rounding.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 9),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The five-minute unverified real-time price at the node.",
+        scale: [
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
+        ],
+        mock: { base: 28, swing: 12, noise: 2.5 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 6, noise: 1.5 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0.3, swing: 1.2, noise: 0.3 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "System energy price — the same number at every node in an interval. " +
+          "Derived as LMP minus congestion minus losses, PJM's own identity; the feed omits it.",
+        mock: { base: 28, swing: 10, noise: 2 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.rtbus",
+    path: ["Energy", "Pricing", "RT bus LMP"],
+    name: "PJM real-time LMPs by bus",
+    short: "RT · bus LMP",
+    dataset: "pjm-rt-lmp-bus",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 1,
+    entities: {
+      count: 13_967,
+      label: "electrical buses",
+      sample: ["ALDENE  230 KV  T-10", "BRANCHBURG500 KV  T-1", "KEYSTONE500 KV  KEY1"],
+    },
+    blurb:
+      "Unverified five-minute prices at every one of PJM's 13,967 electrical buses " +
+      "— generator, load and external — with the congestion and loss components. " +
+      "Four million rows a day; the bus stream under the aggregates. Bus names are " +
+      "PJM's own fixed-width spelling, double spaces included.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 9),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The five-minute unverified real-time price at the node.",
+        scale: [
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
+        ],
+        mock: { base: 28, swing: 12, noise: 2.5 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 6, noise: 1.5 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0.3, swing: 1.2, noise: 0.3 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "System energy price — the same number at every node in an interval. " +
+          "Derived as LMP minus congestion minus losses, PJM's own identity; the feed omits it.",
+        mock: { base: 28, swing: 10, noise: 2 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.dayahead",
+    path: ["Energy", "Pricing", "Day-ahead"],
+    name: "PJM day-ahead LMP",
+    short: "DA · LMP",
+    dataset: "pjm-dam-lmp",
+    availability: "live",
+    cadence: { label: "daily, ~12:30 ET", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 482,
+      label: "aggregate pricing nodes",
+      sample: ["WESTERN HUB", "PJM-RTO", "COMED"],
+    },
+    blurb:
+      "Hourly day-ahead prices at PJM's 482 aggregate pricing nodes — hubs, zones, " +
+      "interfaces, EHV and residual aggregates — with the energy, congestion and " +
+      "loss components as PJM publishes them, posted for the whole of tomorrow " +
+      "between 12:00 and 13:30 Eastern.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 9),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The hourly day-ahead price at the node.",
+        scale: [
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
+        ],
+        mock: { base: 30, swing: 12, noise: 2.5 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 6, noise: 1.5 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0.3, swing: 1.2, noise: 0.3 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "System energy price — the same number at every node in an hour, as PJM " +
+          "publishes it (the day-ahead feed carries all four).",
+        mock: { base: 30, swing: 10, noise: 2 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.dabus",
+    path: ["Energy", "Pricing", "DA bus LMP"],
+    name: "PJM day-ahead LMPs by bus",
+    short: "DA · bus LMP",
+    dataset: "pjm-dam-lmp-bus",
+    availability: "live",
+    cadence: { label: "daily, ~12:30 ET", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 13_967,
+      label: "electrical buses",
+      sample: ["ALDENE  230 KV  T-10", "BRANCHBURG500 KV  T-1", "KEYSTONE500 KV  KEY1"],
+    },
+    blurb:
+      "Hourly day-ahead prices at every one of PJM's 13,967 electrical buses, with " +
+      "the energy, congestion and loss components as PJM publishes them. A third of " +
+      "a million rows a day, named the way the real-time bus stream names them.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 9),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The hourly day-ahead price at the node.",
+        scale: [
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
+        ],
+        mock: { base: 30, swing: 12, noise: 2.5 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 6, noise: 1.5 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0.3, swing: 1.2, noise: 0.3 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "System energy price — the same number at every node in an hour, as PJM " +
+          "publishes it (the day-ahead feed carries all four).",
+        mock: { base: 30, swing: 10, noise: 2 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.load",
+    path: ["Energy", "Load", "Load by area"],
+    name: "PJM load by area",
+    short: "Load",
+    dataset: "pjm-system-load",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 25,
+      label: "load areas",
+      sample: ["PJM RTO", "COMED", "DOM"],
+    },
+    entityKey: "zone",
+    // The RTO is the sum of the zones and each region the sum of its own;
+    // stacking any of them on the zones counts load twice.
+    entityOmit: [
+      "PJM RTO",
+      "PJM MID ATLANTIC REGION",
+      "PJM SOUTHERN REGION",
+      "PJM WESTERN REGION",
+    ],
+    blurb:
+      "Real-time load every five minutes in each of PJM's 21 transmission zones, " +
+      "its three regions and the RTO total — telemetry, the number on PJM's own " +
+      "dashboard, not the metered load that settles. The feed keeps thirty days; " +
+      "the rest is here because it was collected.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 9),
+    },
+    variables: [
+      {
+        key: "demand_mw",
+        label: "Load",
+        unit: "MW",
+        availability: "live",
+        description: "Load in the area at the reading, from telemetry.",
+        mock: { base: 5_000, swing: 2_000, noise: 150, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.genmix",
+    path: ["Energy", "Generation", "Fuel mix"],
+    name: "PJM fuel mix",
+    short: "Fuel mix",
+    dataset: "pjm-fuel-mix",
+    availability: "live",
+    cadence: { label: "hourly, :15 past", seconds: 3_600 },
+    tokens: 0.5,
+    entities: {
+      count: 10,
+      label: "fuel categories",
+      sample: ["GAS", "NUCLEAR", "COAL"],
+    },
+    entityKey: "fuel",
+    blurb:
+      "What generated across PJM each hour, by fuel — gas, nuclear, coal, hydro, " +
+      "wind, solar, storage, oil and the rest — with each one's share of the " +
+      "total. Posted fifteen minutes past the hour and kept by PJM indefinitely.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 9),
+    },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Output",
+        unit: "MW",
+        availability: "live",
+        description: "Generation from the category over the hour. Storage runs negative while charging.",
+        mock: { base: 15_000, swing: 12_000, noise: 400, floor: 0 },
+      },
+      {
+        key: "share",
+        label: "Share of total",
+        unit: "",
+        availability: "live",
+        description: "The category's fraction of the hour's generation, 0–1.",
+        mock: { base: 0.15, swing: 0.1, noise: 0.005, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.ties",
+    path: ["Energy", "Grid", "Tie flows"],
+    name: "PJM tie flows",
+    short: "Ties",
+    dataset: "pjm-tie-flows",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 21,
+      label: "ties",
+      sample: ["NYIS", "PJM MISO", "TVA"],
+    },
+    entityKey: "counterparty",
+    // PJM RTO is the net of every tie and PJM MISO the net of the MISO ones;
+    // stacked on the ties they sum, both count flow twice.
+    entityOmit: ["PJM RTO", "PJM MISO"],
+    blurb:
+      "Actual against scheduled flow every five minutes on each of PJM's ties with " +
+      "its neighbours — New York, the MISO seams, TVA, Duke and the rest — plus the " +
+      "MISO net and the RTO net. Positive is into PJM.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 9),
+    },
+    variables: [
+      {
+        key: "actual_mw",
+        label: "Actual",
+        unit: "MW",
+        availability: "live",
+        description: "Actual flow over the tie at the reading; positive is into PJM.",
+        mock: { base: -400, swing: 600, noise: 80 },
+      },
+      {
+        key: "scheduled_mw",
+        label: "Scheduled",
+        unit: "MW",
+        availability: "live",
+        description: "Scheduled interchange over the tie; positive is into PJM.",
+        mock: { base: -400, swing: 500, noise: 20 },
+      },
+    ],
+  },
   {
     id: "weather.observations.surface",
     path: ["Weather", "Observations", "Surface"],
@@ -2571,8 +2999,13 @@ export function sourceTzOf(schema: Schema): string {
   if (domainOf(schema) !== "Energy") return "UTC";
   // MISO runs its markets on Eastern Standard Time all year, never EDT: a
   // daylight-saving zone would read its labels an hour wrong from March to
-  // November. "EST" is the IANA fixed-offset zone, not an abbreviation.
-  return isoOf(schema) === "MISO" ? "EST" : "America/Chicago";
+  // November. "EST" is the IANA fixed-offset zone, not an abbreviation. PJM's
+  // Eastern Prevailing Time does observe daylight saving, so it is the
+  // ordinary New York zone.
+  const iso = isoOf(schema);
+  if (iso === "MISO") return "EST";
+  if (iso === "PJM") return "America/New_York";
+  return "America/Chicago";
 }
 
 /**
@@ -2582,7 +3015,7 @@ export function sourceTzOf(schema: Schema): string {
  * rule `status.py` uses for the collectors page, so the two cannot disagree
  * about which ISO a feed belongs to.
  */
-const ISO_BY_PREFIX: Record<string, string> = { ercot: "ERCOT", miso: "MISO" };
+const ISO_BY_PREFIX: Record<string, string> = { ercot: "ERCOT", miso: "MISO", pjm: "PJM" };
 
 export function isoOf(schema: Schema): string | null {
   if (schema.iso) return schema.iso;
