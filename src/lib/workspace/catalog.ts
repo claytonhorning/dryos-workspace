@@ -2346,6 +2346,514 @@ export const SCHEMAS: Schema[] = [
     ],
   },
   {
+    id: "energy.pjm.regulation",
+    path: ["Energy", "Ancillary", "Regulation"],
+    name: "PJM regulation prices",
+    short: "Reg · MCP",
+    dataset: "pjm-regulation-prices",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: [],
+    },
+    blurb:
+      "The five-minute regulation clearing price for the PJM RTO, split into its " +
+      "capability and performance components, with the megawatts cleared against " +
+      "the requirement. Preliminary, from the operating day; PJM keeps thirty days.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "mcp",
+        label: "Clearing price",
+        unit: "$/MW",
+        availability: "live",
+        description: "Regulation market clearing price, $/MW per hour.",
+        mock: { base: 20, swing: 18, noise: 6, floor: 0 },
+      },
+      {
+        key: "mcp_capability",
+        label: "Capability",
+        unit: "$/MW",
+        availability: "live",
+        description: "The component paid for holding regulation capacity.",
+        mock: { base: 15, swing: 12, noise: 4, floor: 0 },
+      },
+      {
+        key: "mcp_performance",
+        label: "Performance",
+        unit: "$/MW",
+        availability: "live",
+        description: "The component paid for mileage provided.",
+        mock: { base: 3, swing: 3, noise: 1, floor: 0 },
+      },
+      {
+        key: "quantity_mw",
+        label: "Cleared",
+        unit: "MW",
+        availability: "live",
+        description: "Regulation cleared in the interval.",
+        mock: { base: 700, swing: 60, noise: 20, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.reserves",
+    path: ["Energy", "Ancillary", "Reserves"],
+    name: "PJM dispatched reserves",
+    short: "Reserves",
+    dataset: "pjm-dispatched-reserves",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 3,
+      label: "products",
+      sample: ["SYNCHRONIZED", "PRIMARY", "THIRTY_MINUTE"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "Synchronized, primary and thirty-minute reserve every five minutes: the " +
+      "megawatts the dispatch held against each requirement, the clearing price, " +
+      "and whether PJM called the interval short. A product is one series; the row " +
+      "carries which zone (the RTO or Mid-Atlantic/Dominion) it is.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "mcp",
+        label: "Clearing price",
+        unit: "$/MW",
+        availability: "live",
+        description: "Reserve market clearing price, $/MW per hour.",
+        mock: { base: 1, swing: 3, noise: 1, floor: 0 },
+      },
+      {
+        key: "quantity_mw",
+        label: "Dispatched",
+        unit: "MW",
+        availability: "live",
+        description: "Reserve dispatched in the look-ahead solution.",
+        mock: { base: 2_500, swing: 500, noise: 100, floor: 0 },
+      },
+      {
+        key: "requirement_mw",
+        label: "Requirement",
+        unit: "MW",
+        availability: "live",
+        description: "The requirement the dispatch was meeting.",
+        mock: { base: 2_300, swing: 200, noise: 10, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.loadfc5",
+    path: ["Energy", "Load", "Five-minute forecast"],
+    name: "PJM five-minute load forecast",
+    short: "Load fc · 5m",
+    dataset: "pjm-load-forecast-5min",
+    availability: "live",
+    cadence: { label: "every 5 min, two hours ahead", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 25,
+      label: "forecast areas",
+      sample: ["RTO_COMBINED", "COMED", "PSE&G/MIDATL"],
+    },
+    entityKey: "zone",
+    entityOmit: ["RTO_COMBINED", "MID_ATLANTIC_REGION", "SOUTHERN_REGION", "WESTERN_REGION"],
+    blurb:
+      "PJM's load forecast for the next two hours in five-minute steps, for the " +
+      "zones, the three regions and the RTO, re-issued every five minutes and kept " +
+      "as vintages — so a forecast can be scored against what it said at the time.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "forecast_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast load for the interval, as of this vintage.",
+        mock: { base: 5_000, swing: 2_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.loadfc7",
+    path: ["Energy", "Load", "Seven-day forecast"],
+    name: "PJM seven-day load forecast",
+    short: "Load fc · 7d",
+    dataset: "pjm-load-forecast-7day",
+    availability: "live",
+    cadence: { label: "twice hourly, a week ahead", seconds: 1_800 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 25,
+      label: "forecast areas",
+      sample: ["RTO_COMBINED", "COMED", "DOMINION"],
+    },
+    entityKey: "zone",
+    entityOmit: ["RTO_COMBINED", "MID_ATLANTIC_REGION", "SOUTHERN_REGION", "WESTERN_REGION"],
+    blurb:
+      "PJM's hourly load forecast for the next seven days, for the zones, the " +
+      "three regions and the RTO. PJM replaces it in place twice an hour, so the " +
+      "vintages kept here are the only record of what it said.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "forecast_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast load for the hour, as of this vintage.",
+        mock: { base: 5_000, swing: 2_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.windgen",
+    path: ["Energy", "Generation", "Wind"],
+    name: "PJM wind output",
+    short: "Wind",
+    dataset: "pjm-wind-gen",
+    availability: "live",
+    cadence: { label: "every 15 s", seconds: 15 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: [],
+    },
+    blurb:
+      "Wind output across the whole of PJM, a SCADA reading every fifteen seconds, " +
+      "kept at that grain. PJM holds thirty days.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Wind",
+        unit: "MW",
+        availability: "live",
+        description: "Wind output across PJM at the reading.",
+        mock: { base: 3_000, swing: 2_500, noise: 60, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.solargen",
+    path: ["Energy", "Generation", "Solar"],
+    name: "PJM solar output",
+    short: "Solar",
+    dataset: "pjm-solar-gen",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: [],
+    },
+    blurb:
+      "Metered utility-scale solar output across the whole of PJM every five " +
+      "minutes. Behind-the-meter solar is not in it; PJM sees that as missing load.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Solar",
+        unit: "MW",
+        availability: "live",
+        description: "Utility-scale solar output across PJM for the interval.",
+        mock: { base: 4_000, swing: 4_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.windsolarfc",
+    path: ["Energy", "Generation", "Wind and solar forecast"],
+    name: "PJM wind and solar forecast",
+    short: "Wind · solar fc",
+    dataset: "pjm-wind-solar-forecast",
+    availability: "live",
+    cadence: { label: "every 10 min, two days ahead", seconds: 600 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: {
+      count: 3,
+      label: "resources",
+      sample: ["WIND", "SOLAR", "SOLAR_BTM"],
+    },
+    entityKey: "resource",
+    blurb:
+      "PJM's hourly wind forecast for the next 46 hours, re-issued every ten " +
+      "minutes, and its hourly solar forecast for the next four days — utility-scale " +
+      "and behind-the-meter separately — re-issued hourly. Every issue is a vintage.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "forecast_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "PJM's forecast for the hour, as of this vintage.",
+        mock: { base: 3_000, swing: 2_500, noise: 150, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.constraints",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "PJM binding constraints",
+    short: "Constraints",
+    dataset: "pjm-binding-constraints",
+    availability: "live",
+    cadence: { label: "every 5 min, when bound", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 60,
+      label: "constraints",
+      sample: ["GRACETON-MANOR GRA-MANO     A  230 KV", "APSOUTH", "BED-BLA"],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "Every transmission constraint the real-time dispatch was up against, five " +
+      "minutes at a time, with the contingency it bound for and its shadow price " +
+      "(negative, in PJM's convention). Empty when nothing binds, which is a fact " +
+      "and not a gap; the set of constraints is whatever the grid did that month.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Shadow price",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The constraint's shadow price for the interval; negative in PJM's convention.",
+        mock: { base: -300, swing: 250, noise: 50 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.dispatch",
+    path: ["Energy", "Pricing", "Dispatch rates"],
+    name: "PJM dispatch rates",
+    short: "Dispatch",
+    dataset: "pjm-dispatch-rates",
+    availability: "live",
+    cadence: { label: "every 15 s", seconds: 15 },
+    tokens: 0.5,
+    entities: {
+      count: 20,
+      label: "zones",
+      sample: ["COMED", "DOM", "PS"],
+    },
+    entityKey: "zone",
+    blurb:
+      "The dispatch signal PJM sends each of its 20 transmission zones, in $/MWh, " +
+      "every fifteen seconds — the price the control room is steering generators " +
+      "to at the instant, not a settlement price. PJM keeps fifteen days.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "dispatch_rate",
+        label: "Dispatch rate",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The dispatch rate sent to the zone at the scan.",
+        mock: { base: 28, swing: 12, noise: 2 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.opreserves",
+    path: ["Energy", "Ancillary", "Operational reserves"],
+    name: "PJM operational reserves",
+    short: "Op reserves",
+    dataset: "pjm-operational-reserves",
+    availability: "live",
+    cadence: { label: "every 15 s", seconds: 15 },
+    tokens: 0.5,
+    entities: {
+      count: 13,
+      label: "series",
+      sample: ["RTO_SYNCHRONIZED_RESERVE_TOTAL", "RTO_CONTINGENCY_PRIMARY_RESERVE_TOTAL"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "The megawatts of synchronized, primary and thirty-minute reserve PJM is " +
+      "holding against each requirement, as the control room sees them every " +
+      "fifteen seconds, for the RTO and the Mid-Atlantic/Dominion sub-zone.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "reserve_mw",
+        label: "Reserve",
+        unit: "MW",
+        availability: "live",
+        description: "The series' value at the scan.",
+        mock: { base: 3_000, swing: 800, noise: 60, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.ace",
+    path: ["Energy", "Grid", "Area control error"],
+    name: "PJM area control error",
+    short: "ACE",
+    dataset: "pjm-ace",
+    availability: "live",
+    cadence: { label: "every 15 s", seconds: 15 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: [],
+    },
+    blurb:
+      "How far PJM is from its interchange schedule and frequency obligation at " +
+      "the instant, in megawatts, every fifteen seconds — the number the control " +
+      "room regulates to zero.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "ace_mw",
+        label: "ACE",
+        unit: "MW",
+        availability: "live",
+        description: "Area control error at the scan; positive is over-generating.",
+        mock: { base: 0, swing: 300, noise: 120 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.itsced",
+    path: ["Energy", "Pricing", "Interface prices ahead"],
+    name: "PJM IT SCED interface prices",
+    short: "IT SCED · LMP",
+    dataset: "pjm-itsced-lmp",
+    availability: "live",
+    cadence: { label: "every 5 min, four intervals ahead", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 5,
+      label: "interfaces",
+      sample: ["NYIS", "MISO", "NEPTUNE"],
+    },
+    entityKey: "node",
+    blurb:
+      "What PJM's intermediate-term dispatch expects the next four five-minute " +
+      "intervals to cost at its ties with New York and MISO, re-run every few " +
+      "minutes and kept case by case — the forward-looking price at the seams, " +
+      "MISO's ex-ante counterpart.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "IT SCED LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The price the case expects at the interface for the interval.",
+        mock: { base: 28, swing: 12, noise: 3 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component.",
+        mock: { base: -8, swing: 10, noise: 2 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0.5, swing: 1, noise: 0.3 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.transfer",
+    path: ["Energy", "Grid", "Transfer interfaces"],
+    name: "PJM transfer interfaces",
+    short: "Interfaces",
+    dataset: "pjm-transfer-interfaces",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 11,
+      label: "interfaces",
+      sample: ["APSOUTH", "EAST", "BED-BLA"],
+    },
+    entityKey: "interface",
+    blurb:
+      "Actual flow against the transfer limit on the eleven interfaces PJM watches " +
+      "for stability — the eastern, central and western reactive interfaces, AP " +
+      "South, Bedington–Black Oak and the seams — every five minutes. How close " +
+      "the grid is to its edges.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 10),
+    },
+    variables: [
+      {
+        key: "actual_mw",
+        label: "Flow",
+        unit: "MW",
+        availability: "live",
+        description: "Actual flow across the interface at the reading.",
+        mock: { base: 3_000, swing: 1_200, noise: 150 },
+      },
+      {
+        key: "limit_mw",
+        label: "Limit",
+        unit: "MW",
+        availability: "live",
+        description: "The transfer limit PJM is holding the interface to.",
+        mock: { base: 4_800, swing: 200, noise: 20, floor: 0 },
+      },
+    ],
+  },
+  {
     id: "weather.observations.surface",
     path: ["Weather", "Observations", "Surface"],
     name: "Surface observations",
