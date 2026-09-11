@@ -191,9 +191,9 @@ export interface Schema {
   locatedBy?: string;
   /**
    * How many of the entities the API can place, for a located stream whose
-   * table is partial. Read from `/v1/reference/ercot-node-locations` when the
-   * catalogue was last written (`scripts/build_node_locations.py` prints it);
-   * the coverage line under a layer is this over `entities.count`.
+   * table is partial. Read from `/v1/reference/node-locations/{iso}` when the
+   * catalogue was last written (the build scripts print it); the coverage
+   * line under a layer is this over `entities.count`.
    */
   locatedCount?: number;
   /**
@@ -1581,10 +1581,16 @@ export const SCHEMAS: Schema[] = [
       label: "pricing nodes",
       sample: ["INDIANA.HUB", "ILLINOIS.HUB", "MICHIGAN.HUB"],
     },
-    // No coordinates published, and the node location table is ERCOT's —
-    // so no map for now rather than a wrong one. MISO's own node reference
-    // (`aggregated-pnode`) carries no position either; EIA-860M's MISO plants
-    // would be the same chain again.
+    // Placed by the API from MISO's own node table: 260 generator nodes and
+    // 57 hubs, zones and interfaces sit where MISO's LMP contour map draws
+    // them, and 414 more generator nodes are matched by name to EIA-860M's
+    // MISO plants (`scripts/build_iso_node_locations.py --iso miso`). The
+    // remaining generator nodes and the hubs MISO does not draw read null.
+    located: true,
+    locatedBy:
+      "EIA-860M plant coordinates, matched by the name in the node; hubs and 260 " +
+      "generators where MISO's own map draws them",
+    locatedCount: 731,
     blurb:
       "Preliminary ex-post prices for every MISO commercial pricing node — hubs, " +
       "load zones, generator nodes and interfaces — with the congestion and loss " +
@@ -1940,9 +1946,9 @@ export const SCHEMAS: Schema[] = [
       label: "aggregate pricing nodes",
       sample: ["WESTERN HUB", "PJM-RTO", "COMED"],
     },
-    // No coordinates published; the node location table is ERCOT's. PJM's
-    // pricing-node master carries a transmission zone and a voltage per bus
-    // but no position either, so no map rather than a wrong one.
+    // Every node here is an aggregate — a hub, a zone, an interface, an EHV
+    // set — and an aggregate has no place, so this stream is not located.
+    // The buses are (`energy.pjm.rtbus`): a generator bus is a plant.
     blurb:
       "Unverified five-minute prices at PJM's 12 trading hubs, 22 transmission " +
       "zones, 7 interfaces and every other aggregate pricing node, with the " +
@@ -2015,6 +2021,14 @@ export const SCHEMAS: Schema[] = [
       label: "electrical buses",
       sample: ["ALDENE  230 KV  T-10", "BRANCHBURG500 KV  T-1", "KEYSTONE500 KV  KEY1"],
     },
+    // Placed by the API from the PJM node table: 930 of the 2,141 generator
+    // buses are matched by substation and unit name to EIA-860M's PJM plants
+    // in their transmission zone's states (`scripts/build_iso_node_locations.py
+    // --iso pjm`). The 11,826 load and external buses are not attempted — no
+    // public file says where a feeder leaves the grid — and read null.
+    located: true,
+    locatedBy: "EIA-860M plant coordinates, matched by substation and unit name in the zone",
+    locatedCount: 930,
     blurb:
       "Unverified five-minute prices at every one of PJM's 13,967 electrical buses " +
       "— generator, load and external — with the congestion and loss components. " +
@@ -2159,6 +2173,10 @@ export const SCHEMAS: Schema[] = [
       label: "electrical buses",
       sample: ["ALDENE  230 KV  T-10", "BRANCHBURG500 KV  T-1", "KEYSTONE500 KV  KEY1"],
     },
+    // The same buses as the real-time stream, so the same table places them.
+    located: true,
+    locatedBy: "EIA-860M plant coordinates, matched by substation and unit name in the zone",
+    locatedCount: 930,
     blurb:
       "Hourly day-ahead prices at every one of PJM's 13,967 electrical buses, with " +
       "the energy, congestion and loss components as PJM publishes them. A third of " +
