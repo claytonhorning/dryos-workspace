@@ -2013,6 +2013,104 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // ── CAISO ──────────────────────────────────────────────────────────────
+  // CAISO's OASIS: public, no key, asked for a UTC window and answered with
+  // long rows, one per node and price component. Every row carries GMT; the
+  // market's own clock is Pacific prevailing, which `sourceTzOf` knows.
+  {
+    id: "energy.caiso.realtime",
+    path: ["Energy", "Pricing", "Real-time"],
+    name: "CAISO real-time LMP",
+    short: "RT · LMP",
+    dataset: "caiso-realtime-lmp",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 1,
+    entities: {
+      count: 2757,
+      label: "pricing nodes",
+      sample: ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "DLAP_PGAE-APND"],
+    },
+    // Placed by the API from CAISO's node table (`scripts/build_iso_node_locations.py
+    // --iso caiso`): 131 resources where the price map on caiso.com draws their
+    // substation, 246 matched by name to EIA-860M's plants in the Western EIM
+    // area the node's own energy price puts it in, and 61 units beside a placed
+    // sibling. Demand resources, hubs and load aggregation points are not
+    // places, and read null.
+    located: true,
+    locatedBy:
+      "EIA-860M plant coordinates, matched by name within the area the node's energy " +
+      "price puts it in; and the substations CAISO's own price map draws",
+    locatedCount: 438,
+    blurb:
+      "Real-time dispatch prices at every CAISO aggregated pricing node — the NP15, " +
+      "SP15 and ZP26 trading hubs, the utilities' load aggregation points, resources, " +
+      "and the pricing points of every Western Energy Imbalance Market area — with the " +
+      "energy, congestion, loss and greenhouse-gas components, every five minutes.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 12),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The five-minute real-time price at the pricing node.",
+        // The ERCOT ramp, stop for stop — one price, one color, every operator.
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
+        mock: { base: 26, swing: 14, noise: 3 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 8, noise: 2 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0, swing: 1.5, noise: 0.4 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Marginal energy component, published by CAISO. Not one number per " +
+          "interval: the Western EIM areas balance separately, and their energy " +
+          "prices part when transfers between them bind.",
+        mock: { base: 26, swing: 10, noise: 2 },
+      },
+      {
+        key: "lmp_ghg",
+        label: "Greenhouse gas",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Greenhouse-gas component — CAISO's price for compliance on energy " +
+          "delivered into California. Usually zero.",
+        mock: { base: 0, swing: 0.5, noise: 0.1 },
+      },
+    ],
+  },
   // ── PJM ────────────────────────────────────────────────────────────────
   // Seven streams, one per collector, landed 2026-09-09. Every one reads
   // PJM's Data Miner 2 on a key that allows six requests a minute; the
@@ -3621,6 +3719,8 @@ export function sourceTzOf(schema: Schema): string {
   const iso = isoOf(schema);
   if (iso === "MISO") return "EST";
   if (iso === "PJM") return "America/New_York";
+  // CAISO's market clock is Pacific prevailing; its rows carry GMT anyway.
+  if (iso === "CAISO") return "America/Los_Angeles";
   return "America/Chicago";
 }
 
@@ -3636,6 +3736,7 @@ const ISO_BY_PREFIX: Record<string, string> = {
   miso: "MISO",
   pjm: "PJM",
   spp: "SPP",
+  caiso: "CAISO",
 };
 
 export function isoOf(schema: Schema): string | null {

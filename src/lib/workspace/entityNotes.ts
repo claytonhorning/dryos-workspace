@@ -77,6 +77,17 @@ export const ENTITY_NOTES: Record<string, string> = {
   NYIS: "The New York interface — the price at the seam with NYISO.",
   "PJM RTO": "The RTO total — the sum of every zone, or the net of every tie.",
   "PJM MISO": "Net flow across every PJM–MISO tie; a component of PJM RTO.",
+
+  // CAISO — the three trading hubs and the utilities' default load
+  // aggregation points, out of 2,757 APnodes. OASIS spells every one with
+  // the -APND suffix, and so does the data.
+  "TH_NP15_GEN-APND": "NP15 hub — Northern California; the benchmark north of Path 15.",
+  "TH_SP15_GEN-APND": "SP15 hub — Southern California; the most-traded Western price.",
+  "TH_ZP26_GEN-APND": "ZP26 hub — the Central Valley zone between NP15 and SP15.",
+  "DLAP_PGAE-APND": "PG&E load aggregation point — what load in Northern California pays.",
+  "DLAP_SCE-APND": "SCE load aggregation point — what load in Southern California Edison's area pays.",
+  "DLAP_SDGE-APND": "SDG&E load aggregation point — San Diego.",
+  "DLAP_VEA-APND": "Valley Electric load aggregation point — southern Nevada.",
 };
 
 export function entityNote(node: string): string | undefined {

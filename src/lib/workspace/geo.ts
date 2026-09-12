@@ -68,6 +68,9 @@ const OPERATOR_BOUNDS: Record<string, [number, number, number, number]> = {
   // The RTO from the Texas Panhandle to the Dakotas, and since its western
   // market opened, Colorado, Wyoming and the edge of the Rockies.
   SPP: [-111.0, 31.5, -89.5, 49.0],
+  // California, and the Western EIM areas priced beside it from Arizona to
+  // British Columbia.
+  CAISO: [-125.5, 31.0, -103.0, 52.0],
 };
 
 /**
