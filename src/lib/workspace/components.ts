@@ -9,9 +9,10 @@ import {
 import {
   ERCOT_POINTS,
   ERCOT_VIEW,
+  operatorBounds,
   hasGeography,
 } from "./geo";
-import { schemaById } from "./catalog";
+import { isoOf, schemaById } from "./catalog";
 import { SERIES_PALETTE } from "./palette";
 
 /**
@@ -171,6 +172,15 @@ function unit(ref: DataRef): string {
   const key = column(ref);
   return (
     schema?.variables.find((v) => v.key === key)?.unit ?? ""
+  );
+}
+
+/** The variable's own name — "Total LMP" — for a layer that spans streams. */
+function measureLabel(ref: DataRef): string {
+  const schema = schemaFor(ref.schemaId);
+  const key = column(ref);
+  return (
+    schema?.variables.find((v) => v.key === key)?.label ?? key
   );
 }
 
@@ -2180,7 +2190,33 @@ const table: ComponentDef = {
  * `accepts`, the explorer's cards and the layer picker.
  */
 export const PIN_LAYER_WHY =
-  "One layer of pins per map — a second stream of them would not draw.";
+  "One measure of pins per map — a second stream joins only when it is located and reads the same column in the same unit.";
+
+/**
+ * Whether the pin streams in a selection can share the map's one point layer.
+ *
+ * The layer has one placement rule, one scale and one legend swatch, so two
+ * streams draw together only when nothing about those differs: every one of
+ * them located (the rows carry the coordinate, so no lookup table has to know
+ * two operators), and every one reading the same column in the same unit.
+ * ERCOT's, MISO's and PJM's real-time LMP pass — the same `lmp_total` in
+ * $/MWh on the same declared stops — and a weather station beside a price
+ * does not. A single stream always agrees with itself.
+ */
+export function pinsAgree(refs: DataRef[]): boolean {
+  const streams = pinStreams(refs);
+  if (streams.length <= 1) return true;
+  const firsts = streams.map(
+    (id) => refs.find((r) => r.schemaId === id)!,
+  );
+  if (firsts.some((r) => !schemaById(r.schemaId)?.located))
+    return false;
+  const c = column(firsts[0]);
+  const u = unit(firsts[0]);
+  return firsts.every(
+    (r) => column(r) === c && unit(r) === u,
+  );
+}
 
 const map: ComponentDef = {
   kind: "map",
@@ -2252,9 +2288,9 @@ const map: ComponentDef = {
 
     if (refs.length === 0)
       return { ok: false, why: "Pick a stream to draw." };
-    // One layer of pins per map — see `pinStreams`. Refused here so the API
-    // refuses what the explorer's cards refuse, in the same words.
-    if (pinStreams(refs).length > 1)
+    // One measure of pins per map — see `pinsAgree`. Refused here so the
+    // API refuses what the explorer's cards refuse, in the same words.
+    if (!pinsAgree(refs))
       return { ok: false, why: PIN_LAYER_WHY };
     if (hasField || hasMotion || hasLocated)
       return { ok: true };
@@ -2295,31 +2331,49 @@ const map: ComponentDef = {
       A located stream places its own pins, so none of the lookup below applies
       to it: the coordinates arrive on the rows and the entities are whatever
       the query returns, which means a station the source adds tomorrow appears
-      without anyone editing a table. Mixing one with an ERCOT stream in a
-      single map is not offered — two placement rules in one layer is a
-      different component — so the located ref wins the layer outright.
+      without anyone editing a table. Several located streams share the layer
+      when `pinsAgree` says they read one measure — ERCOT's, MISO's and PJM's
+      real-time LMP on one map — each with its own query and its own entity
+      column; a lookup stream never joins them, since it would need the table
+      below, and `accepts` refuses the mix. One set per stream, in the order
+      the streams were picked.
     */
-    const locatedRef = pointRefs.find(
-      (r) => schemaById(r.schemaId)?.located,
-    );
-    const locatedSchema = locatedRef
-      ? schemaById(locatedRef.schemaId)
-      : undefined;
-    // Declared, then the fan-out key, then `node`. Day-ahead rows say `bus`,
-    // and a placement path that assumed one column drew one stream and silently
-    // nothing for the other.
-    const locatedEntity =
-      locatedSchema?.entityColumn ??
-      locatedSchema?.entityKey ??
-      "node";
-    /*
-      A located stream whose table is partial (it declares `locatedCount`)
-      is an ERCOT one, and its rows for a hub or a load zone carry no
-      coordinate because an aggregate has no place. Those fall back to the
-      `geo.ts` centroids, compiled in below, and wear the approximate caveat
-      the centroids always did — so HB_NORTH alone on a map still draws.
-    */
-    const partial = locatedSchema?.locatedCount !== undefined;
+    const locatedSets = pinStreams(pointRefs).flatMap((id) => {
+      const schema = schemaById(id);
+      if (!schema?.located) return [];
+      const own = pointRefs.filter((r) => r.schemaId === id);
+      const subset = own.find((r) => r.subset)?.subset;
+      // A table that is partial (it declares `locatedCount`) is an
+      // operator's, and its rows for a hub or a load zone carry no
+      // coordinate because an aggregate has no place. Those fall back to
+      // the `geo.ts` centroids compiled in below and wear the approximate
+      // caveat the centroids always did — so HB_NORTH alone on a map still
+      // draws. A whole-stream query of one asks the API for only the rows
+      // it can draw: PJM's bus stream is 13,967 entities and 1,101 places.
+      const partial = schema.locatedCount !== undefined;
+      return [
+        {
+          ref: own[0],
+          schema,
+          dataset: schema.dataset ?? schema.id,
+          // Declared, then the fan-out key, then `node`. Day-ahead rows say
+          // `bus`, and a placement path that assumed one column drew one
+          // stream and silently nothing for the other.
+          entity:
+            schema.entityColumn ?? schema.entityKey ?? "node",
+          subset,
+          partial,
+          count:
+            subset?.entities.length ??
+            (partial
+              ? schema.locatedCount!
+              : schema.entities.count),
+        },
+      ];
+    });
+    const locatedRef = locatedSets[0]?.ref;
+    const locatedSchema = locatedSets[0]?.schema;
+    const partial = locatedSets.some((set) => set.partial);
     /*
       Past a few hundred entities a pin stops being a pin.
 
@@ -2331,9 +2385,7 @@ const map: ComponentDef = {
       hover readout is for.
     */
     const dense =
-      (locatedRef?.subset?.entities.length ??
-        locatedSchema?.entities.count ??
-        0) > 200;
+      locatedSets.reduce((n, set) => n + set.count, 0) > 200;
 
     const nodes = locatedRef
       ? partial
@@ -2397,6 +2449,25 @@ const map: ComponentDef = {
     const trails = o.trails !== "off";
     // Enough readings back to draw a tail without hauling a history nobody sees.
     const motionLimit = trails ? 14 : 1;
+    // How many of the queries above are point queries, so the field and the
+    // fleet know which row slots are theirs.
+    const pointQueries = locatedSets.length || (nodes.length ? 1 : 0);
+    // A layer spanning streams is named by its measure — "Total LMP by
+    // location" — since naming it after the first stream would claim the
+    // other two are ERCOT's.
+    const mapTitle = motionRef
+      ? "Live traffic"
+      : fieldRef
+        ? `${fieldRef.label} field`
+        : locatedSets.length > 1
+          ? `${measureLabel(pointRefs[0])} by location`
+          : `${s[0]?.label ?? "Map"} by location`;
+    // Where the map opens: Texas for ERCOT's pins and everything unplaced by
+    // an operator (weather, fields), the operators' footprints otherwise — so
+    // a MISO or PJM map is not a map of Texas with its pins off the edge.
+    const openBounds = locatedSets.length
+      ? operatorBounds(locatedSets.map((set) => isoOf(set.schema)))
+      : null;
 
     return {
       imports: [],
@@ -2409,7 +2480,17 @@ const map: ComponentDef = {
   const COLUMN = ${JSON.stringify(s[0]?.column ?? "")};
   const UNIT = ${JSON.stringify(s[0]?.unit ?? "")};
   const STYLE = ${JSON.stringify(o.style)};
-  const LOCATED = ${locatedRef ? JSON.stringify({ entity: locatedEntity, label: locatedRef.label, dense }) : "null"};
+  const LOCATED = ${
+    locatedRef
+      ? JSON.stringify({
+          entity: locatedSets[0].entity,
+          label: locatedRef.label,
+          dense,
+          // One query per set, in this order; the placed memo reads each by its own entity column.
+          sets: locatedSets.map((set) => ({ entity: set.entity, label: set.ref.label })),
+        })
+      : "null"
+  };
   // Absolute color stops for the point layer's measure, when its variable
   // declares them. Null falls back to percentiles of whatever is on screen.
   const SCALE = ${JSON.stringify(pointScale(pointRefs.length ? pointRefs : refs))};
@@ -2444,39 +2525,35 @@ const map: ComponentDef = {
   const { rows, error, loading } = useSeries(
     [
 ${
-  locatedRef
+  locatedSets.length
     ? /*
          A whole-stream reference carries no node filter: a located stream
          fans out, so the query asks for everything and the pins are whatever
-         came back. A subset chip filters at the server instead — nine hubs'
-         rows, not 1,118 thinned after delivery — and its limit is sized to
-         the subset. `end` is the load-bearing half either way — a forecast's
-         newest row is seven days out, and a map of "now" that drew next
-         Sunday would be wrong in a way nobody would catch by looking at it.
-         Bounded at now, the newest row is the current one for observations
-         and forecasts alike.
+         came back — everything the map can draw, that is, for a partial
+         table (`located`), so the limit is sized to the placed count rather
+         than to the stream. A subset chip filters at the server instead —
+         nine hubs' rows, not 1,118 thinned after delivery — and its limit is
+         sized to the subset. `end` is the load-bearing half either way — a
+         forecast's newest row is seven days out, and a map of "now" that
+         drew next Sunday would be wrong in a way nobody would catch by
+         looking at it. Bounded at now, the newest row is the current one
+         for observations and forecasts alike.
       */
-      `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, ${
-        locatedRef.subset
-          ? `node: ${JSON.stringify(locatedRef.subset.entities)}, `
-          : ""
-      }end: "-0m", limit: ${
-        locatedRef.subset
-          ? Math.min(
+      locatedSets
+        .map(
+          (set) =>
+            `      { dataset: ${JSON.stringify(set.dataset)}, ${
+              set.subset
+                ? `node: ${JSON.stringify(set.subset.entities)}, `
+                : set.partial
+                  ? "located: true, "
+                  : ""
+            }end: "-0m", limit: ${Math.min(
               DRAW_CAP,
-              Math.max(
-                30,
-                locatedRef.subset.entities.length * 2,
-              ),
-            )
-          : Math.min(
-              DRAW_CAP,
-              Math.max(
-                60,
-                (locatedSchema?.entities.count ?? 50) * 2,
-              ),
-            )
-      } },`
+              Math.max(set.subset ? 30 : 60, set.count * 2),
+            )} },`,
+        )
+        .join("\n")
     : nodes.length
       ? `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 },`
       : ""
@@ -2501,9 +2578,15 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     cursorAt,
   );
 
-  const pointRows = ${locatedRef || nodes.length ? "rows[0] || []" : "[]"};
-  const fieldRows = ${showField ? `rows[${locatedRef || nodes.length ? 1 : 0}] || []` : "[]"};
-  const flightRows = ${motionRef ? `rows[${(locatedRef || nodes.length ? 1 : 0) + (showField ? 1 : 0)}] || []` : "[]"};
+  const pointRows = ${
+    locatedSets.length
+      ? `[${locatedSets.map((_, k) => `...(rows[${k}] || [])`).join(", ")}]`
+      : nodes.length
+        ? "rows[0] || []"
+        : "[]"
+  };
+  const fieldRows = ${showField ? `rows[${pointQueries}] || []` : "[]"};
+  const flightRows = ${motionRef ? `rows[${pointQueries + (showField ? 1 : 0)}] || []` : "[]"};
 
   const ready = useMapbox();
   const theme = useFrameTheme();
@@ -2528,8 +2611,8 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   const placed = React.useMemo(() => {
     const out = {};
     if (LOCATED) {
-      pointRows.forEach((r) => {
-        const id = r[LOCATED.entity];
+      LOCATED.sets.forEach((set, k) => (rows[k] || []).forEach((r) => {
+        const id = r[set.entity];
         if (id == null || out[id]) return;
         // The row's own coordinate first; an aggregate row (a hub, a zone)
         // carries none and takes the centroid compiled in, which is not exact
@@ -2540,7 +2623,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         }
         if (typeof lat !== "number" || typeof lon !== "number") return;
         out[id] = { lon, lat, label: String(id), value: r[COLUMN], exact };
-      });
+      }));
     } else {
       NODES.forEach((n) => {
         const row = pointRows.find((r) => r.node === n);
@@ -2574,10 +2657,18 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       ? [
           {
             id: "points",
-            label: s[0]?.label ?? "Points",
+            // Several streams on the layer are named by their measure, since
+            // three stream names in a legend row is a sentence.
+            label:
+              locatedSets.length > 1
+                ? `${measureLabel(pointRefs[0])} · ${locatedSets.length} streams`
+                : (s[0]?.label ?? "Points"),
             unit: s[0]?.unit ?? "",
             swatch: "#d9a441",
-            note: locatedSchema?.locatedBy ?? "",
+            note:
+              locatedSets.length > 1
+                ? "placed by the API from each operator's node table"
+                : (locatedSchema?.locatedBy ?? ""),
           },
         ]
       : []),
@@ -2814,8 +2905,13 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       doubleClickZoom: false,
       container: host.current,
       style: "mapbox://styles/mapbox/" + style,
-      center: [${ERCOT_VIEW.lon}, ${ERCOT_VIEW.lat}],
-      zoom: ${ERCOT_VIEW.zoom},
+      ${
+        openBounds
+          ? `bounds: ${JSON.stringify(openBounds)},
+      fitBoundsOptions: { padding: 16 },`
+          : `center: [${ERCOT_VIEW.lon}, ${ERCOT_VIEW.lat}],
+      zoom: ${ERCOT_VIEW.zoom},`
+      }
       attributionControl: true,
     });
     return () => { map.current && map.current.remove(); map.current = null; };
@@ -3569,7 +3665,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           id: "dryos-pin",
           type: "circle",
           source: "dryos-pts",
-          filter: ["==", ["get", "id"], (pinnedRef.current && pinnedRef.current.id) || "\u0000"],
+          filter: ["==", ["get", "id"], (pinnedRef.current && pinnedRef.current.id) || "\\u0000"],
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 6.5, 6, 9.5, 9, 14],
             "circle-color": "rgba(0,0,0,0)",
@@ -3648,7 +3744,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     const m = map.current;
     if (!m) return;
     if (m.getLayer && m.getLayer("dryos-pin")) {
-      m.setFilter("dryos-pin", ["==", ["get", "id"], (pinned && pinned.id) || "\u0000"]);
+      m.setFilter("dryos-pin", ["==", ["get", "id"], (pinned && pinned.id) || "\\u0000"]);
     }
     // The marker path: the pinned badge wears the ring as an outline, and
     // every other badge takes it off.
@@ -3670,7 +3766,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   }
 
   return (
-    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(motionRef ? "Live traffic" : fieldRef ? `${fieldRef.label} field` : `${s[0]?.label ?? "Map"} by location`)} sub={${JSON.stringify(subFor(refs, motionRef ? "Live traffic" : fieldRef ? `${fieldRef.label} field` : `${s[0]?.label ?? "Map"} by location`))}} unit={FIELD ? FIELD.unit : UNIT} loading={loading && !ready} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(mapTitle)} sub={${JSON.stringify(subFor(refs, mapTitle))}} unit={FIELD ? FIELD.unit : UNIT} loading={loading && !ready} error={error}>
       <div ref={host} style={{ background: "var(--surface-2)", border: NAKED ? "none" : "1px solid var(--line)", borderRadius: NAKED ? 0 : 6, inset: 0, position: "absolute" }} />
       {/* Over the map, under the markers, and deaf to the pointer — the map
           below still pans and zooms as if nothing were on top of it. */}

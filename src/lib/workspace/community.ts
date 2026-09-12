@@ -5,6 +5,7 @@ import {
   querySnippet,
   schemaById,
   type DataRef,
+  type Schema,
 } from "./catalog";
 import {
   DEFAULT_LAYOUT,
@@ -50,6 +51,13 @@ interface Piece {
    * ones the source adds later.
    */
   entities?: string[];
+  /**
+   * Further whole streams stacked under `schemaId` — a map's other layers.
+   * Only a map takes more than one stream, and only streams that agree on
+   * the measure (`pinsAgree`); a recipe naming any other pair is refused by
+   * the map's own `accepts` when it is dragged, the same as a hand-picked one.
+   */
+  layers?: string[];
   options?: Record<string, string>;
   layout?: { w: number; h: number };
 }
@@ -63,6 +71,17 @@ interface Recipe extends Piece {
 }
 
 const PUBLISHED: Recipe[] = [
+  {
+    slug: "rt-lmp-everywhere",
+    name: "Real-time LMP, every operator",
+    blurb:
+      "Every placed node in ERCOT, MISO and PJM on one map, colored by its newest price on one scale.",
+    author: "Dryos",
+    kind: "map",
+    schemaId: "energy.power.realtime",
+    layers: ["energy.miso.realtime", "energy.pjm.rtbus"],
+    layout: { w: 12, h: 420 },
+  },
   {
     slug: "hub-prices",
     name: "Hub prices",
@@ -105,19 +124,24 @@ const PUBLISHED: Recipe[] = [
   },
 ];
 
+/** The whole-stream reference the explorer would hand over for a schema. */
+function wholeRef(schema: Schema): DataRef {
+  return makeRef(schema, {
+    kind: "schema",
+    label: schema.name,
+    sublabel: entityCountLabel(schema),
+    snippet: querySnippet(schema),
+  });
+}
+
 /** A recipe's references, rebuilt against the catalogue as it stands now. */
 function refsOf(recipe: Piece): DataRef[] | null {
   const schema = schemaById(recipe.schemaId);
   if (!schema) return null;
   if (!recipe.entities) {
-    return [
-      makeRef(schema, {
-        kind: "schema",
-        label: schema.name,
-        sublabel: entityCountLabel(schema),
-        snippet: querySnippet(schema),
-      }),
-    ];
+    const layers = (recipe.layers ?? []).map((id) => schemaById(id));
+    if (layers.some((s) => !s)) return null;
+    return [schema, ...(layers as Schema[])].map(wholeRef);
   }
   return recipe.entities.map((node) => entityRef(schema, node));
 }

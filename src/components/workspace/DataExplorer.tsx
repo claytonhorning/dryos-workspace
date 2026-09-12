@@ -35,6 +35,7 @@ import {
 } from "@/lib/workspace/catalog";
 import {
   PIN_LAYER_WHY,
+  pinsAgree,
   type ComponentKind,
 } from "@/lib/workspace/components";
 import { entityNote } from "@/lib/workspace/entityNotes";
@@ -177,7 +178,7 @@ export function DataExplorer({
   }, [domain]);
   const everything = domain === EVERYTHING;
   const mapping = shape === "map";
-  /** The stream already drawn as pins, if any — a second one is refused. */
+  /** The streams already drawn as pins — another joins only if `pinsAgree`. */
   const pinsOn = useMemo(() => pinStreams(selected), [selected]);
   const [query, setQuery] = useState("");
   /** The set being read at level two, or null for the catalogue. */
@@ -395,7 +396,8 @@ export function DataExplorer({
                       blocked={
                         pinsOn.length > 0 &&
                         mapTreatment(e.schema)!.how === "pins" &&
-                        !pinsOn.includes(e.schema.id)
+                        !pinsOn.includes(e.schema.id) &&
+                        !pinsAgree([...selected, e.streamRef])
                       }
                       onSelect={() => onToggle(e.streamRef!)}
                       onNarrow={
@@ -583,9 +585,9 @@ function DrillRow({
  * `accepts` used to be the first place they surfaced, after the fact, on the
  * footer.
  *
- * `blocked` is the second stream of pins. The map draws one layer of them
- * (see `pinStreams`), and a card that could be clicked into a refusal is
- * worse than one that says why it cannot be.
+ * `blocked` is a second stream of pins that cannot share the layer. The map
+ * draws one measure of them (see `pinsAgree`), and a card that could be
+ * clicked into a refusal is worse than one that says why it cannot be.
  */
 function LayerRow({
   schema,

@@ -57,6 +57,35 @@ export const ERCOT_POINTS: Record<string, Point> = {
 export const ERCOT_VIEW = { lon: -99.3, lat: 31.3, zoom: 4.6 };
 
 /**
+ * Each operator's footprint as [west, south, east, north] — the same boxes
+ * `node_locations.py` checks a manual row against, so a map opens on every
+ * place a node could be.
+ */
+const OPERATOR_BOUNDS: Record<string, [number, number, number, number]> = {
+  ERCOT: [-107.0, 25.5, -93.4, 36.7],
+  MISO: [-106.5, 28.5, -82.0, 50.5],
+  PJM: [-91.5, 34.0, -73.5, 43.5],
+};
+
+/**
+ * The box a map of these operators should open on, or null for the ERCOT
+ * view. A map centred on Texas puts PJM above the top edge of a 420px tile,
+ * so any pins beyond ERCOT's open on the union of their footprints instead.
+ */
+export function operatorBounds(
+  isos: (string | null)[],
+): [[number, number], [number, number]] | null {
+  const boxes = [...new Set(isos)].map((i) => (i ? OPERATOR_BOUNDS[i] : undefined));
+  if (!boxes.length || boxes.some((b) => !b)) return null;
+  if (boxes.length === 1 && boxes[0] === OPERATOR_BOUNDS.ERCOT) return null;
+  const bs = boxes as [number, number, number, number][];
+  return [
+    [Math.min(...bs.map((b) => b[0])), Math.min(...bs.map((b) => b[1]))],
+    [Math.max(...bs.map((b) => b[2])), Math.max(...bs.map((b) => b[3]))],
+  ];
+}
+
+/**
  * A grid cell carries its own position.
  *
  * `G_315_1005` is 31.5°N, 100.5°W — tenths of a degree, west positive. Encoding

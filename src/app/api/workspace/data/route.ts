@@ -43,6 +43,14 @@ export async function POST(req: Request) {
      */
     interval?: string;
     agg?: "avg" | "min" | "max";
+    /**
+     * Only rows the map can place. For a located stream whose table is
+     * partial — PJM's buses, 1,101 placed of 13,967 — a whole-stream query
+     * would otherwise spend its limit on rows that draw nothing. The API
+     * filters on its own node table; a list of 1,101 names would fan out here
+     * into 1,101 requests.
+     */
+    located?: boolean;
     /** Which screen asked, so a screen can be told what it costs. */
     appId?: string;
   };
@@ -93,6 +101,7 @@ export async function POST(req: Request) {
         if (end) url.searchParams.set("end", end);
         if (body.interval) url.searchParams.set("interval", body.interval);
         if (body.agg) url.searchParams.set("agg", body.agg);
+        if (body.located) url.searchParams.set("located", "true");
         url.searchParams.set("limit", String(limit));
 
         const res = await fetch(url, { cache: "no-store", headers: auth });

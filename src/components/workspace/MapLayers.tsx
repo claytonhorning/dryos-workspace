@@ -12,7 +12,7 @@ import {
   schemaFor,
   type DataRef,
 } from "@/lib/workspace/catalog";
-import { PIN_LAYER_WHY } from "@/lib/workspace/components";
+import { PIN_LAYER_WHY, pinsAgree } from "@/lib/workspace/components";
 
 /**
  * The map's layers: what is on it, and what else could be.
@@ -48,7 +48,7 @@ export function MapLayers({
 }) {
   const [adding, setAdding] = useState(false);
   const editable = onChange !== undefined;
-  /** The stream already drawn as pins — a second one is refused. */
+  /** The streams already drawn as pins — another joins only if `pinsAgree`. */
   const pinsOn = useMemo(() => pinStreams(layers), [layers]);
 
   const move = (i: number, by: number) => {
@@ -77,17 +77,18 @@ export function MapLayers({
       .filter((x): x is NonNullable<typeof x> => x !== null);
 
     /*
-      The map draws one layer of pins — see `pinStreams` — so once one is on,
-      every other stream of pins is out. They are listed rather than hidden,
-      since hidden reads as "not mappable", but listed *once*, under the
-      reason, as names: fifteen greyed rows each repeating the sentence
-      buried the one live row — the wind field — under it.
+      The map draws one measure of pins — see `pinsAgree` — so once one is
+      on, every stream of pins that reads another is out. They are listed
+      rather than hidden, since hidden reads as "not mappable", but listed
+      *once*, under the reason, as names: fifteen greyed rows each repeating
+      the sentence buried the one live row — the wind field — under it.
     */
     const blocked = rows.filter(
       (row) =>
         row.t.how === "pins" &&
         pinsOn.length > 0 &&
-        !pinsOn.includes(row.ref.schemaId),
+        !pinsOn.includes(row.ref.schemaId) &&
+        !pinsAgree([...layers, row.ref]),
     );
     const open = rows.filter((row) => !blocked.includes(row));
 
@@ -210,7 +211,7 @@ export function MapLayers({
           {available.blocked.length > 0 && (
             <div className="mt-1.5 border-t border-line pt-1.5">
               <div className="px-1 pb-1 font-mono text-[9px] tracking-[0.13em] text-faint uppercase">
-                One layer of pins per map
+                One measure of pins per map
               </div>
               <p className="px-1 pb-1 text-[10px] leading-snug text-faint">
                 {PIN_LAYER_WHY} Take{" "}

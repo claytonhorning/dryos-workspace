@@ -2021,14 +2021,14 @@ export const SCHEMAS: Schema[] = [
       label: "electrical buses",
       sample: ["ALDENE  230 KV  T-10", "BRANCHBURG500 KV  T-1", "KEYSTONE500 KV  KEY1"],
     },
-    // Placed by the API from the PJM node table: 930 of the 2,141 generator
+    // Placed by the API from the PJM node table: 1,101 of the 2,141 generator
     // buses are matched by substation and unit name to EIA-860M's PJM plants
     // in their transmission zone's states (`scripts/build_iso_node_locations.py
     // --iso pjm`). The 11,826 load and external buses are not attempted — no
     // public file says where a feeder leaves the grid — and read null.
     located: true,
     locatedBy: "EIA-860M plant coordinates, matched by substation and unit name in the zone",
-    locatedCount: 930,
+    locatedCount: 1_101,
     blurb:
       "Unverified five-minute prices at every one of PJM's 13,967 electrical buses " +
       "— generator, load and external — with the congestion and loss components. " +
@@ -2176,7 +2176,7 @@ export const SCHEMAS: Schema[] = [
     // The same buses as the real-time stream, so the same table places them.
     located: true,
     locatedBy: "EIA-860M plant coordinates, matched by substation and unit name in the zone",
-    locatedCount: 930,
+    locatedCount: 1_101,
     blurb:
       "Hourly day-ahead prices at every one of PJM's 13,967 electrical buses, with " +
       "the energy, congestion and loss components as PJM publishes them. A third of " +
@@ -3654,6 +3654,11 @@ export function mapTreatment(
 export function placeableNodes(schema: Schema): string[] {
   const sample = schema.entities.sample ?? [];
   if (!sample.length) return [];
+  // The table is ERCOT's (and the weather and gas points beside it), so
+  // another operator's stream places nothing here: PJM's "WESTERN HUB"
+  // shares a prefix with ERCOT's WEST zone, and was drawn in Texas.
+  const iso = isoOf(schema);
+  if (iso && iso !== "ERCOT") return [];
   const stem = sample[0].slice(0, 3);
   return Object.keys(ERCOT_POINTS).filter(
     (k) =>
