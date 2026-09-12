@@ -67,6 +67,56 @@ const TileIndex = React.createContext(null);
 // registrations and the tips that own a hover.
 let SERIES_SEQ = 0;
 
+/*
+  A query rewritten for a tile-local instant: \`end\` becomes the cursor and a
+  relative \`start\` is resolved against it (see useSeries below).
+*/
+function atInstant(q, cursor) {
+  const at = cursor ? Date.parse(cursor) : NaN;
+  if (!at) return q;
+  const out = { ...q, end: cursor };
+  const m = /^-(\\d+)([mhd])$/.exec(String(q.start == null ? "" : q.start).trim());
+  if (m) {
+    const n = Number(m[1]);
+    const span = m[2] === "m" ? n * 60000 : m[2] === "h" ? n * 3600000 : n * 86400000;
+    out.start = new Date(at - span).toISOString();
+  }
+  return out;
+}
+
+/*
+  Frames: what a cursor-bounded request answered, kept by the exact request.
+
+  Scrubbing and playback ask for the same instants over and over — a handle
+  dragged back across a morning, a day played twice — and an instant in the
+  past answers the same thing every time it is asked. So those answers are
+  kept (the promise, which also folds a playback prefetch and the scrub that
+  catches up with it into one request). An instant within twenty minutes of
+  now, or ahead of it, can still gain rows — an interval not yet published,
+  a forecast's next vintage — so it is kept for a minute only. Bounded, oldest
+  first out, since a frame of a thousand-node map is a thousand rows.
+*/
+const FRAMES = new Map();
+function frameQuery(q, cursor) {
+  const req = atInstant(q, cursor);
+  const at = cursor ? Date.parse(cursor) : NaN;
+  if (!at) return dryos.query(req);
+  const key = JSON.stringify(req);
+  const hit = FRAMES.get(key);
+  if (hit && (at < Date.now() - 20 * 60000 || Date.now() - hit.t < 60000)) return hit.p;
+  const p = dryos.query(req);
+  FRAMES.set(key, { p, t: Date.now() });
+  p.catch(() => {
+    if (FRAMES.get(key) && FRAMES.get(key).p === p) FRAMES.delete(key);
+  });
+  while (FRAMES.size > 400) FRAMES.delete(FRAMES.keys().next().value);
+  return p;
+}
+// Ask for frames ahead of time, so a later load of any of them is a cache hit.
+function prefetchFrames(queries, cursors) {
+  cursors.forEach((c) => queries.forEach((q) => frameQuery(q, c).catch(() => {})));
+}
+
 /**
  * One request per selection, polled together and kept in step.
  *
@@ -102,6 +152,16 @@ function useSeries(queries, refreshMs, cursor) {
   const have = useRef(false);
   const retry = useRef({ timer: null, n: 0 });
   const lastLoad = useRef(0);
+  // Which instant the rows on screen answer (null: live), for a shape that
+  // paces itself on its frames arriving — the map's playback.
+  const [rowsAt, setRowsAt] = useState(null);
+  // A moving cursor's bookkeeping; see load() below.
+  const reqSeq = useRef(0);
+  const shownSeq = useRef(0);
+  const sigRef = useRef("");
+  const busy = useRef(false);
+  const again = useRef(false);
+  const loadRef = useRef(null);
 
   // Which tile this belongs to, and one slot per hook so a component that
   // calls this twice registers both. Null outside a slot — a preview has no
@@ -120,25 +180,37 @@ function useSeries(queries, refreshMs, cursor) {
 
   useEffect(() => {
     let live = true;
-    function atInstant(q) {
-      const at = cursor ? Date.parse(cursor) : NaN;
-      if (!at) return q;
-      const out = { ...q, end: cursor };
-      const m = /^-(\\d+)([mhd])$/.exec(String(q.start == null ? "" : q.start).trim());
-      if (m) {
-        const n = Number(m[1]);
-        const span = m[2] === "m" ? n * 60000 : m[2] === "h" ? n * 3600000 : n * 86400000;
-        out.start = new Date(at - span).toISOString();
-      }
-      return out;
-    }
+    const sig = JSON.stringify(queries);
+    sigRef.current = sig;
     // A new query set (a wire retarget, a scrub) starts a new baseline.
     newest.current = [];
     async function load() {
+      /*
+        One frame in flight at a time while a cursor is held. A drag crosses
+        a step every few pixels, and a request per step queued hundreds
+        behind each other; instead the newest position is asked for the
+        moment the frame ahead of it lands, so the map follows the handle as
+        fast as the source answers and never falls behind it.
+      */
+      if (cursor && busy.current) {
+        again.current = true;
+        return;
+      }
+      busy.current = Boolean(cursor);
+      const mine = ++reqSeq.current;
       lastLoad.current = Date.now();
       try {
-        const out = await Promise.all(queries.map((q) => dryos.query(atInstant(q))));
-        if (!live) return;
+        const out = await Promise.all(queries.map((q) => frameQuery(q, cursor)));
+        /*
+          Shown while it is still this query set and nothing newer has been
+          shown — not only while this is still the current effect. A scrub
+          moves the cursor faster than frames arrive, and dropping every
+          frame whose cursor had since moved left the map frozen until the
+          handle stopped.
+        */
+        if ((!live && sigRef.current !== sig) || mine < shownSeq.current) return;
+        shownSeq.current = mine;
+        setRowsAt(cursor || null);
         setRows(out.map((r) => r.rows));
         setError(null);
         have.current = out.some((r) => r.rows && r.rows.length);
@@ -150,7 +222,8 @@ function useSeries(queries, refreshMs, cursor) {
           }, -Infinity),
         );
         const at = seen.map((t, n) =>
-          !out[n].preview && newest.current[n] != null && t > newest.current[n] ? t : undefined,
+          // An instant scrubbed to is not news arriving, however new its rows.
+          !cursor && !out[n].preview && newest.current[n] != null && t > newest.current[n] ? t : undefined,
         );
         newest.current = seen;
         // Sample rows carry made-up times, and an "as of" on them would be a
@@ -183,9 +256,18 @@ function useSeries(queries, refreshMs, cursor) {
         clearTimeout(retry.current.timer);
         retry.current.timer = setTimeout(load, Math.min(5000 * 2 ** n, 60000));
         return;
+      } finally {
+        if (cursor) {
+          busy.current = false;
+          if (again.current) {
+            again.current = false;
+            if (loadRef.current) loadRef.current();
+          }
+        }
       }
       setLoading(false);
     }
+    loadRef.current = load;
     load();
     // While the host is on the API's event stream, a feed advancing arrives as
     // \`dryos:advanced\` below and the poll does nothing: the stream is
@@ -237,7 +319,7 @@ function useSeries(queries, refreshMs, cursor) {
     // object each render, and the string is what says whether it changed.
   }, [cursor, JSON.stringify(queries)]);
 
-  return { rows, error, loading, fresh, asOf };
+  return { rows, error, loading, fresh, asOf, at: rowsAt };
 }
 
 // Three beats of the ring, then gone.

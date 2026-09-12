@@ -2468,6 +2468,28 @@ const map: ComponentDef = {
     const openBounds = locatedSets.length
       ? operatorBounds(locatedSets.map((set) => isoOf(set.schema)))
       : null;
+    // The streams the time scale asks how far ahead they run. The fleet is
+    // left out: a positions feed has no future to scrub into.
+    const probeDatasets = Array.from(
+      new Set([
+        ...locatedSets.map((set) => set.dataset),
+        ...(!locatedSets.length && nodes.length ? [s[0]?.dataset ?? ""] : []),
+        ...(showField ? [fieldDataset] : []),
+      ]),
+    ).filter(Boolean);
+    // The steps the time scale offers: the finest layer's own grain and
+    // coarser. A step finer than every layer redraws the same picture; one
+    // coarser than the finest skips readings, which is what the coarse
+    // choices are for — playing a day through in seconds. Fifteen minutes
+    // is where it opens when the data is that fine.
+    const finestGrain = Math.min(
+      3600,
+      ...refs.filter((r) => r !== motionRef).map(grainOf),
+    );
+    const scaleSteps = [300, 900, 3600]
+      .filter((sec) => sec >= finestGrain || sec === 3600)
+      .map((sec) => sec * 1000);
+    const defaultStep = scaleSteps.includes(900_000) ? 900_000 : scaleSteps[0];
 
     return {
       imports: [],
@@ -2506,24 +2528,77 @@ const map: ComponentDef = {
     the rest of the screen stays on its own time. Declared above the queries
     because the queries are what it rewrites.
   */
-  const CURSOR_BACK_H = 24, CURSOR_FWD_H = 48, CURSOR_STEP = 3600000;
-  const hourFloor = (ms) => Math.floor(ms / CURSOR_STEP) * CURSOR_STEP;
-  const [cursorNow, setCursorNow] = React.useState(() => hourFloor(Date.now()));
+  const CURSOR_BACK_H = 24, CURSOR_FWD_H = 48, HOUR = 3600000;
+  /*
+    The steps the scale moves in, finest first: the grain of the finest layer
+    on the map and coarser. Fine for watching one morning's congestion move
+    through; coarse for playing a day through in a few seconds.
+  */
+  const STEPS = ${JSON.stringify(scaleSteps)};
+  const [step, setStep] = React.useState(${defaultStep});
+  const floorTo = (ms, s) => Math.floor(ms / s) * s;
+  const toIso = (ms) => new Date(ms).toISOString();
+  const [nowMs, setNowMs] = React.useState(() => Date.now());
   const [cursorAt, setCursorAt] = React.useState(null);
   React.useEffect(() => {
     // Only while live, so the scale cannot slide under a handle somebody set.
     if (cursorAt) return;
-    const id = setInterval(() => setCursorNow(hourFloor(Date.now())), 60000);
+    const id = setInterval(() => setNowMs(Date.now()), 30000);
     return () => clearInterval(id);
   }, [cursorAt]);
+  // The present on the step's grid — the scale's right-hand end on a map
+  // whose data has no future.
+  const cursorNow = floorTo(nowMs, step);
   const cursorMs = cursorAt ? Date.parse(cursorAt) : cursorNow;
+
+  /*
+    How far ahead this map's data actually runs.
+
+    The scale used to offer two days of future on every map, and on a
+    real-time price map every one of those hours drew the same picture as
+    now — a control promising something the data does not have. So the
+    stream is asked: its newest row, unbounded, is the edge of what exists,
+    and a stream whose newest row is the present gets a scale that ends at
+    now. Asked of the data rather than declared per schema, so a feed that
+    starts publishing a forecast grows a future without anyone recomposing.
+    One tiny query per stream, re-asked every quarter hour; a failure leaves
+    the scale at now, which is the conservative reading.
+  */
+  const PROBE = ${JSON.stringify(probeDatasets)};
+  const [horizon, setHorizon] = React.useState(null);
+  React.useEffect(() => {
+    if (NAKED || !PROBE.length) return;
+    let live = true;
+    const look = () =>
+      Promise.all(PROBE.map((d) => dryos.query({ dataset: d, limit: 1 }).catch(() => null))).then((out) => {
+        if (!live) return;
+        let far = 0;
+        out.forEach((r) => ((r && !r.preview && r.rows) || []).forEach((x) => {
+          const t = Date.parse(x.interval_start_utc);
+          if (t > far) far = t;
+        }));
+        setHorizon(far || null);
+      });
+    look();
+    const id = setInterval(look, 15 * 60000);
+    return () => { live = false; clearInterval(id); };
+  }, []);
+  // How much future the scale offers: none unless a row sits past the wall
+  // clock, and never more than two days however far a forecast runs. The
+  // clock, not the grid — a real-time row stamped 13:20 is after 13:00 and
+  // is still the present.
+  const fwdMs = horizon && horizon > Date.now()
+    ? Math.min(CURSOR_FWD_H * HOUR, Math.ceil((horizon - cursorNow) / step) * step)
+    : 0;
+  const scaleFrom = cursorNow - CURSOR_BACK_H * HOUR;
+  const scaleTo = cursorNow + fwdMs;
   // The scrubber's clock follows the navbar's timezone choice like every
   // other clock on the page — source time by default, never the browser's
   // own guess.
   const tz = useTz(${JSON.stringify(sourceTz(refs))});
 
-  const { rows, error, loading } = useSeries(
-    [
+  // Named, because playback asks for these same requests a few frames ahead.
+  const QUERIES = [
 ${
   locatedSets.length
     ? /*
@@ -2573,10 +2648,8 @@ ${
     : ""
 }
 ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m", limit: ${motionLimit} },` : ""}
-    ],
-    ${refreshMs(refs)},
-    cursorAt,
-  );
+  ];
+  const { rows, error, loading, at: rowsAt } = useSeries(QUERIES, ${refreshMs(refs)}, cursorAt);
 
   const pointRows = ${
     locatedSets.length
@@ -2782,40 +2855,127 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   */
   const dataMs = React.useMemo(() => {
     let newest = 0;
-    pointRows.forEach((r) => {
+    [...pointRows, ...fieldRows].forEach((r) => {
       const t = Date.parse(r.interval_start_utc);
       if (t && t > newest) newest = t;
     });
     return newest || null;
   }, [rows]);
-  const behind = cursorAt && dataMs && cursorMs - dataMs > 3600000;
-  const cursorLabel = cursorAt
-    ? new Date(cursorMs).toLocaleString([], { timeZone: tz, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    : "Live";
+  const behind = cursorAt && dataMs && cursorMs - dataMs > Math.max(HOUR, 2 * step);
+  const dayOf = (ms) => new Date(ms).toLocaleDateString([], { timeZone: tz, weekday: "short", month: "short", day: "numeric" });
+  const timeOf = (ms, zone) =>
+    new Date(ms).toLocaleTimeString([], { timeZone: tz, hour: "numeric", minute: "2-digit", ...(zone ? { timeZoneName: "short" } : {}) });
+  const stepName = (s) => (s >= HOUR ? s / HOUR + "h" : s / 60000 + "m");
+  // What the label says: the handle's instant while scrubbed, the newest
+  // reading while live — the hour the map is actually showing either way.
+  const shownMs = cursorAt ? cursorMs : dataMs || nowMs;
+
+  /*
+    Moving the handle. Every position is on the step's grid and inside the
+    scale, and landing on the present is going live rather than pinning the
+    map to it — a handle dragged back to Now keeps advancing like the button.
+  */
+  const goTo = (ms) => {
+    const v = Math.min(Math.max(Math.round(ms / step) * step, scaleFrom), scaleTo);
+    setCursorAt(v === cursorNow ? null : toIso(v));
+  };
+  const changeStep = (s) => {
+    setStep(s);
+    setCursorAt((c) => (c ? toIso(floorTo(Date.parse(c), s)) : c));
+  };
+
+  /*
+    Playback: one step per beat, from the handle — or from the start of the
+    scale when the handle is already at its end, so play on a live map
+    replays the last day. A beat waits for its frame: the next step is taken
+    only once the rows on screen are this step's, so a slow answer slows the
+    playback rather than skipping frames it never drew. The next few frames
+    are asked for ahead of the handle, which is what keeps the beat at its
+    dwell rather than at a round trip.
+  */
+  const PLAY_BEAT = 450;
+  const [playing, setPlaying] = React.useState(false);
+  const togglePlay = () => {
+    if (playing) { setPlaying(false); return; }
+    if (cursorMs + step > scaleTo) setCursorAt(toIso(scaleFrom));
+    setPlaying(true);
+  };
+  React.useEffect(() => {
+    if (!playing) return;
+    const ahead = [];
+    for (let k = 1; k <= 4; k++) if (cursorMs + k * step <= scaleTo) ahead.push(toIso(cursorMs + k * step));
+    prefetchFrames(QUERIES, ahead);
+    if (cursorAt && rowsAt !== cursorAt) return;
+    const id = setTimeout(() => {
+      const next = cursorMs + step;
+      if (next > scaleTo) setPlaying(false);
+      // Arriving at the present on a map with no future is arriving at live.
+      else if (next === cursorNow && !fwdMs) { setCursorAt(null); setPlaying(false); }
+      else setCursorAt(toIso(next));
+    }, PLAY_BEAT);
+    return () => clearTimeout(id);
+  }, [playing, cursorAt, rowsAt, step, scaleTo]);
+
+  /*
+    The track, drawn rather than a native range: a native one has nowhere to
+    put hour marks, a hover time or the line between live and forecast. It is
+    measured so the labels can thin out on a narrow tile rather than collide.
+  */
+  const trackRef = React.useRef(null);
+  const [trackW, setTrackW] = React.useState(320);
+  React.useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setTrackW(el.getBoundingClientRect().width || 320));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const scrubbing = React.useRef(false);
+  const [hoverMs, setHoverMs] = React.useState(null);
+  const atX = (x) => {
+    const r = trackRef.current.getBoundingClientRect();
+    return scaleFrom + ((x - r.left) / (r.width || 1)) * (scaleTo - scaleFrom);
+  };
+  const pct = (ms) => ((ms - scaleFrom) / (scaleTo - scaleFrom || 1)) * 100;
+  const hoverAt = hoverMs == null ? null : Math.min(Math.max(Math.round(hoverMs / step) * step, scaleFrom), scaleTo);
+  const CTL = {
+    alignItems: "center", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 4,
+    color: "var(--ink)", cursor: "pointer", display: "flex", flexShrink: 0, font: "inherit", fontSize: 13,
+    height: 20, justifyContent: "center", lineHeight: 1, padding: 0, width: 22,
+  };
+  const TAG = { fontSize: 7.5, fontWeight: 600, letterSpacing: ".12em", lineHeight: "14px", pointerEvents: "none", position: "absolute", textTransform: "uppercase", top: 0 };
 
   /*
     Marks along the scale, so the handle is a time rather than a position.
 
-    Every twelve hours across the three-day window, and each one is labelled
-    with the day when the day changes and the hour otherwise — a row of
-    identical "12 PM"s tells you nothing about which noon you are on.
+    A mark on every hour, and a label on every hour there is room for — one,
+    two, three, six or twelve apart, whichever keeps labels about forty
+    pixels clear on this tile's track. Midnight carries the date instead of
+    "12A", because a row of hours tells you nothing about which day you are
+    on. Hours are the display zone's, so the labels read as the clock does.
   */
-  const TICKS = React.useMemo(() => {
+  const HOURS = React.useMemo(() => {
+    const span = scaleTo - scaleFrom || 1;
+    const perHour = trackW / (span / HOUR);
+    const every = [1, 2, 3, 6, 12].find((n) => n * perHour >= 40) || 24;
+    const hourIn = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hourCycle: "h23" });
     const out = [];
-    const from = cursorNow - CURSOR_BACK_H * CURSOR_STEP;
-    const to = cursorNow + CURSOR_FWD_H * CURSOR_STEP;
-    let last = null;
-    for (let t = from; t <= to; t += 12 * CURSOR_STEP) {
+    for (let t = Math.ceil(scaleFrom / HOUR) * HOUR; t <= scaleTo; t += HOUR) {
       const d = new Date(t);
-      const day = d.toLocaleDateString([], { timeZone: tz, month: "short", day: "numeric" });
+      const h = Number(hourIn.format(d)) % 24;
       out.push({
         at: t,
-        label: day === last ? d.toLocaleTimeString([], { timeZone: tz, hour: "numeric" }) : day,
+        pct: ((t - scaleFrom) / span) * 100,
+        midnight: h === 0,
+        label: h % every !== 0
+          ? null
+          : h === 0
+            ? d.toLocaleDateString([], { timeZone: tz, month: "short", day: "numeric" })
+            : d.toLocaleTimeString([], { timeZone: tz, hour: "numeric" }).replace(/\\s?([AP])M$/i, "$1"),
       });
-      last = day;
     }
     return out;
-  }, [cursorNow, tz]);
+  }, [scaleFrom, scaleTo, tz, trackW]);
 
   /*
     A grid cell carries its own position: G_315_1005 is 31.5N 100.5W. Encoding
@@ -2912,8 +3072,16 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           : `center: [${ERCOT_VIEW.lon}, ${ERCOT_VIEW.lat}],
       zoom: ${ERCOT_VIEW.zoom},`
       }
-      attributionControl: true,
+      /*
+        Mapbox's terms require both the wordmark and the text attribution on
+        a map drawing their styles — the "i" alone is not enough — but either
+        may sit in any corner. Top right, compact, and side by side (the CSS
+        below), so the bottom edge belongs to the time scale.
+      */
+      logoPosition: "top-right",
+      attributionControl: false,
     });
+    map.current.addControl(new window.mapboxgl.AttributionControl({ compact: true }), "top-right");
     return () => { map.current && map.current.remove(); map.current = null; };
   }, [ready]);
 
@@ -3580,7 +3748,15 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     const m = map.current;
     markers.current.forEach((mk) => mk.remove());
     markers.current = [];
-    if (m.getLayer && m.getLayer("dryos-pts")) {
+    /*
+      The dense layer is updated in place (paint, below), and only torn down
+      when it is being hidden. Removing it on every change of rows and adding
+      it back on the retry timer left it empty for as long as the rows kept
+      changing — a poll every five minutes never showed it, playback at a
+      frame every half second showed an empty map the whole way through.
+    */
+    const dense = Boolean(LOCATED && LOCATED.dense);
+    if (m.getLayer && m.getLayer("dryos-pts") && (!dense || !shown("points"))) {
       if (m.getLayer("dryos-pin")) m.removeLayer("dryos-pin");
       m.removeLayer("dryos-pts");
       m.removeSource("dryos-pts");
@@ -3589,7 +3765,13 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
 
     const ids = Object.keys(placed);
     const values = ids.map((n) => placed[n].value).filter((v) => typeof v === "number");
-    if (!values.length) return;
+    if (!values.length) {
+      // Nothing to draw at this instant: clear the kept layer rather than
+      // leave the previous frame's nodes standing in for it.
+      const src = dense && m.getSource && m.getSource("dryos-pts");
+      if (src) src.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
     /*
       The color ramp, and why it is not min-to-max.
 
@@ -3640,7 +3822,13 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       };
       const paint = () => {
         const src = m.getSource("dryos-pts");
-        if (src) { src.setData(data); return; }
+        if (src) {
+          src.setData(data);
+          // The ramp too: without a declared scale it is this frame's
+          // percentiles, and a kept layer would otherwise keep the first's.
+          if (m.getLayer("dryos-pts")) m.setPaintProperty("dryos-pts", "circle-color", ["interpolate", ["linear"], ["get", "v"], ...ramp]);
+          return;
+        }
         m.addSource("dryos-pts", { type: "geojson", data });
         m.addLayer({
           id: "dryos-pts",
@@ -3767,7 +3955,18 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
 
   return (
     <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(mapTitle)} sub={${JSON.stringify(subFor(refs, mapTitle))}} unit={FIELD ? FIELD.unit : UNIT} loading={loading && !ready} error={error}>
-      <div ref={host} style={{ background: "var(--surface-2)", border: NAKED ? "none" : "1px solid var(--line)", borderRadius: NAKED ? 0 : 6, inset: 0, position: "absolute" }} />
+      {/* Mapbox stacks its corner controls one under another; side by side
+          they are one row, which is the band the layer panel steps below.
+          Both drawn smaller than Mapbox's own 88px wordmark and 24px button
+          — present and legible, as the terms ask, without being the loudest
+          thing on a tile. The pulse is the live dot's. */}
+      <style>{".dryos-map .mapboxgl-ctrl-top-right .mapboxgl-ctrl{clear:none;margin:4px 4px 0 0}" +
+        ".dryos-map .mapboxgl-ctrl-logo{background-size:64px 17px;height:17px;margin:0;width:64px}" +
+        ".dryos-map .mapboxgl-ctrl-attrib.mapboxgl-compact{min-height:16px;padding:0 16px 0 0}" +
+        ".dryos-map .mapboxgl-ctrl-attrib.mapboxgl-compact-show{font-size:10px;padding:1px 20px 1px 6px}" +
+        ".dryos-map .mapboxgl-ctrl-attrib-button{background-size:16px 16px;height:16px;width:16px}" +
+        "@keyframes dryos-live{0%{box-shadow:0 0 0 0 var(--accent-line)}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}"}</style>
+      <div ref={host} className="dryos-map" style={{ background: "var(--surface-2)", border: NAKED ? "none" : "1px solid var(--line)", borderRadius: NAKED ? 0 : 6, inset: 0, position: "absolute" }} />
       {/* Over the map, under the markers, and deaf to the pointer — the map
           below still pans and zooms as if nothing were on top of it. */}
       <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
@@ -3779,11 +3978,14 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       {/* Gone entirely when nothing is on, rather than an empty bordered box
           keying nothing. The layer panel is where you turn things back on. */}
       {!NAKED && ordered.some((L) => shown(L.id)) ? (
-        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 3, left: 4, padding: "5px 7px", position: "absolute", top: 4, zIndex: 3 }}>
+        /* Stops short of the top-right corner, where Mapbox's wordmark sits:
+           a long note ran the key under it, and the wordmark is required to
+           show. The note wraps instead. */
+        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 3, left: 4, maxWidth: "calc(100% - 140px)", padding: "5px 7px", position: "absolute", top: 4, zIndex: 3 }}>
           {ordered.filter((L) => shown(L.id)).map((L) => (
-            <div key={L.id} style={{ alignItems: "center", display: "flex", gap: 6 }}>
+            <div key={L.id} style={{ alignItems: "center", columnGap: 6, display: "flex", flexWrap: "wrap", rowGap: 1 }}>
               <span style={{ background: L.swatch, borderRadius: 2, flexShrink: 0, height: 8, width: 8 }} />
-              <span style={{ color: "var(--ink)", fontSize: 10.5, whiteSpace: "nowrap" }}>{L.label}</span>
+              <span style={{ color: "var(--ink)", fontSize: 10.5, maxWidth: "100%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{L.label}</span>
               {L.unit ? <span style={{ color: "var(--faint)", fontSize: 9.5 }}>{L.unit}</span> : null}
               {L.note ? <span style={{ color: "var(--faint)", fontSize: 9, fontStyle: "italic" }}>{L.note}</span> : null}
             </div>
@@ -3816,7 +4018,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       {/* ── Layers, top right. Visibility and draw order — the two things you
              change while reading rather than while building. ─────────────── */}
       {!NAKED && (LAYERS.length > 1 || (LAYERS.length === 1 && LAYERS[0].id !== "points")) ? (
-        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, minWidth: 132, padding: "4px 5px", position: "absolute", right: 4, top: 4, zIndex: 3 }}>
+        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, minWidth: 132, padding: "4px 5px", position: "absolute", right: 4, top: 26, zIndex: 3 }}>
           <div style={{ color: "var(--faint)", fontSize: 8.5, letterSpacing: ".1em", padding: "0 2px 3px", textTransform: "uppercase" }}>
             Layers
           </div>
@@ -3855,55 +4057,206 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         </div>
       ) : null}
 
-      {/* ── Time, along the bottom. Full width because a scale is easier to
-             land on the further it runs, and this one covers three days. ── */}
-      {!NAKED && (
-      <div style={{ background: "var(--bg)", borderRadius: 5, bottom: 22, left: 4, padding: "4px 8px 2px", position: "absolute", right: 4, zIndex: 3 }}>
-        <div style={{ alignItems: "center", display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => setCursorAt(null)}
-            title="Back to now"
-            style={{
-              background: cursorAt ? "var(--accent-dim)" : "transparent",
-              border: "1px solid " + (cursorAt ? "var(--accent-line)" : "var(--line)"),
-              borderRadius: 3, color: cursorAt ? "var(--accent)" : "var(--muted)",
-              cursor: "pointer", flexShrink: 0, font: "inherit", fontSize: 9.5,
-              letterSpacing: ".06em", padding: "1px 6px", textTransform: "uppercase",
-            }}
-          >
-            Live
-          </button>
-          <input
-            type="range"
-            min={cursorNow - CURSOR_BACK_H * CURSOR_STEP}
-            max={cursorNow + CURSOR_FWD_H * CURSOR_STEP}
-            step={CURSOR_STEP}
-            value={cursorMs}
-            onChange={(e) => setCursorAt(new Date(Number(e.target.value)).toISOString())}
-            aria-label="Time shown on this map"
-            style={{ accentColor: "var(--accent)", flex: 1, height: 12, minWidth: 0 }}
-          />
-          <span style={{ color: cursorAt ? "var(--accent)" : "var(--muted)", flexShrink: 0, fontSize: 10, minWidth: 96, textAlign: "right", whiteSpace: "nowrap" }}>
-            {cursorLabel}
-          </span>
+      {/* ── Along the bottom, one stack: the keys that belong to the map's
+             lower edge, then the time scale under them. A stack rather than
+             three absolutely placed boxes, so nothing sits on the scale
+             whatever height it grows to. ──────────────────────────────── */}
+      <div style={{ bottom: 4, display: "flex", flexDirection: "column", gap: 4, left: 4, pointerEvents: "none", position: "absolute", right: 4, zIndex: 3 }}>
+        <div style={{ alignItems: "flex-end", display: "flex", gap: 4, justifyContent: "space-between" }}>
+          {field && !NAKED ? (
+            <div style={{ alignItems: "center", background: "var(--bg)", borderRadius: 4, display: "flex", gap: 6, padding: "3px 6px" }}>
+              <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9 }}>
+                {field.lo.toFixed(0)}
+              </span>
+              <span style={{ background: "linear-gradient(90deg,#2b6cb0,#6f8768,#d9a441,#c4703a)", borderRadius: 2, height: 5, width: 64 }} />
+              <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9 }}>
+                {field.hi.toFixed(0)} {FIELD.unit}
+              </span>
+            </div>
+          ) : <span />}
+          ${
+            /*
+              The caveat is a caveat, not a caption — so it appears only when
+              it is true. A located stream publishes where it measured, and
+              stamping "approximate" across a map of published coordinates
+              trains people to ignore the word on the maps where it matters.
+
+              Two states, two different claims. Mock numbers get the loud
+              dashed-blue MOCK treatment the catalogue uses everywhere else. A
+              centroid is approximate and says so quietly. A published or
+              joined coordinate needs no caveat at all. It is the one thing
+              \`NAKED\` keeps, because a preview that reads as real is the same
+              lie a launched tile would be telling.
+            */
+            anyMock
+              ? `<p style={{ background: "var(--color-info-dim)", border: "1px dashed var(--color-info-line)", borderRadius: 4, color: "var(--color-info)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".08em", margin: 0, padding: "2px 6px", textTransform: "uppercase" }}>
+            Mock data
+          </p>`
+              : locatedRef || !nodes.length
+                ? ""
+                : `<p style={{ background: "var(--bg)", borderRadius: 4, color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px" }}>
+            Approximate zone centroids
+          </p>`
+          }
         </div>
-        {/* The scale's own marks. Without them the handle is a position with
-            no units — you can see that you moved, not to when. */}
-        <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: 44, paddingRight: 104 }}>
-          {TICKS.map((t) => (
-            <span key={t.at} style={{ color: "var(--faint)", fontSize: 8.5, whiteSpace: "nowrap" }}>
-              {t.label}
+
+        {/* Time. Full width because a scale is easier to land on the further
+            it runs. The present is its right-hand end unless the data runs
+            past it, and Live sits at that end — where "now" is on every
+            timeline anyone has used — rather than beside the oldest hour. */}
+        {!NAKED && (
+        <div data-nopick style={{ background: "var(--bg)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 5, padding: "5px 8px 3px", pointerEvents: "auto" }}>
+          {/* Play, a step either way, and the instant in words — date, hour
+              and zone — then the step size and Live at the right-hand end. */}
+          <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: 4, rowGap: 3 }}>
+            <button type="button" onClick={togglePlay} title={playing ? "Pause" : "Play through time"} aria-label={playing ? "Pause" : "Play"} style={CTL}>
+              {playing ? (
+                <svg width="8" height="9" viewBox="0 0 8 9" aria-hidden="true"><rect x="0" y="0" width="2.6" height="9" fill="currentColor" /><rect x="5.4" y="0" width="2.6" height="9" fill="currentColor" /></svg>
+              ) : (
+                <svg width="8" height="9" viewBox="0 0 8 9" aria-hidden="true"><path d="M0 0 L8 4.5 L0 9 Z" fill="currentColor" /></svg>
+              )}
+            </button>
+            <button type="button" onClick={() => { setPlaying(false); goTo(cursorMs - step); }} disabled={cursorMs <= scaleFrom} title={"Back " + stepName(step)} aria-label={"Back " + stepName(step)} style={{ ...CTL, opacity: cursorMs <= scaleFrom ? 0.4 : 1 }}>
+              ‹
+            </button>
+            <span style={{ alignItems: "baseline", display: "flex", gap: 5, padding: "0 3px", whiteSpace: "nowrap" }}>
+              <span style={{ color: cursorAt ? "var(--accent)" : "var(--ink)", fontSize: 10.5, fontWeight: 600 }}>{dayOf(shownMs)}</span>
+              <span style={{ color: cursorAt ? "var(--accent)" : "var(--muted)", fontSize: 10.5 }}>{timeOf(shownMs, true)}</span>
             </span>
-          ))}
-        </div>
-        {behind ? (
-          <div style={{ color: "var(--warn)", fontSize: 9, paddingLeft: 44 }}>
-            newest data {new Date(dataMs).toLocaleString([], { timeZone: tz, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            <button type="button" onClick={() => { setPlaying(false); goTo(cursorMs + step); }} disabled={cursorMs >= scaleTo} title={"Forward " + stepName(step)} aria-label={"Forward " + stepName(step)} style={{ ...CTL, opacity: cursorMs >= scaleTo ? 0.4 : 1 }}>
+              ›
+            </button>
+            <span style={{ flex: 1 }} />
+            {STEPS.length > 1 ? (
+              <div role="group" aria-label="Step" style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 4, display: "flex", flexShrink: 0, padding: 1 }}>
+                {STEPS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => changeStep(s)}
+                    aria-pressed={s === step}
+                    title={"Move in steps of " + stepName(s)}
+                    style={{
+                      background: s === step ? "var(--bg)" : "transparent", border: "none", borderRadius: 3,
+                      color: s === step ? "var(--ink)" : "var(--faint)", cursor: "pointer", font: "inherit",
+                      fontSize: 9.5, fontWeight: s === step ? 600 : 400, padding: "1px 6px",
+                    }}
+                  >
+                    {stepName(s)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => { setPlaying(false); setCursorAt(null); }}
+              disabled={!cursorAt}
+              title={cursorAt ? "Jump back to live" : "Showing the newest data"}
+              style={{
+                alignItems: "center",
+                background: cursorAt ? "var(--accent-dim)" : "transparent",
+                border: "1px solid " + (cursorAt ? "var(--accent-line)" : "transparent"),
+                borderRadius: 3, color: cursorAt ? "var(--accent)" : "var(--ink)",
+                cursor: cursorAt ? "pointer" : "default", display: "flex", flexShrink: 0, font: "inherit",
+                fontSize: 9.5, fontWeight: 600, gap: 5, letterSpacing: ".06em", padding: "2px 6px",
+                textTransform: "uppercase", whiteSpace: "nowrap",
+              }}
+            >
+              {/* Solid and pulsing while live; hollow while the map is
+                  somewhere else, so the dot is the state and the fill on the
+                  button is the invitation to go back. */}
+              <span
+                style={{
+                  animation: cursorAt ? "none" : "dryos-live 2s ease-out infinite",
+                  background: cursorAt ? "transparent" : "var(--accent)",
+                  border: "1.5px solid var(--accent)", borderRadius: "50%", boxSizing: "border-box",
+                  flexShrink: 0, height: 7, width: 7,
+                }}
+              />
+              {cursorAt ? "Go live" : "Live"}
+            </button>
           </div>
-        ) : null}
+          {/* The scale. Pressed and dragged, the map follows the handle
+              frame by frame; hovered, it says the time under the pointer. */}
+          <div
+            ref={trackRef}
+            role="slider"
+            tabIndex={0}
+            aria-label="Time shown on this map"
+            aria-valuemin={scaleFrom}
+            aria-valuemax={scaleTo}
+            aria-valuenow={cursorMs}
+            aria-valuetext={dayOf(shownMs) + " " + timeOf(shownMs, true)}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              e.currentTarget.focus();
+              scrubbing.current = true;
+              setPlaying(false);
+              setHoverMs(null);
+              goTo(atX(e.clientX));
+            }}
+            onPointerMove={(e) => {
+              if (scrubbing.current) goTo(atX(e.clientX));
+              else setHoverMs(atX(e.clientX));
+            }}
+            onPointerUp={() => { scrubbing.current = false; }}
+            onPointerCancel={() => { scrubbing.current = false; }}
+            onPointerLeave={() => setHoverMs(null)}
+            onKeyDown={(e) => {
+              const k = e.key;
+              if (k === " ") { e.preventDefault(); togglePlay(); return; }
+              const to = k === "ArrowLeft" ? cursorMs - step : k === "ArrowRight" ? cursorMs + step : k === "Home" ? scaleFrom : k === "End" ? scaleTo : null;
+              if (to == null) return;
+              e.preventDefault();
+              setPlaying(false);
+              goTo(to);
+            }}
+            style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 3, cursor: "pointer", height: 16, outline: "none", position: "relative", touchAction: "none" }}
+          >
+            {/* Played through, so where the handle is reads from across the room. */}
+            <div style={{ background: "var(--surface-3)", bottom: 0, left: 0, pointerEvents: "none", position: "absolute", top: 0, width: pct(cursorMs) + "%" }} />
+            {fwdMs ? (
+              <>
+                <div style={{ background: "repeating-linear-gradient(135deg, transparent 0 4px, var(--line) 4px 5px)", bottom: 0, left: pct(cursorNow) + "%", pointerEvents: "none", position: "absolute", right: 0, top: 0 }} />
+                <div style={{ background: "var(--accent)", bottom: 0, left: pct(cursorNow) + "%", opacity: 0.75, pointerEvents: "none", position: "absolute", top: 0, width: 1 }} />
+                <span style={{ ...TAG, color: "var(--accent)", paddingRight: 4, right: 100 - pct(cursorNow) + "%" }}>Live</span>
+                <span style={{ ...TAG, color: "var(--faint)", left: pct(cursorNow) + "%", paddingLeft: 4 }}>Forecast</span>
+              </>
+            ) : null}
+            {HOURS.map((t) => (
+              <div key={t.at} style={{ background: t.midnight ? "var(--line-strong)" : "var(--line)", bottom: 0, left: t.pct + "%", pointerEvents: "none", position: "absolute", top: t.midnight ? 0 : 9, width: 1 }} />
+            ))}
+            {/* The handle: a line through the scale with a head above it. */}
+            <div style={{ background: "var(--ink)", bottom: -2, left: pct(cursorMs) + "%", pointerEvents: "none", position: "absolute", top: -2, transform: "translateX(-50%)", width: 2 }} />
+            <div style={{ background: "var(--ink)", height: 7, left: pct(cursorMs) + "%", pointerEvents: "none", position: "absolute", top: -5, transform: "translateX(-50%) rotate(45deg)", width: 7 }} />
+            {hoverAt != null ? (
+              <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 3, bottom: "calc(100% + 6px)", color: "var(--ink)", fontSize: 9.5, left: pct(hoverAt) + "%", padding: "1px 5px", pointerEvents: "none", position: "absolute", transform: "translateX(-50%)", whiteSpace: "nowrap", zIndex: 2 }}>
+                {new Date(hoverAt).toLocaleString([], { timeZone: tz, weekday: "short", hour: "numeric", minute: "2-digit" })}
+              </div>
+            ) : null}
+          </div>
+          <div style={{ height: 11, position: "relative" }}>
+            {HOURS.filter((t) => t.label && t.pct > 2 && t.pct < 98).map((t) => (
+              <span
+                key={t.at}
+                style={{
+                  color: t.midnight ? "var(--muted)" : "var(--faint)", fontSize: 8.5, fontWeight: t.midnight ? 600 : 400,
+                  left: t.pct + "%", position: "absolute", top: 0, transform: "translateX(-50%)", whiteSpace: "nowrap",
+                }}
+              >
+                {t.label}
+              </span>
+            ))}
+          </div>
+          {behind ? (
+            <div style={{ color: "var(--warn)", fontSize: 9 }}>
+              newest data {dayOf(dataMs)} {timeOf(dataMs, true)}
+            </div>
+          ) : null}
+        </div>
+        )}
       </div>
-      )}
       {readout ? (
         <div
           style={{
@@ -3972,20 +4325,8 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         </div>
       ) : null}
 
-      {field && !NAKED && (
-        <div style={{ alignItems: "center", background: "var(--bg)", borderRadius: 4, bottom: 4, display: "flex", gap: 6, left: 4, padding: "3px 6px", position: "absolute", zIndex: 2 }}>
-          <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9 }}>
-            {field.lo.toFixed(0)}
-          </span>
-          <span style={{ background: "linear-gradient(90deg,#2b6cb0,#6f8768,#d9a441,#c4703a)", borderRadius: 2, height: 5, width: 64 }} />
-          <span style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 9 }}>
-            {field.hi.toFixed(0)} {FIELD.unit}
-          </span>
-        </div>
-      )}
-
       {flights && !NAKED && (
-        <div style={{ alignItems: "center", background: "var(--bg)", borderRadius: 4, display: "flex", gap: 7, padding: "3px 7px", position: "absolute", right: 4, top: 4, zIndex: 2 }}>
+        <div style={{ alignItems: "center", background: "var(--bg)", borderRadius: 4, display: "flex", gap: 7, padding: "3px 7px", position: "absolute", right: 4, top: 26, zIndex: 2 }}>
           <span style={{ color: "var(--ink)", fontFamily: "var(--mono)", fontSize: 10 }}>
             {flights.count} aircraft
           </span>
@@ -3999,35 +4340,6 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           ))}
         </div>
       )}
-
-      ${
-        /*
-          The caveat is a caveat, not a caption — so it appears only when it is
-          true. A located stream publishes where it measured, and stamping
-          "approximate" across a map of published coordinates trains people to
-          ignore the word on the maps where it matters.
-        */
-        /*
-          Two states, two different claims. Mock numbers get the loud
-          dashed-blue MOCK treatment the catalogue uses everywhere else. A
-          centroid is approximate and says so quietly. A published or joined
-          coordinate needs no caveat at all.
-
-          It is the one thing `NAKED` keeps, because a preview that reads as
-          real is the same lie a launched tile would be telling. With the
-          scrubber gone it moves up into the corner the legend vacated —
-          bottom-right out there is Mapbox's own attribution button.
-        */
-        anyMock
-          ? `<p style={{ background: "var(--color-info-dim)", border: "1px dashed var(--color-info-line)", borderRadius: 4, bottom: NAKED ? "auto" : 22, top: NAKED ? 4 : "auto", color: "var(--color-info)", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".08em", margin: 0, padding: "2px 6px", position: "absolute", right: 4, textTransform: "uppercase", zIndex: 2 }}>
-        Mock data
-      </p>`
-          : locatedRef || !nodes.length
-            ? ""
-            : `<p style={{ background: "var(--bg)", borderRadius: 4, bottom: NAKED ? "auto" : 4, top: NAKED ? 4 : "auto", color: "var(--faint)", fontSize: 10, margin: 0, padding: "2px 5px", position: "absolute", right: 4, zIndex: 2 }}>
-        Approximate zone centroids
-      </p>`
-      }
     </Section>
   );
 }`,
