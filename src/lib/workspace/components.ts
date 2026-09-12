@@ -3854,9 +3854,19 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     const pct = (f) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(f * (sorted.length - 1))))];
     const lo = SCALE ? SCALE[0].at : pct(0.05);
     const hi = SCALE ? SCALE[SCALE.length - 1].at : pct(0.95);
-    const ramp = SCALE
-      ? SCALE.flatMap((s) => [s.at, s.color])
-      : [pct(0.05), "#2b6cb0", pct(0.5), "#7dd3fc", pct(0.8), "#e8ff3d", pct(0.95), "#fb8b5c", pct(1), "#f4666b"];
+    /*
+      A declared scale is drawn in bands, never blended. The legend is a stack
+      of solid swatches, one range each, so a node has to be exactly the
+      swatch of the range it is in: interpolated, $400 was drawn 60% of the
+      way to the ≥$500 pink, and every band drifted toward the next the same
+      way. The first stop's color is everything below the second stop, which
+      is the legend's "< 0".
+    */
+    const band = (v) => SCALE.reduce((c, s, i) => (i > 0 && v >= s.at ? s.color : c), SCALE[0].color);
+    const colorExpr = SCALE
+      ? ["step", ["get", "v"], SCALE[0].color, ...SCALE.slice(1).flatMap((s) => [s.at, s.color])]
+      : ["interpolate", ["linear"], ["get", "v"],
+          pct(0.05), "#2b6cb0", pct(0.5), "#7dd3fc", pct(0.8), "#e8ff3d", pct(0.95), "#fb8b5c", pct(1), "#f4666b"];
 
     /*
       One mark, one channel: every node is the same dot and color carries the
@@ -3890,7 +3900,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           src.setData(data);
           // The ramp too: without a declared scale it is this frame's
           // percentiles, and a kept layer would otherwise keep the first's.
-          if (m.getLayer("dryos-pts")) m.setPaintProperty("dryos-pts", "circle-color", ["interpolate", ["linear"], ["get", "v"], ...ramp]);
+          if (m.getLayer("dryos-pts")) m.setPaintProperty("dryos-pts", "circle-color", colorExpr);
           return;
         }
         m.addSource("dryos-pts", { type: "geojson", data });
@@ -3903,7 +3913,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             // mark keeping its apparent size as the map scales, not the value
             // saying anything.
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2.6, 6, 5, 9, 9],
-            "circle-color": ["interpolate", ["linear"], ["get", "v"], ...ramp],
+            "circle-color": colorExpr,
             "circle-opacity": 0.9,
             "circle-stroke-width": 0.5,
             "circle-stroke-color": "rgba(0,0,0,.5)",
@@ -3967,10 +3977,12 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       // Same size for every marker, as on the dense layer. These ones carry
       // their number in the middle, so a varying circle also meant varying room
       // for the text — the widest values were drawn in the smallest badges.
+      // Under a declared scale the badge is the legend's band too; thirds of
+      // lo..hi put everything under $130 in one blue beside a key of nine.
       const t = hi === lo ? 0.5 : (v - lo) / (hi - lo);
       const el = document.createElement("div");
       el.style.cssText =
-        "align-items:center;background:" + (t > 0.66 ? "var(--warn)" : t > 0.33 ? "var(--accent)" : "var(--info)") +
+        "align-items:center;background:" + (SCALE ? band(v) : t > 0.66 ? "var(--warn)" : t > 0.33 ? "var(--accent)" : "var(--info)") +
         ";border:1px solid rgba(0,0,0,.45);border-radius:999px;color:#0d1206;display:flex;font:600 10px/1 ui-sans-serif,system-ui;" +
         "height:28px;justify-content:center;width:28px;";
       el.textContent = v.toFixed(0);
