@@ -2717,13 +2717,13 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           lat = POINTS[id].lat; lon = POINTS[id].lon; exact = false;
         }
         if (typeof lat !== "number" || typeof lon !== "number") return;
-        out[id] = { lon, lat, label: String(id), value: r[COLUMN], exact };
+        out[id] = { lon, lat, label: String(id), value: r[COLUMN], exact, at: Date.parse(r.interval_start_utc) || null };
       }));
     } else {
       NODES.forEach((n) => {
         const row = pointRows.find((r) => r.node === n);
         if (!row) return;
-        out[n] = { ...POINTS[n], value: row[COLUMN], exact: false };
+        out[n] = { ...POINTS[n], value: row[COLUMN], exact: false, at: Date.parse(row.interval_start_utc) || null };
       });
     }
     return out;
@@ -4433,9 +4433,20 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             // The node's own name, which is the thing being asked about — the
             // coordinate under a pin is the pin's, not a place worth stating,
             // and here it is invented anyway.
-            <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
-              {readout.id}
-            </div>
+            <>
+              <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
+                {readout.id}
+              </div>
+              {/* When this node's reading is from — its own row's interval,
+                  read from the current rows so a poll moves it with the value.
+                  Nodes on one map need not share an interval: a late operator
+                  or a scrubbed frame can leave one a step behind the rest. */}
+              {placed[readout.id] && placed[readout.id].at ? (
+                <div style={{ color: "var(--faint)", fontSize: 10, marginTop: 2, whiteSpace: "nowrap" }}>
+                  {timeOf(placed[readout.id].at)}
+                </div>
+              ) : null}
+            </>
           ) : (
             <>
               <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
