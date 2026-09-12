@@ -1942,6 +1942,17 @@ export const SCHEMAS: Schema[] = [
       label: "settlement locations",
       sample: ["SPPNORTH_HUB", "SPPSOUTH_HUB", "SWPW_HUB"],
     },
+    // Placed by the API from SPP's node table: 512 of the 985 resources are
+    // matched by the plant and unit their names carry to EIA-860M's plants in
+    // the market's balancing authorities (`scripts/build_iso_node_locations.py
+    // --iso spp`), and the 45 hubs, interfaces and DC ties SPP's own price
+    // contour map draws sit where it draws them. Load areas and demand
+    // response are regions, and read null.
+    located: true,
+    locatedBy:
+      "EIA-860M plant coordinates, matched by the plant and unit in the name; hubs, " +
+      "interfaces and DC ties where SPP's own price map draws them",
+    locatedCount: 557,
     blurb:
       "Real-time balancing market prices at every SPP settlement location — the " +
       "trading hubs, load areas, resources, demand response and the interfaces with " +
