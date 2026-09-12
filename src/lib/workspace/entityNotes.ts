@@ -88,6 +88,25 @@ export const ENTITY_NOTES: Record<string, string> = {
   "DLAP_SCE-APND": "SCE load aggregation point — what load in Southern California Edison's area pays.",
   "DLAP_SDGE-APND": "SDG&E load aggregation point — San Diego.",
   "DLAP_VEA-APND": "Valley Electric load aggregation point — southern Nevada.",
+
+  // NYISO — the eleven load zones, quoted by letter as often as by name, and
+  // the external proxies. NYISO spells them this way, spaces and dots
+  // included, and so does the data. PJM's proxy shares its note with the
+  // other operators' PJM interface above.
+  WEST: "Zone A — West: Buffalo and the Niagara Frontier.",
+  GENESE: "Zone B — Genesee: Rochester.",
+  CENTRL: "Zone C — Central: Syracuse.",
+  NORTH: "Zone D — North: the St. Lawrence valley and Plattsburgh.",
+  "MHK VL": "Zone E — Mohawk Valley: Utica.",
+  CAPITL: "Zone F — Capital: Albany.",
+  "HUD VL": "Zone G — Hudson Valley.",
+  MILLWD: "Zone H — Millwood: northern Westchester.",
+  DUNWOD: "Zone I — Dunwoodie: southern Westchester.",
+  "N.Y.C.": "Zone J — New York City; the most-watched price in the state.",
+  LONGIL: "Zone K — Long Island.",
+  "H Q": "Hydro-Québec proxy — the price at NYISO's border with Quebec.",
+  NPX: "New England proxy — the price at NYISO's seam with ISO-NE.",
+  "O H": "Ontario proxy — the price at NYISO's seam with Ontario's IESO.",
 };
 
 export function entityNote(node: string): string | undefined {

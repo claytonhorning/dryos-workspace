@@ -71,6 +71,8 @@ const OPERATOR_BOUNDS: Record<string, [number, number, number, number]> = {
   // California, and the Western EIM areas priced beside it from Arizona to
   // British Columbia.
   CAISO: [-125.5, 31.0, -103.0, 52.0],
+  // New York State, Long Island's tip included.
+  NYISO: [-80.0, 40.4, -71.8, 45.1],
 };
 
 /**

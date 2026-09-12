@@ -2111,6 +2111,93 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // ── NYISO ──────────────────────────────────────────────────────────────
+  // NYISO's MIS: public files, no key, a day to a file and the newest
+  // interval at a fixed path. Eastern prevailing, which `sourceTzOf` knows;
+  // no row carries UTC, so the collector localises every stamp itself.
+  {
+    id: "energy.nyiso.realtime",
+    path: ["Energy", "Pricing", "Real-time"],
+    name: "NYISO real-time LMP",
+    short: "RT · LMP",
+    dataset: "nyiso-realtime-lmp",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 1,
+    entities: {
+      count: 763,
+      label: "pricing points",
+      sample: ["N.Y.C.", "LONGIL", "WEST"],
+    },
+    // Placed by the API from NYISO's own generator reference, which carries a
+    // coordinate against the PTID each bus is priced under
+    // (`scripts/build_iso_node_locations.py --iso nyiso`). Zones and the
+    // proxies are regions and borders, and the load buses no generator is
+    // registered to are not attempted; both read null.
+    located: true,
+    locatedBy: "NYISO's own generator reference, which gives each bus its coordinate",
+    locatedCount: 561,
+    blurb:
+      "Real-time dispatch prices at NYISO's eleven load zones — New York City, Long " +
+      "Island and the rest, lettered A to K — its proxies with Quebec, New England, " +
+      "Ontario and PJM, and every generator bus, with the energy, congestion and loss " +
+      "components, every five minutes.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 12),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The five-minute real-time price at the zone or bus — NYISO calls it the LBMP.",
+        // The ERCOT ramp, stop for stop — one price, one color, every operator.
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
+        mock: { base: 40, swing: 16, noise: 4 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Marginal congestion component — the part that differs between points. " +
+          "NYISO publishes it with the opposite sign; here it adds to the price like " +
+          "every other operator's.",
+        mock: { base: 0, swing: 8, noise: 2 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0, swing: 2, noise: 0.5 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Marginal energy component, derived as the price less losses and congestion " +
+          "— NYISO does not publish it. One number across the state each interval.",
+        mock: { base: 40, swing: 14, noise: 3 },
+      },
+    ],
+  },
   // ── PJM ────────────────────────────────────────────────────────────────
   // Seven streams, one per collector, landed 2026-09-09. Every one reads
   // PJM's Data Miner 2 on a key that allows six requests a minute; the
@@ -3718,7 +3805,7 @@ export function sourceTzOf(schema: Schema): string {
   // ordinary New York zone.
   const iso = isoOf(schema);
   if (iso === "MISO") return "EST";
-  if (iso === "PJM") return "America/New_York";
+  if (iso === "PJM" || iso === "NYISO") return "America/New_York";
   // CAISO's market clock is Pacific prevailing; its rows carry GMT anyway.
   if (iso === "CAISO") return "America/Los_Angeles";
   return "America/Chicago";
@@ -3737,6 +3824,7 @@ const ISO_BY_PREFIX: Record<string, string> = {
   pjm: "PJM",
   spp: "SPP",
   caiso: "CAISO",
+  nyiso: "NYISO",
 };
 
 export function isoOf(schema: Schema): string | null {
