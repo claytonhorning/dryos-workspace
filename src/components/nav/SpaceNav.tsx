@@ -461,13 +461,6 @@ export function SpaceNav({
 
         <div className="ml-auto flex shrink-0 items-center gap-2.5">
           {/*
-            Whether the screen is busy right now, next to what being busy
-            costs. First in the cluster so their coming and going widens the
-            row leftward and moves nothing that is already being read.
-          */}
-          <BusyMark pageId={pageId} event="dryos:updating" label="updating…" accent />
-          <BusyMark pageId={pageId} event="dryos:querying" label="querying…" />
-          {/*
             What the workspace is spending, in the chrome rather than floating
             over the screen. It used to sit bottom-left on the canvas, which put
             an object on a surface whose whole point is that it carries nothing
@@ -538,55 +531,6 @@ function SavedMark({ pageId }: { pageId?: string }) {
       >
         ✓ Saved {when}
       </span>
-    </span>
-  );
-}
-
-/**
- * That the screen is busy, said beside what being busy costs.
- *
- * Both marks used to float over the canvas's own corner, which put chrome on
- * the one surface meant to carry nothing but the dashboard — and kept "work is
- * happening" a screen's width away from the number it runs up. `Runner`
- * announces each state with an event (`dryos:querying` for data in flight,
- * `dryos:updating` for a revision loading behind the live one) for the same
- * reason the saved mark is an event: the nav and the canvas share no parent
- * below the layout.
- */
-function BusyMark({
-  pageId,
-  event,
-  label,
-  accent,
-}: {
-  pageId?: string;
-  event: string;
-  label: string;
-  /** The louder treatment, for the state that ends with the screen changing. */
-  accent?: boolean;
-}) {
-  const [on, setOn] = useState(false);
-
-  useEffect(() => {
-    const h = (e: Event) => setOn(Boolean((e as CustomEvent).detail));
-    window.addEventListener(event, h);
-    return () => window.removeEventListener(event, h);
-  }, [event]);
-
-  // The mark belongs to the page that is busy; switching tabs clears it.
-  useEffect(() => setOn(false), [pageId]);
-
-  if (!on) return null;
-  return (
-    <span
-      className={cx(
-        "rounded border px-1.5 py-px font-mono text-[9.5px] whitespace-nowrap",
-        accent
-          ? "animate-pulse border-accent-line bg-accent-dim text-accent"
-          : "border-line text-faint",
-      )}
-    >
-      {label}
     </span>
   );
 }

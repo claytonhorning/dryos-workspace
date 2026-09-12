@@ -71,16 +71,25 @@ let SERIES_SEQ = 0;
   A query rewritten for a tile-local instant: \`end\` becomes the cursor and a
   relative \`start\` is resolved against it (see useSeries below).
 */
+function spanOf(rel) {
+  const m = /^-(\\d+)([mhd])$/.exec(String(rel == null ? "" : rel).trim());
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return m[2] === "m" ? n * 60000 : m[2] === "h" ? n * 3600000 : n * 86400000;
+}
+/*
+  \`scrubStart\` is a window that applies only at a cursor: a map's frame needs
+  the newest reading at the instant, and asked with no start the source sent
+  two intervals of every node and took half as long again to do it. Live
+  queries keep no bound, so a collector running late never empties the map.
+*/
 function atInstant(q, cursor) {
   const at = cursor ? Date.parse(cursor) : NaN;
   if (!at) return q;
-  const out = { ...q, end: cursor };
-  const m = /^-(\\d+)([mhd])$/.exec(String(q.start == null ? "" : q.start).trim());
-  if (m) {
-    const n = Number(m[1]);
-    const span = m[2] === "m" ? n * 60000 : m[2] === "h" ? n * 3600000 : n * 86400000;
-    out.start = new Date(at - span).toISOString();
-  }
+  const { scrubStart, ...rest } = q;
+  const out = { ...rest, end: cursor };
+  const span = spanOf(scrubStart) || spanOf(q.start);
+  if (span) out.start = new Date(at - span).toISOString();
   return out;
 }
 
@@ -112,9 +121,30 @@ function frameQuery(q, cursor) {
   while (FRAMES.size > 400) FRAMES.delete(FRAMES.keys().next().value);
   return p;
 }
-// Ask for frames ahead of time, so a later load of any of them is a cache hit.
+/*
+  Ask for frames ahead of time, so a later load of any of them is a cache hit.
+
+  Through one small queue, newest asks first and three in flight: a drag
+  asks ahead at every step it crosses, and fired straight off, a fast one
+  queued a hundred requests behind the frame the handle had actually stopped
+  on. Asks past the eighth are dropped — by then they are where the handle
+  was a second ago.
+*/
+const PREFETCH = { queue: [], inflight: 0 };
+function pumpPrefetch() {
+  while (PREFETCH.inflight < 3 && PREFETCH.queue.length) {
+    const { queries, c } = PREFETCH.queue.shift();
+    PREFETCH.inflight++;
+    Promise.all(queries.map((q) => frameQuery(q, c).catch(() => null))).finally(() => {
+      PREFETCH.inflight--;
+      pumpPrefetch();
+    });
+  }
+}
 function prefetchFrames(queries, cursors) {
-  cursors.forEach((c) => queries.forEach((q) => frameQuery(q, c).catch(() => {})));
+  cursors.slice().reverse().forEach((c) => PREFETCH.queue.unshift({ queries, c }));
+  if (PREFETCH.queue.length > 8) PREFETCH.queue.length = 8;
+  pumpPrefetch();
 }
 
 /**

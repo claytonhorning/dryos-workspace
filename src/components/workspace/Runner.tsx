@@ -159,31 +159,6 @@ export function Runner({
   /** The visible frame — drops, theme pushes and drag messages address it. */
   const frame = useRef<HTMLIFrameElement | null>(null);
   const shell = useRef<HTMLDivElement>(null);
-  const [busy, setBusy] = useState(0);
-
-  // Queries in flight are reported in the workspace bar, beside what they
-  // cost, rather than floated over the canvas's corner — a screen's whole
-  // point is that it carries nothing but the dashboard. An event for the same
-  // reason the saved mark is one: the nav and the canvas share no parent
-  // below the layout.
-  useEffect(() => {
-    window.dispatchEvent(
-      new CustomEvent("dryos:querying", {
-        detail: busy > 0,
-      }),
-    );
-  }, [busy]);
-  // A Runner that unmounts mid-query would otherwise leave the mark stuck on.
-  useEffect(
-    () => () => {
-      window.dispatchEvent(
-        new CustomEvent("dryos:querying", {
-          detail: false,
-        }),
-      );
-    },
-    [],
-  );
   /** The place on the canvas the frame says the pointer is currently over. */
   const spot = useRef<{ x: number; y: number } | null>(
     null,
@@ -247,27 +222,6 @@ export function Runner({
       setLanding(null);
   }, [landing, placing, pending, version, live]);
 
-  // A revision loading behind the live one is reported in the workspace bar,
-  // beside the querying mark — same reasoning, same channel: the canvas
-  // carries nothing but the dashboard.
-  useEffect(() => {
-    window.dispatchEvent(
-      new CustomEvent("dryos:updating", {
-        detail: pending != null,
-      }),
-    );
-  }, [pending]);
-  useEffect(
-    () => () => {
-      window.dispatchEvent(
-        new CustomEvent("dryos:updating", {
-          detail: false,
-        }),
-      );
-    },
-    [],
-  );
-
   // The frame cannot read this document, so the theme has to be handed to it —
   // on load and again whenever it changes under someone's feet.
   useEffect(() => {
@@ -315,7 +269,6 @@ export function Runner({
       op: string,
       payload: unknown,
     ) => {
-      setBusy((n) => n + 1);
       try {
         if (op !== "query")
           throw new Error(`Unknown operation "${op}"`);
@@ -348,8 +301,6 @@ export function Runner({
           },
           "*",
         );
-      } finally {
-        setBusy((n) => n - 1);
       }
     },
     [appId],

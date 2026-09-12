@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { record } from "@/lib/workspace/meter";
 import { isMockDataset, mockRows } from "@/lib/workspace/mockData";
@@ -71,7 +71,9 @@ export async function POST(req: Request) {
 
   if (isMockDataset(dataset)) {
     const rows = mockRows({ dataset, node: body.node, start, end, limit });
-    await record(dataset, rows.length, body.appId);
+    // Counted after the answer has left: the ledger is a Supabase round trip,
+    // and a map scrubbing through time waited on it once per frame.
+    after(() => record(dataset, rows.length, body.appId));
     return NextResponse.json({ rows, count: rows.length, mock: true });
   }
 
@@ -119,7 +121,9 @@ export async function POST(req: Request) {
     );
 
     const rows = results.flat();
-    await record(dataset, rows.length, body.appId);
+    // Counted after the answer has left: the ledger is a Supabase round trip,
+    // and a map scrubbing through time waited on it once per frame.
+    after(() => record(dataset, rows.length, body.appId));
     return NextResponse.json({ rows, count: rows.length });
   } catch (err) {
     return NextResponse.json(

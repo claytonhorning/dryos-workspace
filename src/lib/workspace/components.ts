@@ -2490,6 +2490,10 @@ const map: ComponentDef = {
       .filter((sec) => sec >= finestGrain || sec === 3600)
       .map((sec) => sec * 1000);
     const defaultStep = scaleSteps.includes(900_000) ? 900_000 : scaleSteps[0];
+    // How far back a scrubbed frame looks: a little over one reading of the
+    // stream, so a frame is the newest interval at the instant rather than
+    // two of them — half the rows, and measured at 0.45s against 0.75s.
+    const scrubWindow = (r: DataRef) => "-" + Math.ceil((grainOf(r) * 1.4) / 60) + "m";
 
     return {
       imports: [],
@@ -2623,7 +2627,7 @@ ${
                 : set.partial
                   ? "located: true, "
                   : ""
-            }end: "-0m", limit: ${Math.min(
+            }scrubStart: ${JSON.stringify(scrubWindow(set.ref))}, end: "-0m", limit: ${Math.min(
               DRAW_CAP,
               Math.max(set.subset ? 30 : 60, set.count * 2),
             )} },`,
@@ -2644,7 +2648,7 @@ ${
          out, and a wind map of the day after tomorrow looks exactly like a
          wind map of now.
       */
-      `      { dataset: ${JSON.stringify(fieldDataset)}, end: "-0m", limit: ${Math.min(4000, (fieldSchema?.entities.count ?? 200) * 2)} },`
+      `      { dataset: ${JSON.stringify(fieldDataset)}, scrubStart: ${JSON.stringify(scrubWindow(fieldRef!))}, end: "-0m", limit: ${Math.min(4000, (fieldSchema?.entities.count ?? 200) * 2)} },`
     : ""
 }
 ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m", limit: ${motionLimit} },` : ""}
@@ -2660,6 +2664,24 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   };
   const fieldRows = ${showField ? `rows[${pointQueries}] || []` : "[]"};
   const flightRows = ${motionRef ? `rows[${pointQueries + (showField ? 1 : 0)}] || []` : "[]"};
+
+  /*
+    Loading, shown on the map rather than said in words: a bar sliding along
+    the top edge and the map dimmed a shade, for as long as what is drawn is
+    not what was asked for — the first load, a frame on its way while
+    scrubbing, the live rows on their way back after Go live. Only after a
+    beat, so a frame that comes from the cache does not flicker the map.
+  */
+  const pending = rowsAt !== cursorAt || (loading && !rows.some((r) => r && r.length));
+  const [busyShown, setBusyShown] = React.useState(false);
+  React.useEffect(() => {
+    if (!pending) { setBusyShown(false); return; }
+    const id = setTimeout(() => setBusyShown(true), 150);
+    return () => clearTimeout(id);
+  }, [pending]);
+  // A frame that arrived with nothing in it: a gap in the source at that
+  // instant, said so rather than drawn as an empty map that looks broken.
+  const emptyFrame = Boolean(cursorAt) && rowsAt === cursorAt && !pointRows.length && !fieldRows.length && !flightRows.length;
 
   const ready = useMapbox();
   const theme = useFrameTheme();
@@ -2932,12 +2954,46 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   }, []);
   const scrubbing = React.useRef(false);
   const [hoverMs, setHoverMs] = React.useState(null);
+  /*
+    The scale can be folded away to a pill, because on a small tile it is a
+    third of the map. Folded, it is hidden rather than unmounted: the track's
+    ResizeObserver was attached once, and a remounted track would be a new
+    element nobody is measuring. Folding pauses playback, since the pill has no
+    pause to stop it with; what the pill keeps is the instant and the way back
+    to live — what somebody needs to know the map is not showing now — and a
+    "Timeline" label, because a chevron alone does not say what it opens.
+  */
+  const [timeOpen, setTimeOpen] = React.useState(true);
   const atX = (x) => {
     const r = trackRef.current.getBoundingClientRect();
     return scaleFrom + ((x - r.left) / (r.width || 1)) * (scaleTo - scaleFrom);
   };
   const pct = (ms) => ((ms - scaleFrom) / (scaleTo - scaleFrom || 1)) * 100;
   const hoverAt = hoverMs == null ? null : Math.min(Math.max(Math.round(hoverMs / step) * step, scaleFrom), scaleTo);
+
+  /*
+    Frames asked for before the handle gets there. A pointer resting over the
+    track is about to press there; a handle moving is about to arrive a few
+    steps further the same way. Both go through the runtime's prefetch queue,
+    so a fast drag cannot queue a hundred requests behind the one it stopped
+    on — and a frame already on hand is drawn the moment the handle lands.
+  */
+  React.useEffect(() => {
+    if (hoverAt == null || hoverAt === cursorNow || scrubbing.current) return;
+    const id = setTimeout(() => prefetchFrames(QUERIES, [toIso(hoverAt)]), 120);
+    return () => clearTimeout(id);
+  }, [hoverAt]);
+  const lastMs = React.useRef(null);
+  React.useEffect(() => {
+    const prev = lastMs.current;
+    lastMs.current = cursorMs;
+    if (playing || !cursorAt || prev == null || prev === cursorMs) return;
+    const dir = cursorMs > prev ? 1 : -1;
+    const ahead = [1, 2, 3]
+      .map((k) => cursorMs + dir * k * step)
+      .filter((t) => t >= scaleFrom && t <= scaleTo && t !== cursorNow);
+    prefetchFrames(QUERIES, ahead.map(toIso));
+  }, [cursorAt]);
   const CTL = {
     alignItems: "center", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 4,
     color: "var(--ink)", cursor: "pointer", display: "flex", flexShrink: 0, font: "inherit", fontSize: 13,
@@ -3063,6 +3119,14 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       // A double click on the map asks about the node under it (see Section),
       // so it must not also zoom. The wheel and the controls still do.
       doubleClickZoom: false,
+      /*
+        The lower 48 and a margin, and no further. Every operator collected
+        is American, so zoomed out past the country a price map is an ocean
+        with a few dots in it, and a small tile got there in two turns of the
+        wheel. The box also caps the zoom-out: Mapbox will not show more than
+        it. It reaches 55°N because SPP draws its AESO tie at Edmonton.
+      */
+      maxBounds: [[-128, 22], [-64, 55]],
       container: host.current,
       style: "mapbox://styles/mapbox/" + style,
       ${
@@ -3954,7 +4018,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   }
 
   return (
-    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(mapTitle)} sub={${JSON.stringify(subFor(refs, mapTitle))}} unit={FIELD ? FIELD.unit : UNIT} loading={loading && !ready} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(mapTitle)} sub={${JSON.stringify(subFor(refs, mapTitle))}} unit={FIELD ? FIELD.unit : UNIT} error={error}>
       {/* Mapbox stacks its corner controls one under another; side by side
           they are one row, which is the band the layer panel steps below.
           Both drawn smaller than Mapbox's own 88px wordmark and 24px button
@@ -3965,11 +4029,22 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
         ".dryos-map .mapboxgl-ctrl-attrib.mapboxgl-compact{min-height:16px;padding:0 16px 0 0}" +
         ".dryos-map .mapboxgl-ctrl-attrib.mapboxgl-compact-show{font-size:10px;padding:1px 20px 1px 6px}" +
         ".dryos-map .mapboxgl-ctrl-attrib-button{background-size:16px 16px;height:16px;width:16px}" +
+        "@keyframes dryos-load{0%{left:-35%}100%{left:100%}}" +
         "@keyframes dryos-live{0%{box-shadow:0 0 0 0 var(--accent-line)}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}"}</style>
       <div ref={host} className="dryos-map" style={{ background: "var(--surface-2)", border: NAKED ? "none" : "1px solid var(--line)", borderRadius: NAKED ? 0 : 6, inset: 0, position: "absolute" }} />
       {/* Over the map, under the markers, and deaf to the pointer — the map
           below still pans and zooms as if nothing were on top of it. */}
       <canvas ref={veil} style={{ borderRadius: 6, height: "100%", inset: 0, pointerEvents: "none", position: "absolute", width: "100%", zIndex: 1 }} />
+      {/* Loading (see busyShown): a shade over the map, under the legend and
+          the scale, and a bar sliding along the top edge above everything. */}
+      {busyShown ? (
+        <>
+          <div style={{ background: "var(--bg)", borderRadius: NAKED ? 0 : 6, inset: 0, opacity: 0.28, pointerEvents: "none", position: "absolute", zIndex: 2 }} />
+          <div style={{ borderRadius: "6px 6px 0 0", height: 2, left: 1, overflow: "hidden", pointerEvents: "none", position: "absolute", right: 1, top: 1, zIndex: 4 }}>
+            <div style={{ animation: "dryos-load 1.1s ease-in-out infinite", background: "var(--accent)", height: "100%", position: "absolute", width: "35%" }} />
+          </div>
+        </>
+      ) : null}
 
       {/* ── Legend, top left. A key, not a control: it says what the marks
              mean, which is what a reader needs and what a launched screen is
@@ -3977,39 +4052,37 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
              has its own panel. ───────────────────────────────────────────── */}
       {/* Gone entirely when nothing is on, rather than an empty bordered box
           keying nothing. The layer panel is where you turn things back on. */}
-      {!NAKED && ordered.some((L) => shown(L.id)) ? (
-        /* Stops short of the top-right corner, where Mapbox's wordmark sits:
-           a long note ran the key under it, and the wordmark is required to
-           show. The note wraps instead. */
-        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 3, left: 4, maxWidth: "calc(100% - 140px)", padding: "5px 7px", position: "absolute", top: 4, zIndex: 3 }}>
-          {ordered.filter((L) => shown(L.id)).map((L) => (
-            <div key={L.id} style={{ alignItems: "center", columnGap: 6, display: "flex", flexWrap: "wrap", rowGap: 1 }}>
-              <span style={{ background: L.swatch, borderRadius: 2, flexShrink: 0, height: 8, width: 8 }} />
-              <span style={{ color: "var(--ink)", fontSize: 10.5, maxWidth: "100%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{L.label}</span>
-              {L.unit ? <span style={{ color: "var(--faint)", fontSize: 9.5 }}>{L.unit}</span> : null}
-              {L.note ? <span style={{ color: "var(--faint)", fontSize: 9, fontStyle: "italic" }}>{L.note}</span> : null}
-            </div>
-          ))}
+      {/* Only the color key. The layer's name and unit used to head it, and
+          both are already said — the tile's header names the stream and its
+          unit, and a map of several layers lists them in the layer panel —
+          so the row was a second caption spending the map's corner. */}
+      {!NAKED && SCALE && shown("points") ? (
+        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", left: 4, padding: "5px 7px", position: "absolute", top: 4, zIndex: 3 }}>
           {/*
             The ramp itself, because "a hundred dollars stands out" only helps
             somebody who can tell that this red is a hundred dollars. A
             continuous scale with no key is decoration.
 
-            Drawn with the stops spaced evenly rather than by value: the values
-            are deliberately non-linear ($0 … $70, $100, $250, $1000), and
-            spacing them to scale would compress everything below $250 into a
-            sliver — which is the failure this whole change is undoing.
+            One row per band, highest on top, each a swatch and the range it
+            covers. A ramp under the name squeezed nine labels into the width of
+            a legend, and on a narrow tile they ran together; a stack reads
+            every band at the same size whatever the tile's width. The values
+            are deliberately non-linear ($0 … $70, $100, $250, $500), which a
+            list of ranges states rather than hides.
           */}
           {SCALE && shown("points") ? (
-            <div style={{ marginTop: 2 }}>
-              <div style={{ background: "linear-gradient(to right, " + SCALE.map((s) => s.color).join(", ") + ")", borderRadius: 2, height: 5, width: "100%" }} />
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                {SCALE.map((s) => (
-                  <span key={s.at} style={{ color: "var(--faint)", fontSize: 8 }}>
-                    {s.label === "negative" ? "−" : s.at >= 1000 ? "1k+" : s.at}
-                  </span>
-                ))}
-              </div>
+            <div style={{ alignItems: "center", columnGap: 5, display: "grid", gridTemplateColumns: "auto auto", justifyContent: "start", marginTop: 2, rowGap: 1 }}>
+              {SCALE.map((s, i) => {
+                const k = (v) => (Math.abs(v) >= 1000 ? v / 1000 + "k" : String(v));
+                const next = SCALE[i + 1];
+                const range = s.label === "negative" ? "< 0" : !next ? "≥ " + k(s.at) : k(s.at) + "–" + k(next.at);
+                return { at: s.at, color: s.color, range };
+              }).reverse().map((b) => (
+                <React.Fragment key={b.at}>
+                  <span style={{ background: b.color, borderRadius: 2, height: 8, width: 10 }} />
+                  <span style={{ color: "var(--muted)", fontFamily: "var(--mono)", fontSize: 8.5, lineHeight: "10px", whiteSpace: "nowrap" }}>{b.range}</span>
+                </React.Fragment>
+              ))}
             </div>
           ) : null}
         </div>
@@ -4073,6 +4146,10 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
                 {field.hi.toFixed(0)} {FIELD.unit}
               </span>
             </div>
+          ) : emptyFrame && !busyShown ? (
+            <p style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--muted)", fontSize: 10, margin: 0, padding: "2px 6px" }}>
+              No readings at this time
+            </p>
           ) : <span />}
           ${
             /*
@@ -4104,8 +4181,42 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             it runs. The present is its right-hand end unless the data runs
             past it, and Live sits at that end — where "now" is on every
             timeline anyone has used — rather than beside the oldest hour. */}
+        {!NAKED && !timeOpen && (
+        <div data-nopick style={{ alignItems: "center", alignSelf: "flex-end", background: "var(--bg)", borderRadius: 5, display: "flex", gap: 4, padding: 3, pointerEvents: "auto" }}>
+          {/* The instant while it is not now; the live dot alone while it is,
+              since "now" needs no words. Pressed, it goes back to live. */}
+          <button
+            type="button"
+            onClick={() => { setPlaying(false); setCursorAt(null); }}
+            disabled={!cursorAt}
+            title={cursorAt ? "Jump back to live" : "Showing the newest data"}
+            style={{ alignItems: "center", background: "none", border: "none", cursor: cursorAt ? "pointer" : "default", display: "flex", font: "inherit", gap: 5, padding: "0 3px", whiteSpace: "nowrap" }}
+          >
+            <span
+              style={{
+                animation: cursorAt ? "none" : "dryos-live 2s ease-out infinite",
+                background: cursorAt ? "transparent" : "var(--accent)",
+                border: "1.5px solid var(--accent)", borderRadius: "50%", boxSizing: "border-box",
+                flexShrink: 0, height: 7, width: 7,
+              }}
+            />
+            {cursorAt ? (
+              <span style={{ color: "var(--accent)", fontSize: 10.5 }}>{dayOf(shownMs)} {timeOf(shownMs, true)}</span>
+            ) : (
+              <span style={{ color: "var(--ink)", fontSize: 9.5, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase" }}>Live</span>
+            )}
+          </button>
+          {/* Words, not only a chevron: folded, the pill is the one sign the
+              map has a timeline at all, and an arrow alone does not say what
+              it opens. */}
+          <button type="button" onClick={() => setTimeOpen(true)} title="Show the timeline" aria-expanded={false} style={{ ...CTL, color: "var(--muted)", fontSize: 9.5, gap: 5, padding: "0 7px", width: "auto" }}>
+            Timeline
+            <svg width="9" height="6" viewBox="0 0 9 6" aria-hidden="true"><path d="M1 5 L4.5 1.5 L8 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+          </button>
+        </div>
+        )}
         {!NAKED && (
-        <div data-nopick style={{ background: "var(--bg)", borderRadius: 5, display: "flex", flexDirection: "column", gap: 5, padding: "5px 8px 3px", pointerEvents: "auto" }}>
+        <div data-nopick style={{ background: "var(--bg)", borderRadius: 5, display: timeOpen ? "flex" : "none", flexDirection: "column", gap: 5, padding: "5px 8px 3px", pointerEvents: "auto" }}>
           {/* Play, a step either way, and the instant in words — date, hour
               and zone — then the step size and Live at the right-hand end. */}
           <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: 4, rowGap: 3 }}>
@@ -4174,6 +4285,9 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
                 }}
               />
               {cursorAt ? "Go live" : "Live"}
+            </button>
+            <button type="button" onClick={() => { setHoverMs(null); setPlaying(false); setTimeOpen(false); }} title="Hide the timeline" aria-label="Hide the timeline" aria-expanded={true} style={CTL}>
+              <svg width="9" height="6" viewBox="0 0 9 6" aria-hidden="true"><path d="M1 1 L4.5 4.5 L8 1" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
             </button>
           </div>
           {/* The scale. Pressed and dragged, the map follows the handle
