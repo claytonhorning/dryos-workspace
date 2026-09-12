@@ -65,6 +65,9 @@ const OPERATOR_BOUNDS: Record<string, [number, number, number, number]> = {
   ERCOT: [-107.0, 25.5, -93.4, 36.7],
   MISO: [-106.5, 28.5, -82.0, 50.5],
   PJM: [-91.5, 34.0, -73.5, 43.5],
+  // The RTO from the Texas Panhandle to the Dakotas, and since its western
+  // market opened, Colorado, Wyoming and the edge of the Rockies.
+  SPP: [-111.0, 31.5, -89.5, 49.0],
 };
 
 /**

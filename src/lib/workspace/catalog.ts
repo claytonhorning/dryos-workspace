@@ -1923,6 +1923,85 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // ── SPP ────────────────────────────────────────────────────────────────
+  // SPP's marketplace portal: public files, no key, the latest interval at a
+  // fixed path and every other one filed by date. Central prevailing time,
+  // which is the Energy default in `sourceTzOf`, and every row carries UTC
+  // beside it anyway.
+  {
+    id: "energy.spp.realtime",
+    path: ["Energy", "Pricing", "Real-time"],
+    name: "SPP real-time LMP",
+    short: "RT · LMP",
+    dataset: "spp-realtime-lmp",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 1,
+    entities: {
+      count: 1612,
+      label: "settlement locations",
+      sample: ["SPPNORTH_HUB", "SPPSOUTH_HUB", "SWPW_HUB"],
+    },
+    blurb:
+      "Real-time balancing market prices at every SPP settlement location — the " +
+      "trading hubs, load areas, resources, demand response and the interfaces with " +
+      "its neighbours — with the energy, congestion and loss components, every five " +
+      "minutes. SPP's western market is in the same file and clears on its own " +
+      "energy price, so SWPW_HUB and SPPNORTH_HUB can sit thirty dollars apart.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 12),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The five-minute real-time price at the settlement location.",
+        // The ERCOT ramp, stop for stop — one price, one color, whichever
+        // market it cleared in.
+        scale: [
+          { at: -50, color: "#41bae4", label: "negative" },
+          { at: 0, color: "#734dbe" },
+          { at: 20, color: "#af48b7" },
+          { at: 30, color: "#e34992" },
+          { at: 45, color: "#ff645f" },
+          { at: 70, color: "#f99356" },
+          { at: 100, color: "#fcb459" },
+          { at: 250, color: "#fad371" },
+          { at: 1000, color: "#fcef83", label: "cap" },
+        ],
+        mock: { base: 26, swing: 12, noise: 3 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between locations.",
+        mock: { base: 0, swing: 8, noise: 2 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0, swing: 1.5, noise: 0.4 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Marginal energy component, published by SPP. One number per market per " +
+          "interval: the RTO's and the western market's differ.",
+        mock: { base: 26, swing: 10, noise: 2 },
+      },
+    ],
+  },
   // ── PJM ────────────────────────────────────────────────────────────────
   // Seven streams, one per collector, landed 2026-09-09. Every one reads
   // PJM's Data Miner 2 on a key that allows six requests a minute; the
@@ -3541,7 +3620,12 @@ export function sourceTzOf(schema: Schema): string {
  * rule `status.py` uses for the collectors page, so the two cannot disagree
  * about which ISO a feed belongs to.
  */
-const ISO_BY_PREFIX: Record<string, string> = { ercot: "ERCOT", miso: "MISO", pjm: "PJM" };
+const ISO_BY_PREFIX: Record<string, string> = {
+  ercot: "ERCOT",
+  miso: "MISO",
+  pjm: "PJM",
+  spp: "SPP",
+};
 
 export function isoOf(schema: Schema): string | null {
   if (schema.iso) return schema.iso;
