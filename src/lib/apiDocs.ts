@@ -1,0 +1,247 @@
+import { SCHEMAS, domainOf, grainSeconds, type Schema } from "@/lib/workspace/catalog";
+
+/** `ALL` in `lib/domain.tsx`, spelled out: that module is a client one and
+    `/llms.txt` renders on the server. */
+const ALL = "all";
+
+/**
+ * The public API, described once for two readers: the developers page draws
+ * it, and `/llms.txt` prints it for an agent. Two copies would drift, and the
+ * one that drifted would be the one an agent was reading.
+ *
+ * The routes are written from `backend/src/dryos/api/main.py` and
+ * `events.py`; a parameter added there is added here or it does not exist to
+ * anyone outside. The stream list is the catalogue, so it never needs writing.
+ */
+
+/** Always the public host, whatever this deployment's own backend is — the
+    reader is somebody else's program. */
+export const PUBLIC_API = "https://api.dryos.ai";
+
+export interface Param {
+  name: string;
+  /** e.g. "string", "ISO-8601", "repeatable". */
+  type: string;
+  desc: string;
+}
+
+export interface Route {
+  path: string;
+  summary: string;
+  detail?: string;
+  params?: Param[];
+  example: string;
+}
+
+export const ROUTES: Route[] = [
+  {
+    path: "/v1/datasets",
+    summary: "The catalogue — every stream, its columns and how to read it.",
+    detail:
+      "Each dataset carries its slug, schema (column, type, description, nullable), primary key, " +
+      "collection schedule, source, and `serving`: which column names the entity, which is the " +
+      "headline measure, and its unit. Start here.",
+    example: "/v1/datasets",
+  },
+  {
+    path: "/v1/datasets/{slug}",
+    summary: "One stream's catalogue entry, plus its last twenty collection runs.",
+    example: "/v1/datasets/ercot-realtime-lmp",
+  },
+  {
+    path: "/v1/datasets/{slug}/nodes",
+    summary: "The entities in a stream — nodes, zones, stations, fuels — with coverage.",
+    detail:
+      "Names are verbatim, inner spaces included: look them up here rather than guessing. " +
+      "`facets` counts the entities by type; `coverage` gives the table's earliest and latest interval.",
+    params: [
+      { name: "q", type: "string", desc: "Case-insensitive substring of the entity name." },
+      { name: "node_type", type: "string", desc: "Only entities of one type (HUB, LOAD_ZONE, RESOURCE_NODE…)." },
+      { name: "limit", type: "1–2000", desc: "Default 200." },
+    ],
+    example: "/v1/datasets/ercot-realtime-lmp/nodes?q=HB_&limit=10",
+  },
+  {
+    path: "/v1/datasets/{slug}/query",
+    summary: "Read rows — raw, or bucketed into a rollup.",
+    detail:
+      "Raw rows come newest first. With `interval` the rows are buckets instead, each carrying " +
+      "`samples`, the number of readings it holds — an average of twelve and an average of one are " +
+      "different claims.",
+    params: [
+      { name: "node", type: "string", desc: "The entity, whatever the stream calls it. Refused on system-level feeds." },
+      { name: "start", type: "ISO-8601", desc: "Inclusive lower bound on interval_start_utc." },
+      { name: "end", type: "ISO-8601", desc: "Exclusive upper bound." },
+      { name: "limit", type: "≤ 50000", desc: "Default 1000." },
+      { name: "interval", type: "15m · 1h · 1d · all", desc: "Bucket size, 1m to 7d. Absent means raw rows." },
+      { name: "agg", type: "avg · min · max · sum", desc: "How a bucket is reduced. Default avg." },
+      { name: "by", type: "column · none", desc: "What a rollup splits by. Default the entity; none for one series." },
+      { name: "where", type: "column=value", desc: "Text columns only. Repeat on one column for OR; across columns is AND." },
+      { name: "search", type: "column:text", desc: "Case-insensitive substring of a text column." },
+      { name: "vintages", type: "latest · all", desc: "Forecasts keep every publication. Default is the newest per interval." },
+      { name: "located", type: "bool", desc: "Only rows the map can place (located price streams)." },
+      { name: "stamp", type: "start · noon", desc: "Label a daily bucket at noon UTC so the date reads right in US zones." },
+    ],
+    example: "/v1/datasets/ercot-realtime-lmp/query?node=HB_NORTH&limit=12",
+  },
+  {
+    path: "/v1/datasets/{slug}/values",
+    summary: "Distinct values of one text column, most rows first.",
+    detail: "Takes the same `where` and `search` as the query, so a value can say how many rows it would leave.",
+    params: [
+      { name: "column", type: "string", desc: "A text column from the schema (not the entity — use /nodes)." },
+      { name: "limit", type: "1–500", desc: "Default 40." },
+    ],
+    example: "/v1/datasets/ercot-realtime-lmp/values?column=node_type",
+  },
+  {
+    path: "/v1/datasets/{slug}/sample",
+    summary: "One entity's headline series over recent hours — a worked example.",
+    params: [
+      { name: "node", type: "string", desc: "The entity. Default a representative one (a hub where there are hubs)." },
+      { name: "hours", type: "1–168", desc: "Default 24." },
+    ],
+    example: "/v1/datasets/ercot-realtime-lmp/sample?node=HB_HOUSTON&hours=6",
+  },
+  {
+    path: "/v1/datasets/{slug}/preview",
+    summary: "Per interval: how many entities landed, and how late the source and Dryos each were.",
+    params: [{ name: "hours", type: "1–168", desc: "Default 24." }],
+    example: "/v1/datasets/ercot-realtime-lmp/preview?hours=2",
+  },
+  {
+    path: "/v1/datasets/{slug}/runs",
+    summary: "Collection history: every run, its outcome and rows written.",
+    params: [{ name: "hours", type: "1–2880", desc: "Default 24." }],
+    example: "/v1/datasets/ercot-realtime-lmp/runs?hours=1",
+  },
+  {
+    path: "/v1/status",
+    summary: "Every collector's health, freshness and changelog in one payload.",
+    example: "/v1/status",
+  },
+  {
+    path: "/v1/reference/node-locations/{iso}",
+    summary: "Where an operator's pricing nodes are, and the evidence for each placement.",
+    detail: "iso is ERCOT, MISO, PJM, SPP, CAISO, NYISO or ISO-NE.",
+    example: "/v1/reference/node-locations/MISO",
+  },
+  {
+    path: "/v1/events",
+    summary: "Server-sent events: which dataset just landed rows, and when. No rows ride on it.",
+    detail:
+      "Each message is `{\"dataset\": slug, \"at\": ISO}`. A `ping` event every twenty seconds keeps it " +
+      "honest; `resync` means refetch everything. Hear the name, then read through /query.",
+    example: "/v1/events",
+  },
+  {
+    path: "/health",
+    summary: "Liveness.",
+    example: "/health",
+  },
+];
+
+/** Live, collected streams in one domain — or every one for the blend. */
+export function apiStreams(domain?: string | null): Schema[] {
+  return SCHEMAS.filter(
+    (s) =>
+      s.dataset &&
+      s.availability === "live" &&
+      (!domain || domain === ALL || domainOf(s) === domain),
+  );
+}
+
+function every(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${seconds / 60}m`;
+  if (seconds < 86400) return `${seconds / 3600}h`;
+  return `${seconds / 86400}d`;
+}
+
+export const QUICKSTART = `curl "${PUBLIC_API}/v1/datasets/ercot-realtime-lmp/query?node=HB_NORTH&limit=2"`;
+
+/** A real answer to the quick start (2026-09-13), trimmed of nothing. */
+export const QUICKSTART_RESPONSE = `{
+  "dataset": "ercot-realtime-lmp",
+  "rows": [
+    {
+      "interval_start_utc": "2026-09-13T19:10:19Z",
+      "iso": "ERCOT",
+      "market": "RTM",
+      "node": "HB_NORTH",
+      "node_type": "HUB",
+      "lmp_total": 27.04,
+      "lmp_energy": null,
+      "lmp_congestion": null,
+      "lmp_loss": null,
+      "source_published_at_utc": "2026-09-13T19:10:22Z",
+      "collected_at_utc": "2026-09-13T19:11:40.143691Z",
+      "lat": null,
+      "lon": null
+    },
+    …
+  ],
+  "count": 2,
+  "servedTo": null
+}`;
+
+/**
+ * What an agent is told. Written as instructions, not as reference: the
+ * routes are the what, and the rules are the part that stops an agent
+ * answering with a plausible wrong number — a Central timestamp read as UTC,
+ * a guessed node name, a forecast's revisions stacked into one series.
+ */
+export function agentInstructions(): string {
+  const streams = apiStreams(null)
+    .map((s) => {
+      const sample = s.entities.sample.length ? ` — e.g. ${s.entities.sample.slice(0, 3).join(", ")}` : "";
+      return `- \`${s.dataset}\` — ${s.name} (${s.path.join(" › ")}), a row every ${every(grainSeconds(s))}${sample}`;
+    })
+    .join("\n");
+
+  const routes = ROUTES.map((r) => `- \`GET ${r.path}\` — ${r.summary}`).join("\n");
+
+  return `# Dryos API — instructions for AI agents
+
+Dryos serves real, reconciled data — US power markets (ERCOT, MISO, PJM, SPP, CAISO, NYISO, ISO-NE), weather, and building permits — collected live from the source and served as read-only JSON.
+
+Base URL: ${PUBLIC_API}
+Every route is GET and answers JSON. No API key is needed today. If you send \`Authorization: Bearer <token>\`, it must be a valid Dryos access token: a bad or expired token is refused with 401, never served anonymously.
+
+## How to answer a question
+
+1. **Find the stream.** \`GET /v1/datasets\` lists every stream. Match the question to a \`slug\`, then read its \`schema\` (every column, with type and description) and \`serving\`: \`entity\` is the column that names a node/zone/station, \`measure\` the headline value, \`unit\` its unit.
+2. **Find the entity.** \`GET /v1/datasets/{slug}/nodes?q=<text>\` searches entity names. Names are verbatim, inner spaces included (\`ALDENE  230 KV  T-10\`). Never guess one — look it up.
+3. **Read the rows.** \`GET /v1/datasets/{slug}/query?node=<entity>&start=<ISO>&end=<ISO>&limit=<n>\`. Raw rows come newest first; \`limit\` defaults to 1000 and stops at 50000.
+4. **Aggregate long windows.** Past a day or so of five-minute data, add \`interval=1h\` (or \`15m\`, \`1d\`, \`all\`) and \`agg=avg|min|max|sum\`. Each bucket carries \`samples\`, the readings in it: a bucket of 1 is not a bucket of 12, and a low count is a collection gap.
+
+## Rules that prevent wrong answers
+
+- **Every timestamp is UTC**, ISO-8601. \`interval_start_utc\` is the start of the interval. Convert only for display: ERCOT and SPP are US Central, MISO is EST all year (never EDT), PJM, NYISO and ISO-NE are US Eastern with daylight saving, CAISO is US Pacific.
+- \`start\` is inclusive and \`end\` exclusive.
+- **Forecasts keep every publication.** By default you get the newest vintage of each interval; \`vintages=all\` returns every one, stamped by \`source_published_at_utc\`. Do not average vintages together.
+- **Null means the source did not report it**, never zero.
+- \`node\` filters on the entity whatever the stream calls it. System-level feeds have no entity and answer 400 to it.
+- \`where=column=value\` filters a text column (repeat on one column for OR; different columns AND). \`search=column:text\` is a case-insensitive substring. Numbers and timestamps cannot be filtered this way.
+- Price streams that are \`located\` carry \`lat\`/\`lon\` — the generating plant's coordinates. Hubs, zones and unplaced nodes are null.
+- 404 is an unknown slug; 503 means the stream has not been collected yet; 400 explains what was wrong with the request in words.
+- Do not poll faster than a stream's cadence. To hear when data lands, hold \`GET /v1/events\` open (server-sent events: \`{"dataset", "at"}\`) and query on the name.
+- Cite the slug and the interval timestamps behind any number you report.
+
+## Example
+
+\`\`\`
+curl "${PUBLIC_API}/v1/datasets/ercot-realtime-lmp/query?node=HB_NORTH&interval=1h&agg=max&start=2026-09-12T00:00:00Z"
+\`\`\`
+
+The hourly maximum real-time price at ERCOT's North hub since midnight UTC on 12 September.
+
+## Routes
+
+${routes}
+
+## Streams
+
+${streams}
+`;
+}

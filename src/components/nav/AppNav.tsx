@@ -24,7 +24,10 @@ export function AppNav({ pathname }: { pathname: string }) {
     <Shell
       strip={
         <MobileStrip
-          links={[{ href: "/workspace", label: "Workspaces" }]}
+          links={[
+            { href: "/workspace", label: "Workspaces" },
+            { href: "/docs", label: "API" },
+          ]}
         />
       }
     >

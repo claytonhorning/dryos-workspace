@@ -51,6 +51,40 @@ export interface Variable {
    * which is still relative but no longer flattened by a single outlier.
    */
   scale?: { at: number; color: string; label?: string }[];
+  /**
+   * A measure that only exists once rows are gathered into days or weeks.
+   *
+   * A permit is an event, not a reading: the question is how many were issued
+   * and what they were worth, and no single row answers either. `count` reads
+   * the rollup's own `samples` (which is why the variable's key is `samples`),
+   * `sum` totals the column. A reference to one of these is a tally — see
+   * `Tally` — and every shape asks the API for buckets instead of rows.
+   */
+  rollup?: "count" | "sum";
+}
+
+/**
+ * How an event stream is narrowed, broken down and listed.
+ *
+ * Present on a stream whose rows are events (permits), and read by the
+ * explorer's set view to draw its filters. The columns are declared rather than
+ * derived because which of a row's text columns a person would narrow on is a
+ * judgement — `status` is, a permit number never is — while the *values* on
+ * offer are always the data's own, fetched from `/values` when the set opens.
+ */
+export interface Tally {
+  /** The column naming one event — a map pins each, not each ZIP. */
+  key?: string;
+  /** Text columns a selection narrows on or breaks down by, in offer order. */
+  dims: { column: string; label: string }[];
+  /** The free-text column a search reads — "roof" in a permit's description. */
+  search?: { column: string; label: string };
+  /** The table's Records view: which columns, in order, and how to show them. */
+  list: {
+    column: string;
+    label: string;
+    kind?: "date" | "money" | "text";
+  }[];
 }
 
 export interface Schema {
@@ -81,6 +115,8 @@ export interface Schema {
    * the two agree, which is true of every real-time feed.
    */
   intervalSeconds?: number;
+  /** An event stream's filters, breakdowns and record view. See `Tally`. */
+  tally?: Tally;
   /** Dryos tokens burned each time this schema is queried. */
   tokens: number;
   /**
@@ -2367,6 +2403,77 @@ export const SCHEMAS: Schema[] = [
     ],
   },
   {
+    id: "energy.pjm.realtimehourly",
+    path: ["Energy", "Pricing", "Real-time hourly"],
+    name: "PJM real-time hourly LMP",
+    short: "RT · hourly",
+    dataset: "pjm-realtime-lmp-hourly",
+    availability: "live",
+    cadence: { label: "hourly, for the hour before", seconds: 3_600 },
+    tokens: 0.5,
+    entities: {
+      count: 482,
+      label: "aggregate pricing nodes",
+      sample: ["WESTERN HUB", "PJM-RTO", "COMED"],
+    },
+    // Aggregates only, as on the five-minute stream: an aggregate has no place.
+    blurb:
+      "PJM's own hourly integration of its unverified real-time prices at the 12 " +
+      "trading hubs, 22 transmission zones, 7 interfaces and every other aggregate, " +
+      "with the congestion and loss components, posted for the previous hour. PJM " +
+      "keeps it thirty days.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The hourly unverified real-time price at the node, as PJM integrates it.",
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
+        mock: { base: 28, swing: 12, noise: 2.5 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 6, noise: 1.5 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0.3, swing: 1.2, noise: 0.3 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "System energy price, derived as LMP minus congestion minus losses; the feed omits it.",
+        mock: { base: 28, swing: 10, noise: 2 },
+      },
+    ],
+  },
+  {
     id: "energy.pjm.rtbus",
     path: ["Energy", "Pricing", "RT bus LMP"],
     name: "PJM real-time LMPs by bus",
@@ -2831,6 +2938,162 @@ export const SCHEMAS: Schema[] = [
     ],
   },
   {
+    id: "energy.pjm.reserveresults",
+    path: ["Energy", "Ancillary", "Market results"],
+    name: "PJM real-time ancillary market results",
+    short: "AS results",
+    dataset: "pjm-rt-reserve-results",
+    availability: "live",
+    cadence: { label: "every 5 min, posted ~3 days late", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 4,
+      label: "services",
+      sample: ["REGULATION", "SYNCHRONIZED", "PRIMARY"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "PJM's settled real-time results for regulation, synchronized, primary and th" +
+      "irty-minute reserve, every five minutes, for the RTO and the Mid-Atlantic/Do" +
+      "minion subzone: clearing prices, requirements and the megawatts behind them." +
+      " Posted about three days late, on business days.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "mcp",
+        label: "Clearing price",
+        unit: "$/MW-h",
+        availability: "live",
+        description: "The service's market clearing price for the interval.",
+        mock: { base: 5, swing: 8, noise: 2, floor: 0 },
+      },
+      {
+        key: "as_req_mw",
+        label: "Requirement",
+        unit: "MW",
+        availability: "live",
+        description: "The service's requirement.",
+        mock: { base: 2_000, swing: 800, noise: 50, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.dareserveresults",
+    path: ["Energy", "Ancillary", "Market results"],
+    name: "PJM day-ahead ancillary market results",
+    short: "DA AS results",
+    dataset: "pjm-da-reserve-results",
+    availability: "live",
+    cadence: { label: "daily, for tomorrow", seconds: 86400 },
+    intervalSeconds: 3600,
+    tokens: 0.25,
+    entities: {
+      count: 3,
+      label: "services",
+      sample: ["SYNCHRONIZED", "PRIMARY", "THIRTY_MINUTE"],
+    },
+    entityKey: "as_type",
+    blurb:
+      "PJM's day-ahead results for synchronized, primary and thirty-minute reserve," +
+      " hourly, for the RTO and the Mid-Atlantic/Dominion subzone: clearing prices," +
+      " requirements and the megawatts behind them, posted with tomorrow's market.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "mcp",
+        label: "Clearing price",
+        unit: "$/MW-h",
+        availability: "live",
+        description: "The service's day-ahead clearing price for the hour.",
+        mock: { base: 5, swing: 8, noise: 2, floor: 0 },
+      },
+      {
+        key: "as_req_mw",
+        label: "Requirement",
+        unit: "MW",
+        availability: "live",
+        description: "The service's requirement.",
+        mock: { base: 2_000, swing: 800, noise: 50, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.loadmetered",
+    path: ["Energy", "Load", "Metered hourly load"],
+    name: "PJM metered hourly load",
+    short: "Metered load",
+    dataset: "pjm-load-metered",
+    availability: "live",
+    cadence: { label: "every 3 h, a few days behind", seconds: 10800 },
+    intervalSeconds: 3600,
+    tokens: 0.25,
+    entities: {
+      count: 31,
+      label: "load areas",
+      sample: ["AECO", "DOM", "PS"],
+    },
+    entityKey: "load_area",
+    entityOmit: ["RTO"],
+    blurb:
+      "PJM's settlement-quality hourly load for 30 load areas and the RTO, from the" +
+      " distribution companies' own meters, filled in company by company over the d" +
+      "ays after \u2014 the RTO row is a running total until every company has reported.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "demand_mw",
+        label: "Load",
+        unit: "MW",
+        availability: "live",
+        description: "Metered energy for load over the hour \u2014 its average MW.",
+        mock: { base: 3_000, swing: 1_200, noise: 80, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.loadprelim",
+    path: ["Energy", "Load", "Preliminary hourly load"],
+    name: "PJM preliminary hourly load",
+    short: "Prelim load",
+    dataset: "pjm-load-prelim",
+    availability: "live",
+    cadence: { label: "every 3 h, a day behind", seconds: 10800 },
+    intervalSeconds: 3600,
+    tokens: 0.25,
+    entities: {
+      count: 10,
+      label: "load areas",
+      sample: ["AEP", "DOM", "MIDATL"],
+    },
+    entityKey: "load_area",
+    blurb:
+      "PJM's preliminary hourly load for ten areas, integrated from telemetry the d" +
+      "ay after \u2014 between the five-minute reading and the metered settlement load.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "demand_mw",
+        label: "Load",
+        unit: "MW",
+        availability: "live",
+        description: "Preliminary integrated load over the hour, average MW.",
+        mock: { base: 12_000, swing: 5_000, noise: 200, floor: 0 },
+      },
+    ],
+  },
+  {
     id: "energy.pjm.loadfc5",
     path: ["Energy", "Load", "Five-minute forecast"],
     name: "PJM five-minute load forecast",
@@ -3001,6 +3264,41 @@ export const SCHEMAS: Schema[] = [
     ],
   },
   {
+    id: "energy.pjm.windsolarfc5",
+    path: ["Energy", "Generation", "Wind and solar forecast"],
+    name: "PJM five-minute wind and solar forecast",
+    short: "Wind · solar fc 5m",
+    dataset: "pjm-wind-solar-forecast-5min",
+    availability: "live",
+    cadence: { label: "every 10 min, six hours ahead", seconds: 600 },
+    intervalSeconds: 300,
+    tokens: 0.25,
+    entities: {
+      count: 3,
+      label: "resources",
+      sample: ["WIND", "SOLAR", "SOLAR_BTM"],
+    },
+    entityKey: "resource",
+    blurb:
+      "PJM's wind and solar forecasts for the next six hours in five-minute steps — " +
+      "solar utility-scale and behind-the-meter separately — re-issued every ten " +
+      "minutes. Every issue is a vintage. PJM keeps them thirty days.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "forecast_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "PJM's forecast for the five-minute interval, as of this vintage.",
+        mock: { base: 3_000, swing: 2_500, noise: 150, floor: 0 },
+      },
+    ],
+  },
+  {
     id: "energy.pjm.constraints",
     path: ["Energy", "Pricing", "Shadow prices"],
     name: "PJM binding constraints",
@@ -3032,6 +3330,76 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "The constraint's shadow price for the interval; negative in PJM's convention.",
         mock: { base: -300, swing: 250, noise: 50 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.rtmarginal",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "PJM real-time constraint marginal values",
+    short: "RT marginal value",
+    dataset: "pjm-rt-marginal-value",
+    availability: "live",
+    cadence: { label: "every 5 min, posted ~3 days late", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 60,
+      label: "constraints",
+      sample: ["APSOUTH", "BED-BLA"],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "PJM's settled record of every transmission constraint that bound in the real" +
+      "-time market, five minutes at a time, with its contingency, shadow price (ne" +
+      "gative, in PJM's convention), penalty factor and limit control percentage. P" +
+      "osted about three days late, on business days.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Marginal value",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The constraint's settled shadow price for the interval; negative in PJM's convention.",
+        mock: { base: -60, swing: 120, noise: 30 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.damarginal",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "PJM day-ahead constraint marginal values",
+    short: "DA marginal value",
+    dataset: "pjm-da-marginal-value",
+    availability: "live",
+    cadence: { label: "daily, for tomorrow", seconds: 86400 },
+    intervalSeconds: 3600,
+    tokens: 0.5,
+    entities: {
+      count: 60,
+      label: "constraints",
+      sample: ["APSOUTH", "BED-BLA"],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "Every transmission constraint that binds in PJM's day-ahead market, hour by " +
+      "hour, with its contingency and shadow price (negative, in PJM's convention)," +
+      " posted with tomorrow's prices.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Marginal value",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The constraint's day-ahead shadow price for the hour; negative in PJM's convention.",
+        mock: { base: -60, swing: 120, noise: 30 },
       },
     ],
   },
@@ -3133,6 +3501,172 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description: "Area control error at the scan; positive is over-generating.",
         mock: { base: 0, swing: 300, noise: 120 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.interchange",
+    path: ["Energy", "Grid", "Hourly interchange"],
+    name: "PJM hourly interchange by tie",
+    short: "Interchange",
+    dataset: "pjm-interchange-hourly",
+    availability: "live",
+    cadence: { label: "every 2 h, hours behind", seconds: 7200 },
+    intervalSeconds: 3600,
+    tokens: 0.25,
+    entities: {
+      count: 20,
+      label: "ties",
+      sample: ["NYIS", "TVA", "DUK"],
+    },
+    entityKey: "counterparty",
+    blurb:
+      "Actual, scheduled and inadvertent flow over each of PJM's ties with its neig" +
+      "hbours, hour by hour \u2014 the record PJM keeps indefinitely behind the five-min" +
+      "ute tie flows it keeps thirty days. Positive is into PJM.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "actual_mw",
+        label: "Actual",
+        unit: "MW",
+        availability: "live",
+        description: "Actual flow over the hour; positive is into PJM.",
+        mock: { base: 0, swing: 900, noise: 60 },
+      },
+      {
+        key: "scheduled_mw",
+        label: "Scheduled",
+        unit: "MW",
+        availability: "live",
+        description: "Scheduled flow over the hour; positive is into PJM.",
+        mock: { base: 0, swing: 900, noise: 40 },
+      },
+      {
+        key: "inadvertent_mw",
+        label: "Inadvertent",
+        unit: "MW",
+        availability: "live",
+        description: "Inadvertent flow over the hour, as PJM reports it.",
+        mock: { base: 0, swing: 60, noise: 15 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.genoutages",
+    path: ["Energy", "Grid", "Generation outages"],
+    name: "PJM generation outages, week ahead",
+    short: "Outages 7d",
+    dataset: "pjm-gen-outages",
+    availability: "live",
+    cadence: { label: "daily, a week ahead", seconds: 86400 },
+    intervalSeconds: 86400,
+    tokens: 0.25,
+    entities: {
+      count: 3,
+      label: "regions",
+      sample: ["PJM RTO", "Western", "Mid Atlantic - Dominion"],
+    },
+    entityKey: "region",
+    entityOmit: ["PJM RTO"],
+    blurb:
+      "PJM's generation outages for today and the next six days, for the RTO and it" +
+      "s two regions, split into planned, maintenance and forced \u2014 issued daily and" +
+      " kept as vintages.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "total_mw",
+        label: "Total out",
+        unit: "MW",
+        availability: "live",
+        description: "All generation out that day.",
+        mock: { base: 25_000, swing: 8_000, noise: 500, floor: 0 },
+      },
+      {
+        key: "forced_mw",
+        label: "Forced",
+        unit: "MW",
+        availability: "live",
+        description: "Forced (unplanned) outages.",
+        mock: { base: 5_000, swing: 2_000, noise: 300, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.genoutagefc",
+    path: ["Energy", "Grid", "Generation outages"],
+    name: "PJM generation outage forecast, ninety days",
+    short: "Outages 90d",
+    dataset: "pjm-gen-outage-forecast",
+    availability: "live",
+    cadence: { label: "daily, ninety days ahead", seconds: 86400 },
+    intervalSeconds: 86400,
+    tokens: 0.25,
+    entities: {
+      count: 3,
+      label: "regions",
+      sample: ["PJM RTO", "Western", "Other"],
+    },
+    entityKey: "region",
+    entityOmit: ["PJM RTO"],
+    blurb:
+      "PJM's forecast of generation out of service for each of the next ninety days" +
+      ", for the RTO, the west and the rest \u2014 issued daily and kept as vintages.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "outage_mw",
+        label: "Forecast out",
+        unit: "MW",
+        availability: "live",
+        description: "Generation forecast out that day.",
+        mock: { base: 25_000, swing: 10_000, noise: 500, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.pjm.pai",
+    path: ["Energy", "Grid", "Performance assessment"],
+    name: "PJM performance assessment intervals",
+    short: "PAI",
+    dataset: "pjm-pai-intervals",
+    availability: "live",
+    cadence: { label: "every 10 min, one row per interval", seconds: 600 },
+    intervalSeconds: 300,
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: [],
+    },
+    blurb:
+      "Which five-minute intervals PJM flags as Performance Assessment Intervals — " +
+      "the emergencies in which capacity resources are scored on whether they " +
+      "delivered — for the RTO and the active subzone, as PJM first flags them. " +
+      "Almost always zero, which is the point: the rare interval that is not is the " +
+      "one capacity is paid or penalised for. PJM keeps sixty days.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "pai_level",
+        label: "PAI level",
+        unit: "level",
+        availability: "live",
+        description: "0 no PAI, 1 a PAI in the active subzone, 2 a PAI across the RTO and the subzone.",
+        mock: { base: 0, swing: 0, noise: 0, floor: 0 },
       },
     ],
   },
@@ -3592,18 +4126,58 @@ export const SCHEMAS: Schema[] = [
       name: "Dryos",
       since: Date.UTC(2026, 8, 7),
     },
+    // Counted first: how many permits is the question every tile on this
+    // stream starts from, and a declared value is on one permit in six.
     variables: [
       {
+        key: "samples",
+        label: "Permits issued",
+        unit: "permits",
+        availability: "live",
+        rollup: "count",
+        description:
+          "How many permits were issued in the day or week — the rollup's " +
+          "own row count, after any filter.",
+        mock: { base: 170, swing: 60, noise: 30, floor: 0 },
+      },
+      {
         key: "valuation_usd",
-        label: "Job valuation",
+        label: "Declared value",
         unit: "$",
         availability: "live",
+        rollup: "sum",
         description:
-          "Total job valuation declared on the permit. Trade permits carry " +
-          "none; about one permit in six declares a value.",
-        mock: { base: 60_000, swing: 45_000, noise: 20_000, floor: 0 },
+          "Total job valuation declared on the permits in the day or week. " +
+          "Trade permits carry none; about one permit in six declares a value.",
+        mock: { base: 9_000_000, swing: 4_000_000, noise: 2_000_000, floor: 0 },
       },
     ],
+    tally: {
+      key: "permit_id",
+      dims: [
+        // Ours first: what the work is done to and what is being done, the
+        // same words in every city (the API's labels table, rules v1). The
+        // city's own codes follow for whoever needs them.
+        { column: "subject", label: "Work on" },
+        { column: "action", label: "Job" },
+        { column: "permit_class", label: "Class" },
+        { column: "permit_type", label: "City type" },
+        { column: "work_class", label: "City work class" },
+        { column: "status", label: "Status" },
+      ],
+      // Austin has no roofing type — a re-roof is a building permit whose
+      // description says so — so the search is how roofing is found here.
+      search: { column: "description", label: "Description" },
+      list: [
+        { column: "interval_start_utc", label: "Issued", kind: "date" },
+        { column: "subject", label: "Work on" },
+        { column: "action", label: "Job" },
+        { column: "description", label: "Work" },
+        { column: "valuation_usd", label: "Value", kind: "money" },
+        { column: "contractor", label: "Contractor" },
+        { column: "zip", label: "ZIP" },
+      ],
+    },
   },
   // San Antonio is the roofing signal: the city issues a re-roof permit
   // type of its own, about seventy a week, with coordinates on nine rows in
@@ -3638,16 +4212,54 @@ export const SCHEMAS: Schema[] = [
     },
     variables: [
       {
+        key: "samples",
+        label: "Permits issued",
+        unit: "permits",
+        availability: "live",
+        rollup: "count",
+        description:
+          "How many permits were issued in the day or week — the rollup's " +
+          "own row count, after any filter.",
+        mock: { base: 190, swing: 70, noise: 35, floor: 0 },
+      },
+      {
         key: "valuation_usd",
-        label: "Declared valuation",
+        label: "Declared value",
         unit: "$",
         availability: "live",
+        rollup: "sum",
         description:
-          "Valuation declared on the permit. Filed on about two permits in a " +
-          "hundred, mostly new buildings.",
-        mock: { base: 80_000, swing: 60_000, noise: 25_000, floor: 0 },
+          "Total valuation declared on the permits in the day or week. Filed " +
+          "on about two permits in a hundred, mostly new buildings, so this " +
+          "is new construction's value rather than all work's.",
+        mock: { base: 6_000_000, swing: 3_000_000, noise: 1_500_000, floor: 0 },
       },
     ],
+    // The re-roof type is San Antonio's own, so here roofing is a Type chip
+    // rather than a search.
+    tally: {
+      key: "permit_id",
+      dims: [
+        // Ours first: what the work is done to and what is being done, the
+        // same words in every city (the API's labels table, rules v1). The
+        // city's own codes follow for whoever needs them.
+        { column: "subject", label: "Work on" },
+        { column: "action", label: "Job" },
+        { column: "permit_class", label: "Class" },
+        { column: "permit_type", label: "City type" },
+        { column: "work_class", label: "City work class" },
+      ],
+      search: { column: "description", label: "Description" },
+      list: [
+        { column: "interval_start_utc", label: "Issued", kind: "date" },
+        { column: "subject", label: "Work on" },
+        { column: "action", label: "Job" },
+        { column: "description", label: "Work" },
+        { column: "valuation_usd", label: "Value", kind: "money" },
+        { column: "contractor", label: "Contractor" },
+        { column: "zip", label: "ZIP" },
+      ],
+    },
   },
 ];
 
@@ -3766,6 +4378,20 @@ export interface DataRef {
    * reference stays its own kind.
    */
   subset?: { label: string; entities: string[] };
+  /**
+   * An event stream narrowed and grouped — "re-roof permits", "new
+   * residential, by ZIP". Made in the set view's filters and read literally
+   * by every shape: `where` is column → the values any of which match,
+   * `search` the text the stream's search column must contain, `by` the
+   * column the tally breaks down by (one series per value). Rides beside
+   * `subset` rather than inside the label, so a shape reads the filter and
+   * never parses it back out of words.
+   */
+  tally?: {
+    where?: Record<string, string[]>;
+    search?: string;
+    by?: string;
+  };
 }
 
 export function makeRef(
@@ -4204,6 +4830,84 @@ export function entityRef(
     tokens: schema.tokens,
     snippet: `dryos.query({ dataset: ${JSON.stringify(schema.dataset ?? schema.id)}, node: ${JSON.stringify(node)}, start: "-24h" })`,
   };
+}
+
+/**
+ * A chip with an event stream's narrowing on it.
+ *
+ * The filter says itself in the label — "Austin construction permits ·
+ * RES_REROOF · by Type" — because the chip is how a person tells two
+ * selections of one stream apart, and the explorer keys a selection on its
+ * label and snippet: two filters of the same ZIP are two chips, and the same
+ * filter picked twice toggles itself off. An empty filter returns the chip
+ * untouched.
+ */
+export function withTally(
+  ref: DataRef,
+  schema: Schema,
+  tally: NonNullable<DataRef["tally"]>,
+): DataRef {
+  const where = Object.fromEntries(
+    Object.entries(tally.where ?? {})
+      .filter(([, vs]) => vs.length)
+      .map(([c, vs]) => [c, [...vs].sort()]),
+  );
+  const search = tally.search?.trim() || undefined;
+  const by = tally.by || undefined;
+  if (!Object.keys(where).length && !search && !by) return ref;
+  const dimLabel = (c: string) =>
+    schema.tally?.dims.find((d) => d.column === c)?.label ??
+    (c === (schema.entityColumn ?? schema.entityKey)
+      ? (schema.entities.label ?? c).replace(/s$/, "")
+      : c);
+  const parts = [
+    ...Object.values(where).map((vs) =>
+      vs.map(tallyValue).join(" or "),
+    ),
+    ...(search ? [`“${search}”`] : []),
+    ...(by ? [`by ${dimLabel(by)}`] : []),
+  ];
+  const clean = {
+    ...(Object.keys(where).length ? { where } : {}),
+    ...(search ? { search } : {}),
+    ...(by ? { by } : {}),
+  };
+  return {
+    ...ref,
+    label: `${ref.label} · ${parts.join(" · ")}`,
+    // The snippet is what the build agent is shown; it says the filter in
+    // the query's own terms so a sentence refining this tile keeps it.
+    snippet: ref.snippet.replace(
+      / \}\)$/,
+      `, tally: ${JSON.stringify(clean)} })`,
+    ),
+    tally: clean,
+  };
+}
+
+/** A tally column in words — "Job", "Contractor", or the entity's own noun. */
+export function tallyDimLabel(schema: Schema, column: string): string {
+  const declared = schema.tally?.dims.find((d) => d.column === column)?.label;
+  if (declared) return declared;
+  if (column === (schema.entityColumn ?? schema.entityKey))
+    return (schema.entities.label ?? column).replace(/s$/, "");
+  return column.charAt(0).toUpperCase() + column.slice(1).replace(/_/g, " ");
+}
+
+/**
+ * A source's code as words: `RES_NEW_BUILDING` reads "Res new building".
+ *
+ * Only for display. The value sent to the API is always the source's own
+ * spelling, double spaces and all, since that is what the rows hold.
+ */
+export function tallyValue(value: string): string {
+  const words = value.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  if (words !== words.toUpperCase()) return words;
+  // A short capitalised word is an acronym, not a shouted code: HVAC, ADU
+  // and EV stay as they are, where ELECTRICAL becomes "Electrical".
+  if (/^[A-Z0-9]{1,4}$/.test(words)) return words;
+  const lower = words.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 /**

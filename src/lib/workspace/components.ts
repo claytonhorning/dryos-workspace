@@ -5,6 +5,7 @@ import {
   pinStreams,
   schemaFor,
   sourceTzOf,
+  tallyDimLabel,
 } from "./catalog";
 import {
   ERCOT_POINTS,
@@ -42,6 +43,7 @@ export type ComponentKind =
   | "table"
   | "map"
   | "picker"
+  | "area"
   | "text";
 
 export interface ComponentSpec {
@@ -91,6 +93,56 @@ export interface Option {
   label: string;
   choices: { value: string; label: string }[];
   fallback: string;
+  /**
+   * Other choices for a particular selection, or none at all (`hidden`).
+   *
+   * A window of six hours is the right question of a five-minute price and
+   * an empty one of permits, which land a day late and are counted by the
+   * week; the same "Window" setting has to offer the permits their own spans
+   * rather than a separate control. Read through `optionFor` — the panel and
+   * every generator agree on what a selection was offered.
+   */
+  forRefs?: (
+    refs: DataRef[],
+  ) =>
+    | { choices: { value: string; label: string }[]; fallback: string }
+    | "hidden"
+    | undefined;
+}
+
+/**
+ * The option as offered for this selection: its own choices, the selection's,
+ * or null when the selection has no use for it.
+ */
+export function optionFor(
+  o: Option,
+  refs: DataRef[],
+): Option | null {
+  const alt = o.forRefs?.(refs);
+  if (alt === "hidden") return null;
+  return alt ? { ...o, ...alt } : o;
+}
+
+/**
+ * A chosen value, held to what this selection was offered.
+ *
+ * A tile's options are stored with it, so a chart built on prices keeps
+ * `-24h` when its data is changed to permits; a value the new choices do not
+ * hold falls back to their default rather than asking for a window the shape
+ * cannot serve.
+ */
+function chosen(
+  def: ComponentDef,
+  key: string,
+  refs: DataRef[],
+  o: Record<string, string>,
+): string {
+  const opt = def.options.find((x) => x.key === key);
+  const offered = opt ? optionFor(opt, refs) : null;
+  if (!offered) return o[key];
+  return offered.choices.some((c) => c.value === o[key])
+    ? o[key]
+    : offered.fallback;
 }
 
 export interface Emitted {
@@ -208,6 +260,150 @@ function node(ref: DataRef): string | null {
   return m ? m[1] : null;
 }
 
+/* ── Tallies: event streams, counted by the day or the week ────────────── */
+
+/*
+  A permit is an event, so its stream is never charted row by row: a day of
+  Austin is two hundred rows sharing one timestamp, most with no value on
+  them, and a line through them says nothing. What people ask of it is how
+  many, and what they were worth, over weeks — so a reference to a `rollup`
+  variable is a tally, and every shape asks the API for buckets of it.
+
+  The spans are the permits' own. Six hours of a stream that lands a day late
+  is always empty, which is what every tile on it showed before this existed.
+*/
+const TALLY_WINDOWS = [
+  { value: "-30d", label: "Last 30 days" },
+  { value: "-90d", label: "Last 90 days" },
+  { value: "-365d", label: "Last year" },
+];
+
+/**
+ * The bucket a span reads in. A month by the day shows the week's rhythm; a
+ * quarter by the day is ninety teeth of weekday and weekend, and by the week
+ * it is the trend somebody opened it for.
+ */
+const TALLY_BUCKET: Record<string, string> = {
+  "-30d": "1d",
+  "-90d": "7d",
+  "-365d": "7d",
+};
+
+/** Whether a reference counts or totals an event stream. */
+export function isTally(ref: DataRef): boolean {
+  const schema = schemaFor(ref.schemaId);
+  const key = column(ref);
+  return Boolean(
+    schema?.variables.find((v) => v.key === key)?.rollup,
+  );
+}
+
+/**
+ * A selection mixing tallies and readings. Refused wherever it would have to
+ * share an axis: a week of permits and five minutes of a price have no
+ * timestamp in common, and forward-filling a count would invent permits.
+ */
+function mixesTally(refs: DataRef[]): boolean {
+  return refs.some(isTally) && !refs.every(isTally);
+}
+const TALLY_MIX_WHY =
+  "Permit counts and interval readings share no time axis — pick one kind.";
+
+/** The narrowing a tally sends, as the API spells it. Empty for anything else. */
+function tallyFilter(ref: DataRef): {
+  where?: string[];
+  search?: string;
+} {
+  const t = ref.tally;
+  if (!t) return {};
+  const col = schemaFor(ref.schemaId)?.tally?.search?.column;
+  const where = Object.entries(t.where ?? {}).flatMap(
+    ([c, vs]) => vs.map((v) => `${c}=${v}`),
+  );
+  return {
+    ...(where.length ? { where } : {}),
+    ...(t.search && col ? { search: `${col}:${t.search}` } : {}),
+  };
+}
+
+/**
+ * What a tally asks for instead of rows: buckets of `interval`, summed (the
+ * permit count is the rollup's own `samples`), each labelled at midday so a
+ * day reads as its own date in every US zone — a bucket labelled at UTC
+ * midnight is the evening before in Austin. A whole stream with no breakdown
+ * is one total (`by: none`); left to the default it would group by ZIP and
+ * the chart's join would keep whichever ZIP landed last.
+ */
+function tallyQuery(ref: DataRef, interval: string) {
+  if (!isTally(ref)) return {};
+  const whole = ref.kind === "schema" && !ref.subset;
+  return {
+    ...tallyFilter(ref),
+    interval,
+    agg: "sum",
+    stamp: "noon",
+    ...(ref.tally?.by
+      ? { by: ref.tally.by }
+      : whole
+        ? { by: "none" }
+        : {}),
+  };
+}
+
+/** How a tally's value prints: whole permits, whole dollars, compact when big. */
+const TALLY_FORMAT = `function fmtTally(v, unit) {
+    if (v == null) return "—";
+    if (unit === "$") {
+      const a = Math.abs(v);
+      return a >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : a >= 1e6 ? "$" + (v / 1e6).toFixed(1) + "M" : a >= 1e4 ? "$" + Math.round(v / 1e3) + "K" : "$" + Math.round(v).toLocaleString("en-US");
+    }
+    return Math.round(v).toLocaleString("en-US");
+  }
+  function prettyTally(v) {
+    const w = String(v).replace(/_/g, " ").replace(/\\s+/g, " ").trim();
+    if (w !== w.toUpperCase()) return w;
+    if (/^[A-Z0-9]{1,4}$/.test(w)) return w;
+    const l = w.toLowerCase();
+    return l.charAt(0).toUpperCase() + l.slice(1);
+  }`;
+
+/**
+ * Fill a tally's empty buckets with zero, from its first bucket to its last.
+ *
+ * A day nothing was issued has no row in a rollup, and a line drawn across
+ * the missing Sunday says permits were issued on it. Zero is the honest value
+ * inside the span the data covers; before its first bucket it is not, since
+ * that is before the collector existed, so the fill never reaches back past
+ * the rows. Buckets sit on the API's grid: UTC midnights, weeks from Monday,
+ * each stamped at noon.
+ */
+function tallyFillCode(interval: string): string {
+  const week = interval === "7d";
+  return `function fillTally(list, keys) {${
+    week
+      ? `
+    // A week is a week once it is over, and a window rarely opens on a
+    // Monday: the first bucket holds only the days the window caught of it,
+    // the last only the days so far. Either would draw a slump that never
+    // happened, so both go. The grid's Monday, stamped at noon like the API.
+    const thisWeek = Math.floor((Date.now() - 345600000) / 604800000) * 604800000 + 345600000 + 43200000;
+    list = list.filter((r) => r.t < thisWeek).slice(1);`
+      : ""
+  }
+    if (list.length < 2) return list;
+    const B = ${week ? 7 : 1} * 86400000;
+    const have = new Map(list.map((r) => [r.t, r]));
+    const out = [];
+    for (let t = list[0].t; t <= list[list.length - 1].t; t += B) {
+      const r = have.get(t) || { t };
+      for (const k of keys) if (r[k] == null) r[k] = 0;
+      out.push(r);
+    }
+    // A row off the grid (a stamp this code did not expect) is kept, not lost.
+    return out.length >= have.size ? out : list;
+  }`;
+}
+
 /**
  * Forward-fill code for the slower series in a mixed-cadence selection.
  *
@@ -263,9 +459,15 @@ function series(refs: DataRef[]) {
     return {
       key: `s${i}`,
       dataset: target(r),
+      // A stream-level chip with no entity falls back to the catalogue's
+      // first sample — except a tally's, which means the whole city: its
+      // query carries `by: none` and no node, where the sample would have
+      // quietly made "Austin permits" the permits of one ZIP.
       node:
         n ??
-        schemaFor(r.schemaId)?.entities.sample[0] ??
+        (isTally(r)
+          ? ""
+          : schemaFor(r.schemaId)?.entities.sample[0]) ??
         "",
       column: column(r),
       unit: unit(r),
@@ -471,9 +673,19 @@ export function followable(spec: ComponentSpec): boolean {
   // A title reads no data, so it has nothing to retarget — it follows by
   // naming the pick in its own words, and needs no reference to do it.
   if (spec.kind === "text") return true;
+  const refs = spec.refs ?? [];
+  // A tally follows by filter rather than by node, so a breakdown still
+  // follows (the filter narrows it; it keeps discovering its own groups),
+  // and the bar and the table follow too.
+  if (refs.length > 0 && refs.every(isTally))
+    return (
+      spec.kind === "chart" ||
+      spec.kind === "ticker" ||
+      spec.kind === "bar" ||
+      spec.kind === "table"
+    );
   if (spec.kind !== "chart" && spec.kind !== "ticker")
     return false;
-  const refs = spec.refs ?? [];
   if (refs.length === 0) return false;
   if (
     spec.kind === "chart" &&
@@ -498,7 +710,9 @@ export function emitsPicks(spec: {
   custom?: { name: string; code: string };
 }): boolean {
   if (spec.custom) return false;
-  return spec.kind === "map" || spec.kind === "picker";
+  return (
+    spec.kind === "map" || spec.kind === "picker" || spec.kind === "area"
+  );
 }
 
 /**
@@ -513,26 +727,44 @@ function followSnippet(
 ): string {
   if (follow === null)
     return `  const queries = ${queriesJson};`;
-  return `  // Wired: tile ${follow}'s selected entity retargets these queries.
+  return `  // Wired: tile ${follow}'s pick retargets these queries — a node from a
+  // map or a search, or a filter (a trade and an area) from an area picker.
   const FOLLOW = ${follow};
-  const [picked, setPicked] = useState(null);
+  // The source may have spoken before this tile mounted — an area picker
+  // announces its trade on arrival — so its last word is read from the page.
+  const [pick, setPick] = useState(() => (window.__dryosPicks || {})[FOLLOW] || null);
   useEffect(() => {
     const h = (e) => {
       const d = e.detail;
-      // A null entity is a source clearing its selection, which is a pick
-      // like any other: the tile goes back to the series it was composed
-      // with rather than holding the last thing anybody clicked.
-      if (d && d.source === FOLLOW) setPicked(d.entity || null);
+      // A null entity with no filter is a source clearing its selection,
+      // which is a pick like any other: the tile goes back to the series it
+      // was composed with rather than holding the last thing anybody clicked.
+      if (d && d.source === FOLLOW) setPick(d.entity || d.filter ? d : null);
     };
     window.addEventListener("dryos:pick", h);
     return () => window.removeEventListener("dryos:pick", h);
   }, []);
+  const picked = pick ? pick.label || pick.entity || null : null;
+  // A filter narrows only the queries on the stream it was made on, and
+  // replaces the tile's own filter on the same columns: the picker's trade
+  // wins over the trade the tile was composed with, the tile's other
+  // narrowing (replacements only, a breakdown) stays.
+  const followFilter = (q, f) => {
+    if (f.dataset && q.dataset !== f.dataset) return q;
+    const cols = Object.keys(f.where || {});
+    const kept = (q.where || []).filter((w) => cols.indexOf(w.split("=")[0]) === -1);
+    const add = [];
+    cols.forEach((c) => (f.where[c] || []).forEach((v) => add.push(c + "=" + v)));
+    return { ...q, where: kept.concat(add) };
+  };
   const queries = useMemo(
     () => {
       const base = ${queriesJson};
-      return picked ? base.map((q) => ({ ...q, node: picked })) : base;
+      if (!pick) return base;
+      if (pick.filter) return base.map((q) => followFilter(q, pick.filter));
+      return base.map((q) => ({ ...q, node: pick.entity }));
     },
-    [picked],
+    [pick],
   );`;
 }
 
@@ -571,7 +803,13 @@ function subFor(refs: DataRef[], title: string): string | null {
   const schema = schemaFor(ids[0]);
   if (!schema) return null;
   const short = schema.short ?? schema.name;
-  return title === schema.name || title === short ? null : short;
+  // A filtered chip's title already opens with the stream — "San Antonio
+  // permits · Re roof" — so the header would say it twice.
+  return title === schema.name ||
+    title === short ||
+    title.startsWith(`${schema.name} · `)
+    ? null
+    : short;
 }
 
 /**
@@ -588,6 +826,11 @@ function subFor(refs: DataRef[], title: string): string | null {
 function fanoutOf(
   ref: DataRef,
 ): { key: string; omit: string[]; only?: string[] } | null {
+  // A tally broken down by a column is one series per value of it — types,
+  // classes, ZIPs — whether it covers the city or one ZIP. The API groups
+  // by the column, so the pivot reads it straight off the rows.
+  if (ref.tally?.by && ref.kind !== "query")
+    return { key: ref.tally.by, omit: [] };
   if (ref.kind === "entity" || ref.kind === "query")
     return null;
   const schema = schemaFor(ref.schemaId);
@@ -703,6 +946,10 @@ const chart: ComponentDef = {
       label: "Window",
       choices: WINDOWS,
       fallback: "-24h",
+      forRefs: (refs) =>
+        refs.some(isTally)
+          ? { choices: TALLY_WINDOWS, fallback: "-90d" }
+          : undefined,
     },
     {
       key: "shape",
@@ -743,6 +990,8 @@ const chart: ComponentDef = {
   accepts: (refs) =>
     refs.length === 0
       ? { ok: false, why: "Pick a series." }
+      : mixesTally(refs)
+        ? { ok: false, why: TALLY_MIX_WHY }
       : refs.length > 8
         ? {
             ok: false,
@@ -784,15 +1033,25 @@ const chart: ComponentDef = {
     // A day of a five-minute feed is 288 rows; a week is 2,016 — and a
     // fanned-out stream multiplies that by its entities. The limit follows
     // the window instead of quietly truncating the long one.
-    const limit = fan
-      ? fanoutLimit(
-          o.window,
-          grainOf(refs[0]),
-          fan.only?.length,
-        )
-      : o.window === "-7d"
-        ? 2000
-        : 500;
+    //
+    // A tally asks for buckets, not rows: a year of weeks is 53 of them, and
+    // broken down it is 53 per value — fifty ZIPs is under three thousand.
+    const tally = refs.some(isTally);
+    const win = chosen(chart, "window", refs, o);
+    const bucket = tally ? (TALLY_BUCKET[win] ?? "1d") : null;
+    const limit = tally
+      ? fan
+        ? 5000
+        : 400
+      : fan
+        ? fanoutLimit(
+            o.window,
+            grainOf(refs[0]),
+            fan.only?.length,
+          )
+        : o.window === "-7d"
+          ? 2000
+          : 500;
     // A fanned-out chart is always several series, whatever its shape, so it
     // always carries the legend.
     const legend = stacked || fan;
@@ -800,7 +1059,10 @@ const chart: ComponentDef = {
     // A wire retargets per-node queries at the picked entity; a fan-out
     // discovers its own entities and a spread is a derived pair, so neither
     // can follow one.
-    const follow = fan || spread ? null : followOf(o);
+    // A breakdown discovers its own series, so it cannot follow a node —
+    // but a tally follows by filter, which narrows the breakdown instead.
+    const follow = spread || (fan && !tally) ? null : followOf(o);
+    const suffix = tally ? followSuffix(refs[0]) : "";
 
     /*
       A second y-axis, when any series was sent to it. Only for overlapping
@@ -830,7 +1092,9 @@ const chart: ComponentDef = {
     const headerUnit =
       dual && rightUnit && rightUnit !== leftUnit
         ? `${leftUnit} · ${rightUnit}`
-        : s[0].unit;
+        : bucket
+          ? `${s[0].unit} / ${bucket === "7d" ? "week" : "day"}`
+          : s[0].unit;
     const tipUnits = dual
       ? ` units={${JSON.stringify(Object.fromEntries(s.map((x) => [x.key, x.unit])))}}`
       : "";
@@ -842,15 +1106,17 @@ const chart: ComponentDef = {
             // A subset chip filters at the server: nine hubs' rows, not
             // 1,118 nodes' rows thinned after delivery.
             ...(fan.only ? { node: fan.only } : {}),
-            start: o.window,
+            start: win,
             limit,
+            ...(bucket ? tallyQuery(refs[0], bucket) : {}),
           },
         ]
-      : s.map((x) => ({
+      : s.map((x, n) => ({
           dataset: x.dataset,
           node: x.node,
-          start: o.window,
+          start: win,
           limit,
+          ...(bucket ? tallyQuery(refs[n], bucket) : {}),
         }));
 
     const setup = fan
@@ -889,7 +1155,8 @@ const chart: ComponentDef = {
       );
       names = names.filter((e) => keep.has(e));
     }
-    return { merged: [...by.values()].sort((a, b) => a.t - b.t), names };
+    const sorted = [...by.values()].sort((a, b) => a.t - b.t);
+    return { merged: ${bucket ? "fillTally(sorted, names)" : "sorted"}, names };
   }, [rows]);
 
   const SERIES = names.map((e, n) => ({ key: e, label: e, color: ${JSON.stringify(PALETTE)}[n % 8] }));`
@@ -916,7 +1183,7 @@ const chart: ComponentDef = {
     }`
         : ""
     }
-    return sorted;
+    return ${bucket ? `fillTally(sorted, ${JSON.stringify(s.map((x) => x.key))})` : "sorted"};
   }, [rows]);
 ${
   stacked
@@ -996,7 +1263,7 @@ ${
   const SOURCE_TZ = ${JSON.stringify(sourceTz(refs))};
 ${followSnippet(follow, JSON.stringify(queries, null, 2).replace(/\n/g, "\n      "))}
   const { rows, error, loading, fresh } = useSeries(queries, ${refreshMs(refs)});
-${setup}
+${setup}${bucket ? `\n  ${tallyFillCode(bucket)}` : ""}
 ${orderMemo}
   /*
     Evenly spaced clock ticks, generated from the domain rather than left to
@@ -1036,9 +1303,11 @@ ${orderMemo}
     if (merged.length < 2) return { ticks: undefined, labels: null, tall: false };
     const lo = merged[0].t, hi = merged[merged.length - 1].t;
     const HOUR = 3600000, DAY = 86400000;
-    const steps = [15 * 60000, 30 * 60000, HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY];
+    // Weeks and four-week steps are for a tally's quarter or year; nothing
+    // read at intervals spans far enough to reach them.
+    const steps = [15 * 60000, 30 * 60000, HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY, 7 * DAY, 14 * DAY, 28 * DAY, 56 * DAY];
     const fit = plotW > 0 ? Math.max(4, Math.floor(plotW / 48)) : 7;
-    const step = steps.find((x) => (hi - lo) / x <= fit) || 2 * DAY;
+    const step = steps.find((x) => (hi - lo) / x <= fit) || 56 * DAY;
     // Daily ticks land on the display zone's own midnights; sub-daily steps
     // stay epoch-aligned, which is hour-aligned for every whole-hour zone.
     const off = step >= DAY ? tzOffsetMs(lo, tz) : 0;
@@ -1061,9 +1330,9 @@ ${orderMemo}
     return { ticks, labels, tall };
   }, [merged, plotW, tz]);
   return (
-    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill sub={${JSON.stringify(subFor(refs, title))}} title=${
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill${bucket ? " day" : ""} sub={${JSON.stringify(subFor(refs, title))}} title=${
       follow !== null
-        ? `{picked ? picked : ${JSON.stringify(title)}}`
+        ? `{picked ? picked + ${JSON.stringify(suffix)} : ${JSON.stringify(title)}}`
         : JSON.stringify(title)
     } unit=${JSON.stringify(headerUnit)} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div ref={plotBox} style={{ inset: 0, position: "absolute" }}>
@@ -1094,7 +1363,7 @@ ${
     : `          <YAxis tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={52} />
           <ReferenceLine y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />`
 }
-          <Tooltip content={<ChartTip unit=${JSON.stringify(leftUnit)}${tipUnits} tz={tz} />} />
+          <Tooltip content={<ChartTip unit=${JSON.stringify(leftUnit)}${tipUnits} tz={tz}${bucket ? ` day="${bucket === "7d" ? "week" : "day"}" digits={0}` : ""} />} />
 ${
   legend
     ? `          {!NAKED && <Legend wrapperStyle={{ fontSize: 10.5, color: "var(--muted)" }} iconSize={9} />}
@@ -1151,7 +1420,12 @@ const scatter: ComponentDef = {
   // Exactly two: an x and a y. A third series has no axis left to sit on, and
   // one has nothing to be plotted against.
   accepts: (refs) =>
-    refs.length === 2 &&
+    refs.some(isTally)
+      ? {
+          ok: false,
+          why: "Permit counts have no shared instants to pair — compare them in a chart.",
+        }
+      : refs.length === 2 &&
     !fanoutOf(refs[0]) &&
     !fanoutOf(refs[1])
       ? { ok: true }
@@ -1349,14 +1623,27 @@ const bar: ComponentDef = {
       ],
       fallback: "v",
     },
+    {
+      // A bar of permits is a total over a span — the latest day alone is
+      // one morning's filing. Offered only when the bars are tallies.
+      key: "span",
+      label: "Over",
+      choices: TALLY_WINDOWS,
+      fallback: "-30d",
+      forRefs: (refs) => (refs.some(isTally) ? undefined : "hidden"),
+    },
   ],
   accepts: (refs) =>
     refs.length === 0
       ? { ok: false, why: "Pick some series." }
+      : mixesTally(refs)
+        ? { ok: false, why: TALLY_MIX_WHY }
       : refs.length === 1 && !fanoutOf(refs[0])
         ? {
             ok: false,
-            why: "One value is a ticker — add a second series to compare.",
+            why: isTally(refs[0])
+              ? "One total is a ticker — break it down (By: Type, ZIP…) to compare bars."
+              : "One value is a ticker — add a second series to compare.",
           }
         : refs.length > 8
           ? {
@@ -1382,6 +1669,13 @@ const bar: ComponentDef = {
       : titleFor(refs, s);
     const horizontal = o.orient === "h";
 
+    // A tally's bar is one total over the span (`interval: all`): the API
+    // answers one row per group, busiest first, so a breakdown by contractor
+    // is the top of the list rather than an alphabetical slice of it.
+    const tally = refs.some(isTally);
+    const span = tally ? chosen(bar, "span", refs, o) : null;
+    // A tally's bar follows an area picker's filter; nothing else follows.
+    const follow = tally ? followOf(o) : null;
     const queries = fan
       ? // Two intervals' worth of rows covers every entity even when the
         // newest interval is still filling in. A subset filters at the server
@@ -1390,15 +1684,23 @@ const bar: ComponentDef = {
           {
             dataset: s[0].dataset,
             ...(fan.only ? { node: fan.only } : {}),
-            limit: fan.only
-              ? Math.max(24, fan.only.length * 2)
-              : 24,
+            limit: tally
+              ? 50
+              : fan.only
+                ? Math.max(24, fan.only.length * 2)
+                : 24,
+            ...(span
+              ? { start: span, ...tallyQuery(refs[0], "all") }
+              : {}),
           },
         ]
-      : s.map((x) => ({
+      : s.map((x, n) => ({
           dataset: x.dataset,
           node: x.node,
           limit: 1,
+          ...(span
+            ? { start: span, ...tallyQuery(refs[n], "all") }
+            : {}),
         }));
 
     const dataMemo = fan
@@ -1422,12 +1724,16 @@ const bar: ComponentDef = {
     const names = [...latest.keys()].sort();
     const out = names
       .map((e, n) => ({
-        name: e,
-        full: e,
+        name: ${tally ? "prettyTally(e)" : "e"},
+        full: ${tally ? "prettyTally(e)" : "e"},
         fill: ${JSON.stringify(PALETTE)}[n % 8],
         v: latest.get(e),
       }))
-      .filter((d) => d.v != null)
+      .filter((d) => d.v != null)${
+        // A breakdown can hold hundreds of values; the eight that fit are
+        // the eight largest, not the first eight in the alphabet.
+        tally ? "\n      .sort((a, b) => b.v - a.v)" : ""
+      }
       .slice(0, 8);
     if (${JSON.stringify(o.sort)} === "size") out.sort((a, b) => b.v - a.v);
     return out;
@@ -1468,11 +1774,9 @@ const bar: ComponentDef = {
         "ResponsiveContainer",
       ],
       code: `function ${name}({ w, h }) {
-  const { rows, error, loading } = useSeries(
-    ${JSON.stringify(queries, null, 2).replace(/\n/g, "\n    ")},
-    ${refreshMs(refs)},
-  );
-${dataMemo}
+${followSnippet(follow, JSON.stringify(queries, null, 2).replace(/\n/g, "\n      "))}
+  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
+${tally ? `  ${TALLY_FORMAT}\n` : ""}${dataMemo}
 
   function BarTip({ active, payload }) {
     // The bar being read, for the double click that asks about it
@@ -1490,14 +1794,14 @@ ${dataMemo}
         <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>{d.full}</div>
         <div style={{ color: "var(--ink)" }}>
           <span style={{ color: d.fill }}>■ </span>
-          <strong>{Number(d.v).toFixed(2)}</strong> ${s[0].unit}
+          <strong>{${tally ? `fmtTally(d.v, ${JSON.stringify(s[0].unit)})` : "Number(d.v).toFixed(2)"}}</strong>${tally && s[0].unit === "$" ? "" : ` ${s[0].unit}`}
         </div>
       </div>
     );
   }
 
   return (
-    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(title)} sub={${JSON.stringify(subFor(refs, title))}} unit=${JSON.stringify(s[0].unit)} loading={loading} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill${tally ? " day" : ""} title=${follow !== null ? `{picked ? picked + ${JSON.stringify(followSuffix(refs[0]))} : ${JSON.stringify(title)}}` : JSON.stringify(title)} sub={${JSON.stringify(subFor(refs, title))}} unit=${JSON.stringify(s[0].unit)} loading={loading} error={error}>
 ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} ${horizontal ? 'layout="vertical" ' : ""}margin={{ top: 4, right: 8, bottom: 0, left: ${horizontal ? 4 : -12} }} barCategoryGap="22%">
@@ -1505,7 +1809,7 @@ ${mockTag(anyMock)}      <div style={{ inset: 0, position: "absolute" }}>
 ${
   horizontal
     ? `          <XAxis type="number" tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} />
-          <YAxis type="category" dataKey="name" width={92} tick={{ fill: "var(--faint)", fontSize: 10.5 }} stroke="var(--line)" tickLine={false} />`
+          <YAxis type="category" dataKey="name" width={${tally ? 128 : 92}} tick={{ fill: "var(--faint)", fontSize: 10.5 }} stroke="var(--line)" tickLine={false} />`
     : `          <XAxis dataKey="name" tick={{ fill: "var(--faint)", fontSize: 10.5 }} stroke="var(--line)" tickLine={false} interval={0} />
           <YAxis tick={{ fill: "var(--faint)", fontSize: 11 }} stroke="var(--line)" tickLine={false} width={52} />`
 }
@@ -1933,6 +2237,9 @@ const ticker: ComponentDef = {
         { value: "day", label: "24 hours ago" },
       ],
       fallback: "prev",
+      // A tally's ticker is always last full week against the one before —
+      // the only comparison a count that lands a day late can honestly make.
+      forRefs: (refs) => (refs.some(isTally) ? "hidden" : undefined),
     },
   ],
   /*
@@ -1943,7 +2250,12 @@ const ticker: ComponentDef = {
     draw.
   */
   accepts: (refs) =>
-    refs.length === 1
+    refs.length === 1 && isTally(refs[0]) && refs[0].tally?.by
+      ? {
+          ok: false,
+          why: "A ticker is one number — drop the breakdown, or use a bar.",
+        }
+      : refs.length === 1
       ? { ok: true }
       : {
           ok: false,
@@ -1956,6 +2268,10 @@ const ticker: ComponentDef = {
     const s = series(refs);
     const name = `Ticker${i}`;
     const day = o.compare === "day";
+    // A tally's ticker counts weeks. Its newest row is this week so far and
+    // a day late besides, so the number is the last full week and the move
+    // is against the week before it.
+    const tally = isTally(refs[0]);
     const follow =
       refs.length === 1 && fanoutOf(refs[0])
         ? null
@@ -1966,12 +2282,22 @@ const ticker: ComponentDef = {
 ${followSnippet(
   follow,
   JSON.stringify(
-    s.map((x) => ({
-      dataset: x.dataset,
-      node: x.node,
-      start: "-2h",
-      limit: 2,
-    })),
+    s.map((x, n) =>
+      tally
+        ? {
+            dataset: x.dataset,
+            node: x.node,
+            start: "-35d",
+            limit: 8,
+            ...tallyQuery(refs[n], "7d"),
+          }
+        : {
+            dataset: x.dataset,
+            node: x.node,
+            start: "-2h",
+            limit: 2,
+          },
+    ),
     null,
     2,
   ).replace(/\n/g, "\n      "),
@@ -1980,7 +2306,20 @@ ${followSnippet(
   const tz = useTz(${JSON.stringify(sourceTz(refs))});
 
   const cell = useRef(null);
-
+${
+  tally
+    ? `  ${TALLY_FORMAT}
+  // The last full week and the one before, on the API's grid: Mondays,
+  // stamped at noon. A week with no row issued nothing, which is zero.
+  const WEEK = 604800000;
+  const LAST = Math.floor((Date.now() - 345600000) / WEEK) * WEEK + 345600000 + 43200000 - WEEK;
+  const weekOf = (recent, column, t) => {
+    const r = recent.find((x) => Date.parse(x.interval_start_utc) === t);
+    return r ? (r[column] ?? 0) : 0;
+  };
+`
+    : ""
+}
   const cells = ${JSON.stringify(
     s.map((x) => ({
       label: x.label,
@@ -1990,8 +2329,8 @@ ${followSnippet(
     })),
   )}.map((c, n) => {
     const recent = rows[n] || [];
-    const now = recent[0] ? recent[0][c.column] : null;
-    const prev = ${day ? "recent[recent.length - 1]" : "recent[1]"} ? ${day ? "recent[recent.length - 1]" : "recent[1]"}[c.column] : null;
+    const now = ${tally ? "recent.length ? weekOf(recent, c.column, LAST) : null" : "recent[0] ? recent[0][c.column] : null"};
+    const prev = ${tally ? "recent.length ? weekOf(recent, c.column, LAST - WEEK) : null" : `${day ? "recent[recent.length - 1]" : "recent[1]"} ? ${day ? "recent[recent.length - 1]" : "recent[1]"}[c.column] : null`};
     // Keyed on the advance so a second one inside the flash restarts it.
     const flash = fresh.at[n] != null ? "f" + fresh.seq : null;
     return { ...c, now, prev, flash, delta: now != null && prev != null ? now - prev : null };
@@ -1999,7 +2338,9 @@ ${followSnippet(
 
   return (
     <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} title={${
-      follow !== null ? "picked ?? cells[0].label" : "cells[0].label"
+      follow !== null
+        ? `picked ? picked + ${JSON.stringify(tally ? followSuffix(refs[0]) : "")} : cells[0].label`
+        : "cells[0].label"
     }} sub={${JSON.stringify(s[0]?.streamShort ?? "Ticker")}} loading={loading} error={error} fill minH={${TICKER_MIN_H}} minW={${TICKER_MIN_W}} headerAsOf={false} expand={false}>
       {/* The number is the tile: named once in the header — the entity
           leads, since it is what tells two tickers apart — it takes the
@@ -2011,7 +2352,7 @@ ${followSnippet(
           const mock = c.mock && (
             <span style={{ border: "1px dashed var(--info)", borderRadius: ".14em", color: "var(--info)", fontFamily: "var(--mono)", fontSize: ".3em", padding: "0 .3em", textTransform: "uppercase" }}>mock</span>
           );
-          const number = c.now == null ? "—" : c.now.toFixed(2);
+          const number = ${tally ? "fmtTally(c.now, c.unit)" : 'c.now == null ? "—" : c.now.toFixed(2)'};
           // The move is an arrow and a percentage to the right of the
           // number, nothing else — the arrow carries the sign, so the
           // figure is a magnitude, and a whole one: a ticker is glanced at,
@@ -2033,7 +2374,7 @@ ${followSnippet(
               title={"Newest interval: " + tzDate(asOf, tz) + " " + tzTime(asOf, tz) + " " + tzShort(asOf, tz)}
               style={{ color: "var(--info)", fontFamily: "var(--mono)", fontSize: ".3em", letterSpacing: ".04em", whiteSpace: "nowrap" }}
             >
-              <Clock /> {tzTime(asOf, tz)}
+              <Clock /> {${tally ? '"wk " + tzDate(LAST, tz)' : "tzTime(asOf, tz)"}}
             </span>
           );
           const moveEl = move && (
@@ -2087,6 +2428,100 @@ ${followSnippet(
   },
 };
 
+/**
+ * The table's Records view: the events themselves, newest first.
+ *
+ * A count says how many re-roofs; this says which — the address's ZIP, the
+ * work as the city wrote it, the value and who pulled it. It is the one view
+ * of an event stream that reads rows rather than buckets, so it takes the
+ * filter and none of the rollup, and its columns are the stream's declared
+ * `list` rather than one per series.
+ */
+function recordsEmit(
+  refs: DataRef[],
+  i: number,
+  follow: number | null,
+): Emitted {
+  const ref = refs[0];
+  const schema = schemaFor(ref.schemaId);
+  const cols = schema?.tally?.list ?? [];
+  const n = node(ref);
+  const query = {
+    dataset: target(ref),
+    ...(n
+      ? { node: n }
+      : ref.subset
+        ? { node: ref.subset.entities }
+        : {}),
+    start: "-30d",
+    limit: 150,
+    ...tallyFilter(ref),
+  };
+  const lead = schema ? `${schema.name} · ` : "";
+  const sub = ref.label.startsWith(lead)
+    ? ref.label.slice(lead.length)
+    : null;
+  const title = `Latest ${schema?.short ?? schema?.name ?? ref.label}`;
+  return {
+    imports: [],
+    code: `function Table${i}({ w, h }) {
+${followSnippet(follow, `[${JSON.stringify(query)}]`)}
+  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
+  const tz = useTz(${JSON.stringify(sourceTz(refs))});
+  const COLS = ${JSON.stringify(cols)};
+  const KEY = ${JSON.stringify(schema?.tally?.key ?? "interval_start_utc")};
+  ${TALLY_FORMAT}
+  const shown = (r, c) => {
+    const v = r[c.column];
+    if (v == null || v === "") return "—";
+    if (c.kind === "date") return tzDayKey(Date.parse(v), tz);
+    if (c.kind === "money") return fmtTally(v, "$");
+    return String(v);
+  };
+  return (
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill day title=${follow !== null ? `{picked ? "Latest jobs · " + picked : ${JSON.stringify(title)}}` : JSON.stringify(title)} sub={${JSON.stringify(sub)}} loading={loading} error={error}>
+      <div style={{ inset: 0, overflow: "auto", position: "absolute" }}>
+        <table>
+          <thead>
+            <tr>
+              {COLS.map((c) => (
+                <th key={c.column} style={{ textAlign: c.kind === "money" ? "right" : "left", whiteSpace: "nowrap" }}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(rows[0] || []).map((r, k) => (
+              <tr key={String(r[KEY] ?? k)}>
+                {COLS.map((c) => (
+                  <td
+                    key={c.column}
+                    title={c.kind ? undefined : String(r[c.column] ?? "")}
+                    style={{
+                      color: c.kind === "date" ? "var(--faint)" : undefined,
+                      fontFamily: c.kind === "date" ? "var(--mono)" : undefined,
+                      fontSize: c.kind === "date" ? 11 : undefined,
+                      fontVariantNumeric: "tabular-nums",
+                      maxWidth: c.kind ? undefined : 260,
+                      overflow: "hidden",
+                      textAlign: c.kind === "money" ? "right" : "left",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {shown(r, c)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+}`,
+  };
+}
+
 const table: ComponentDef = {
   kind: "table",
   name: "Table",
@@ -2097,6 +2532,10 @@ const table: ComponentDef = {
       label: "Window",
       choices: WINDOWS,
       fallback: "-6h",
+      forRefs: (refs) =>
+        refs.some(isTally)
+          ? { choices: TALLY_WINDOWS, fallback: "-30d" }
+          : undefined,
     },
     {
       key: "rows",
@@ -2108,33 +2547,73 @@ const table: ComponentDef = {
       ],
       fallback: "24",
     },
+    {
+      // An event stream is read two ways: counted (a row a day or a week)
+      // or listed (a row a permit). One tally at a time for the list — its
+      // columns are the stream's, not one per series.
+      key: "show",
+      label: "Show",
+      choices: [
+        { value: "totals", label: "Totals" },
+        { value: "records", label: "Each record" },
+      ],
+      fallback: "totals",
+      forRefs: (refs) =>
+        refs.length === 1 && isTally(refs[0]) ? undefined : "hidden",
+    },
   ],
   accepts: (refs) =>
     refs.length === 0
       ? { ok: false, why: "Pick a series." }
-      : { ok: true },
+      : mixesTally(refs)
+        ? { ok: false, why: TALLY_MIX_WHY }
+        : refs.some((r) => isTally(r) && r.tally?.by)
+          ? {
+              ok: false,
+              why: "A table lists totals or records — drop the breakdown, or compare the groups in a bar.",
+            }
+          : { ok: true },
   emit(refs, i, o) {
+    const tally = refs.some(isTally);
+    if (tally && chosen(table, "show", refs, o) === "records")
+      return recordsEmit(refs, i, followOf(o));
     const s = series(refs);
     const name = `Table${i}`;
+    const win = tally ? chosen(table, "window", refs, o) : null;
+    const bucket = win ? (TALLY_BUCKET[win] ?? "1d") : null;
+    const week = bucket === "7d";
+    const heading = tally ? (week ? "By week" : "By day") : "Recent intervals";
+    const follow = tally ? followOf(o) : null;
     return {
       imports: [],
       code: `function ${name}({ w, h }) {
-  const { rows, error, loading } = useSeries(
-    ${JSON.stringify(
-      s.map((x) => ({
-        dataset: x.dataset,
-        node: x.node,
-        start: "-6h",
-        limit: 40,
-      })),
+${followSnippet(
+    follow,
+    JSON.stringify(
+      s.map((x, n) =>
+        bucket
+          ? {
+              dataset: x.dataset,
+              node: x.node,
+              start: win,
+              limit: 400,
+              ...tallyQuery(refs[n], bucket),
+            }
+          : {
+              dataset: x.dataset,
+              node: x.node,
+              start: "-6h",
+              limit: 40,
+            },
+      ),
       null,
       2,
-    ).replace(/\n/g, "\n    ")},
-    ${refreshMs(refs)},
-  );
+    ).replace(/\n/g, "\n      "),
+  )}
+  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
 
-  const cols = ${JSON.stringify(s.map((x) => ({ label: x.label, column: x.column, unit: x.unit })))};
-  const tz = useTz(${JSON.stringify(sourceTz(refs))});
+  const cols = ${JSON.stringify(s.map((x, n) => ({ label: tally && refs.length === 1 ? measureLabel(refs[n]) : x.label, column: x.column, unit: x.unit })))};
+  const tz = useTz(${JSON.stringify(sourceTz(refs))});${tally ? `\n  ${TALLY_FORMAT}` : ""}
   const merged = React.useMemo(() => {
     const by = new Map();
     cols.forEach((c, n) => {
@@ -2149,14 +2628,14 @@ const table: ComponentDef = {
   }, [rows]);
 
   return (
-    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} title="Recent intervals" sub={${JSON.stringify(subFor(refs, "Recent intervals"))}} loading={loading} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h}${tally ? " day" : ""} title=${follow !== null ? `{picked ? picked + ${JSON.stringify(` · ${heading.toLowerCase()}`)} : ${JSON.stringify(heading)}}` : JSON.stringify(heading)} sub={${JSON.stringify(subFor(refs, heading))}} loading={loading} error={error}>
       <div style={{ maxHeight: 260, overflowY: "auto" }}>
         <table>
           <thead>
             <tr>
               {/* The zone once, on the column, not per row: a table of times
                   each wearing "CST" is a table half made of the same word. */}
-              <th>Interval ({tzShort(Date.now(), tz)})</th>
+              <th>${tally ? (week ? "Week of" : "Day") : "Interval ({tzShort(Date.now(), tz)})"}</th>
               {cols.map((c) => (
                 <th key={c.label} style={{ textAlign: "right" }}>{c.label} {c.unit && "(" + c.unit + ")"}</th>
               ))}
@@ -2165,12 +2644,12 @@ const table: ComponentDef = {
           <tbody>
             {merged.map((r) => (
               <tr key={r.t}>
-                <td style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 11 }}>
-                  {tzTime(Date.parse(r.t), tz)}
+                <td style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 11, whiteSpace: "nowrap" }}>
+                  {${tally ? "tzDayKey(Date.parse(r.t), tz)" : "tzTime(Date.parse(r.t), tz)"}}
                 </td>
                 {cols.map((c, n) => (
                   <td key={c.label} style={{ fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
-                    {r["c" + n] == null ? "—" : Number(r["c" + n]).toFixed(2)}
+                    {${tally ? 'fmtTally(r["c" + n], c.unit)' : 'r["c" + n] == null ? "—" : Number(r["c" + n]).toFixed(2)'}}
                   </td>
                 ))}
               </tr>
@@ -2351,6 +2830,11 @@ const map: ComponentDef = {
       // draws. A whole-stream query of one asks the API for only the rows
       // it can draw: PJM's bus stream is 13,967 entities and 1,101 places.
       const partial = schema.locatedCount !== undefined;
+      // A pin of an event stream is one event, not its ZIP: keyed on the
+      // ZIP, the newest permit in each would stand for all of them, at its
+      // own address. So a tally pins by its record key and draws the newest
+      // few hundred that match its filter.
+      const record = isTally(own[0]) ? schema.tally?.key : undefined;
       return [
         {
           ref: own[0],
@@ -2360,14 +2844,18 @@ const map: ComponentDef = {
           // `bus`, and a placement path that assumed one column drew one
           // stream and silently nothing for the other.
           entity:
-            schema.entityColumn ?? schema.entityKey ?? "node",
+            record ??
+            schema.entityColumn ??
+            schema.entityKey ??
+            "node",
           subset,
           partial,
-          count:
-            subset?.entities.length ??
-            (partial
-              ? schema.locatedCount!
-              : schema.entities.count),
+          count: record
+            ? 250
+            : (subset?.entities.length ??
+              (partial
+                ? schema.locatedCount!
+                : schema.entities.count)),
         },
       ];
     });
@@ -2513,7 +3001,7 @@ const map: ComponentDef = {
           label: locatedRef.label,
           dense,
           // One query per set, in this order; the placed memo reads each by its own entity column.
-          sets: locatedSets.map((set) => ({ entity: set.entity, label: set.ref.label })),
+          sets: locatedSets.map((set) => ({ entity: set.entity, label: set.ref.label, events: set.entity === set.schema.tally?.key })),
         })
       : "null"
   };
@@ -2622,6 +3110,12 @@ ${
         .map(
           (set) =>
             `      { dataset: ${JSON.stringify(set.dataset)}, ${
+              // A tally's filter narrows the pins as it narrows a count:
+              // re-roofs on the map are the re-roofs in the chart.
+              Object.entries(tallyFilter(set.ref))
+                .map(([k, v]) => `${k}: ${JSON.stringify(v)}, `)
+                .join("")
+            }${
               set.subset
                 ? `node: ${JSON.stringify(set.subset.entities)}, `
                 : set.partial
@@ -2717,7 +3211,9 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           lat = POINTS[id].lat; lon = POINTS[id].lon; exact = false;
         }
         if (typeof lat !== "number" || typeof lon !== "number") return;
-        out[id] = { lon, lat, label: String(id), value: r[COLUMN], exact, at: Date.parse(r.interval_start_utc) || null };
+        // An event pin has no measure of its own — one permit is one mark —
+        // so it carries 1, and the ramp below draws every one alike.
+        out[id] = { lon, lat, label: String(id), value: set.events ? 1 : r[COLUMN], exact, at: Date.parse(r.interval_start_utc) || null };
       }));
     } else {
       NODES.forEach((n) => {
@@ -3863,9 +4359,15 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       is the legend's "< 0".
     */
     const band = (v) => SCALE.reduce((c, s, i) => (i > 0 && v >= s.at ? s.color : c), SCALE[0].color);
+    // Every value alike — one event per pin, or a stream flat at this
+    // instant — has no ramp to draw, and an interpolation over equal stops is
+    // an expression Mapbox refuses, which left the map silently empty.
+    const flat = !SCALE && sorted[0] === sorted[sorted.length - 1];
     const colorExpr = SCALE
       ? ["step", ["get", "v"], SCALE[0].color, ...SCALE.slice(1).flatMap((s) => [s.at, s.color])]
-      : ["interpolate", ["linear"], ["get", "v"],
+      : flat
+        ? "#e8ff3d"
+        : ["interpolate", ["linear"], ["get", "v"],
           pct(0.05), "#2b6cb0", pct(0.5), "#7dd3fc", pct(0.8), "#e8ff3d", pct(0.95), "#fb8b5c", pct(1), "#f4666b"];
 
     /*
@@ -4809,11 +5311,12 @@ ${
   follow !== null
     ? `  // Wired: tile ${follow}'s pick is what {pick} says.
   const FOLLOW = ${follow};
-  const [picked, setPicked] = useState(null);
+  const first = (window.__dryosPicks || {})[FOLLOW];
+  const [picked, setPicked] = useState(first ? first.label || first.entity || null : null);
   useEffect(() => {
     const h = (e) => {
       const d = e.detail;
-      if (d && d.source === FOLLOW) setPicked(d.entity || null);
+      if (d && d.source === FOLLOW) setPicked(d.label || d.entity || null);
     };
     window.addEventListener("dryos:pick", h);
     return () => window.removeEventListener("dryos:pick", h);
@@ -4840,6 +5343,221 @@ ${
   },
 };
 
+/**
+ * What a follower's title adds after the pick: its own narrowing that the
+ * pick leaves alone — "· by Contractor", "· Replace" — so two tiles wired to
+ * one picker do not both read "HVAC · 3 ZIPs". The picker's own columns (the
+ * lead dimension and the entity) are the pick's to say.
+ */
+function followSuffix(ref: DataRef): string {
+  const schema = schemaFor(ref.schemaId);
+  if (!schema || !ref.tally) return "";
+  const own = new Set([
+    schema.tally?.dims[0]?.column,
+    schema.entityColumn ?? schema.entityKey,
+  ]);
+  const parts = [
+    ...Object.entries(ref.tally.where ?? {})
+      .filter(([c]) => !own.has(c))
+      .map(([, vs]) => vs.join(" or ")),
+    ...(ref.tally.search ? [`“${ref.tally.search}”`] : []),
+    ...(ref.tally.by ? [`by ${tallyDimLabel(schema, ref.tally.by).toLowerCase()}`] : []),
+  ];
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
+/**
+ * Your trade and your area, as one tile — the answer to "which ZIPs are
+ * mine, and what is happening in them".
+ *
+ * An owner does not start from a ZIP; they start from the work they do and
+ * the part of town they drive. So the tile leads with the trade (the event
+ * stream's first `tally` dimension — "Work on" for permits), ranks every ZIP
+ * by jobs in it with the change against the span before and, when a recipe
+ * names one, the share a follow-up filter holds (replacements, for a trade
+ * that sells them), and a tap on a row adds the ZIP to the area. Trade and
+ * area leave as one pick carrying a filter, which every tile wired to it
+ * merges into its own permit queries — so the page reads "HVAC in my three
+ * ZIPs" wherever it is looked at. A ZIP row says what it holds, which is the
+ * thing a bare list of ZIP codes never did.
+ *
+ * `lead` (the trade it opens on) and `share` ("action=Replace") ride in the
+ * options undeclared, set by a recipe; the trade can be changed in the tile
+ * for the session. The pick is kept on the page (`__dryosPicks`) as well as
+ * sent, because the picker speaks on arrival and a follower may mount after.
+ */
+const area: ComponentDef = {
+  kind: "area",
+  name: "Area picker",
+  blurb:
+    "Your trade and your ZIP codes: every ZIP ranked by jobs, with its change. Tiles wired to it follow what you pick.",
+  options: [
+    {
+      key: "span",
+      label: "Compare",
+      choices: [
+        { value: "28", label: "4 weeks vs the 4 before" },
+        { value: "91", label: "13 weeks vs the 13 before" },
+      ],
+      fallback: "28",
+    },
+  ],
+  accepts: (refs) => {
+    const schema =
+      refs.length === 1 ? schemaFor(refs[0].schemaId) : undefined;
+    return schema?.tally && isTally(refs[0]) && !refs[0].tally?.by
+      ? { ok: true }
+      : {
+          ok: false,
+          why: "Pick one permit stream, without a breakdown — the picker ranks its ZIP codes.",
+        };
+  },
+  emit(refs, i, o) {
+    const ref = refs[0];
+    const schema = schemaFor(ref.schemaId)!;
+    const lead = schema.tally?.dims[0]?.column ?? "subject";
+    const zip = schema.entityColumn ?? schema.entityKey ?? "zip";
+    const noun = (schema.entities.label ?? "areas")
+      .replace(/ codes?$/i, "")
+      .replace(/s$/, "");
+    const days = Number(o.span) === 91 ? 91 : 28;
+    const f = tallyFilter(ref);
+    const share =
+      typeof o.share === "string" && /^[a-z_]+=[^=]+$/.test(o.share)
+        ? o.share
+        : null;
+    const shareLabel = share
+      ? share.split("=")[1].toLowerCase().slice(0, 5) + "."
+      : "";
+    const start = typeof o.lead === "string" ? o.lead : "";
+    const common = {
+      dataset: target(ref),
+      interval: "all",
+      agg: "sum",
+      stamp: "noon",
+      ...(f.search ? { search: f.search } : {}),
+    };
+    // The name, the bar and the count flex; the change and the share are
+    // short and fixed, so a narrow tile loses bar length before it loses a
+    // number.
+    const cols = `12px 46px minmax(0,1fr) 46px${share ? " 38px" : ""}`;
+    const title = `Where the work is · ${schema.path[2]}`;
+    return {
+      imports: [],
+      code: `function Area${i}({ w, h }) {
+  const DATASET = ${JSON.stringify(target(ref))};
+  const LEAD = ${JSON.stringify(lead)};
+  const ZIP = ${JSON.stringify(zip)};
+  const DAYS = ${days};
+  const BASE = ${JSON.stringify(f.where ?? [])};
+  const SHARE = ${JSON.stringify(share)};
+  const COMMON = ${JSON.stringify(common)};
+  const [lead, setLead] = useState(${JSON.stringify(start)});
+  const [zips, setZips] = useState([]);
+  // The trades with their counts for the select, this span's jobs per ZIP,
+  // the span before for the change, and the share when a recipe names one.
+  const queries = useMemo(() => {
+    const trade = lead ? BASE.concat([LEAD + "=" + lead]) : BASE;
+    const now = { ...COMMON, start: "-" + DAYS + "d", by: ZIP, where: trade, limit: 400 };
+    return [
+      { ...COMMON, start: "-" + DAYS + "d", by: LEAD, where: BASE, limit: 60 },
+      now,
+      { ...now, start: "-" + 2 * DAYS + "d", end: "-" + DAYS + "d" },
+      ...(SHARE ? [{ ...now, where: trade.concat([SHARE]) }] : []),
+    ];
+  }, [lead]);
+  const { rows, error, loading } = useSeries(queries, ${refreshMs(refs)});
+  const trades = useMemo(
+    () => (rows[0] || []).filter((r) => r[LEAD] != null).map((r) => ({ v: String(r[LEAD]), n: r.samples || 0 })),
+    [rows],
+  );
+  const list = useMemo(() => {
+    const prev = new Map((rows[2] || []).map((r) => [r[ZIP], r.samples || 0]));
+    const part = new Map((rows[3] || []).map((r) => [r[ZIP], r.samples || 0]));
+    return (rows[1] || [])
+      .filter((r) => r[ZIP] != null)
+      .map((r) => ({ z: String(r[ZIP]), n: r.samples || 0, p: prev.get(r[ZIP]) || 0, s: part.get(r[ZIP]) || 0 }))
+      .sort((a, b) => b.n - a.n);
+  }, [rows]);
+  const top = list.length ? Math.max(1, list[0].n) : 1;
+  const area = zips.length === 0 ? "all ${noun}s" : zips.length === 1 ? zips[0] : zips.length + " ${noun}s";
+  useEffect(() => {
+    const where = {};
+    if (lead) where[LEAD] = [lead];
+    if (zips.length) where[ZIP] = zips;
+    const detail = { source: ${i}, entity: null, label: (lead || "All work") + " · " + area, filter: { dataset: DATASET, where } };
+    (window.__dryosPicks = window.__dryosPicks || {})[${i}] = detail;
+    // Sent a tick later: on arrival this effect runs before the followers'
+    // own effects have subscribed, and a first word nobody hears leaves
+    // every title on the page naming the stream instead of the trade.
+    const t = setTimeout(() => window.dispatchEvent(new CustomEvent("dryos:pick", { detail })), 0);
+    return () => clearTimeout(t);
+  }, [lead, zips.join(",")]);
+  const toggle = (z) => setZips((cur) => (cur.indexOf(z) === -1 ? cur.concat([z]) : cur.filter((x) => x !== z)));
+  // A percentage of a handful is noise — 2 jobs to 4 is not "doubled" in
+  // any sense an owner acts on — so under five before, the move is a count.
+  const change = (x) => {
+    if (x.p >= 5) {
+      const d = Math.round((100 * (x.n - x.p)) / x.p);
+      return { t: (d > 0 ? "▲ " : d < 0 ? "▼ " : "") + Math.abs(d) + "%", c: d >= 10 ? "var(--up)" : d <= -10 ? "var(--fail)" : "var(--faint)" };
+    }
+    const d = x.n - x.p;
+    return { t: (d > 0 ? "+" : "") + d, c: "var(--faint)" };
+  };
+  return (
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill day title=${JSON.stringify(title)} loading={loading} error={error}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, inset: 0, position: "absolute" }}>
+        <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", fontSize: 13, gap: 6 }}>
+          <span style={{ color: "var(--muted)" }}>I do</span>
+          <select value={lead} onChange={(e) => setLead(e.target.value)} style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, color: "var(--ink)", fontFamily: "inherit", fontSize: 13, padding: "3px 6px" }}>
+            <option value="">All work</option>
+            {lead && !trades.some((t) => t.v === lead) && <option value={lead}>{lead}</option>}
+            {trades.map((t) => (
+              <option key={t.v} value={t.v}>{t.v + " · " + t.n.toLocaleString()}</option>
+            ))}
+          </select>
+          <span style={{ color: "var(--muted)" }}>covering</span>
+          <span style={{ color: "var(--ink)", fontWeight: 600 }}>{area}</span>
+          {zips.length > 0 && (
+            <button onClick={() => setZips([])} style={{ background: "transparent", border: "none", color: "var(--faint)", cursor: "pointer", fontSize: 11, padding: 0 }}>clear</button>
+          )}
+        </div>
+        <div style={{ color: "var(--faint)", display: "grid", fontSize: 10.5, gap: 8, gridTemplateColumns: ${JSON.stringify(cols)}, padding: "0 7px" }}>
+          <span></span>
+          <span>${noun}</span>
+          <span title=${JSON.stringify(`Jobs in the last ${days === 28 ? "4" : "13"} weeks, against the ${days === 28 ? "4" : "13"} before`)}>jobs · ${days === 28 ? "4" : "13"} wk</span>
+          <span style={{ textAlign: "right" }}>change</span>
+          ${share ? `<span style={{ textAlign: "right" }}>${shareLabel}</span>` : ""}
+        </div>
+        <div style={{ display: "flex", flex: 1, flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }}>
+          {list.map((x) => {
+            const on = zips.indexOf(x.z) !== -1;
+            const ch = change(x);
+            return (
+              <button key={x.z} onClick={() => toggle(x.z)} title={on ? "Remove from your area" : "Add to your area"} style={{ alignItems: "center", background: on ? "var(--accent-dim)" : "transparent", border: "1px solid " + (on ? "var(--accent)" : "transparent"), borderRadius: 5, color: "var(--ink)", cursor: "pointer", display: "grid", fontFamily: "inherit", fontSize: 12, gap: 8, gridTemplateColumns: ${JSON.stringify(cols)}, padding: "4px 6px", textAlign: "left" }}>
+                <span style={{ color: on ? "var(--accent)" : "var(--faint)" }}>{on ? "●" : "○"}</span>
+                <span style={{ fontFamily: "var(--mono)" }}>{x.z}</span>
+                <span style={{ alignItems: "center", display: "flex", gap: 6, minWidth: 0 }}>
+                  <span style={{ background: on ? "var(--accent)" : "var(--s2)", borderRadius: 3, flexShrink: 0, height: 7, width: Math.max(3, Math.round((70 * x.n) / top)) + "%" }}></span>
+                  <span style={{ fontVariantNumeric: "tabular-nums" }}>{x.n.toLocaleString()}</span>
+                </span>
+                <span style={{ color: ch.c, fontFamily: "var(--mono)", fontSize: 11, textAlign: "right" }}>{ch.t}</span>
+                ${share ? `<span style={{ color: "var(--muted)", fontFamily: "var(--mono)", fontSize: 11, textAlign: "right" }}>{x.n ? Math.round((100 * x.s) / x.n) + "%" : "—"}</span>` : ""}
+              </button>
+            );
+          })}
+          {list.length === 0 && !loading && (
+            <p style={{ color: "var(--faint)", fontSize: 11.5, margin: "6px 2px" }}>No jobs in this span.</p>
+          )}
+        </div>
+      </div>
+    </Section>
+  );
+}`,
+    };
+  },
+};
+
 export const COMPONENTS: ComponentDef[] = [
   chart,
   scatter,
@@ -4849,6 +5567,7 @@ export const COMPONENTS: ComponentDef[] = [
   table,
   map,
   picker,
+  area,
   text,
 ];
 
@@ -4902,6 +5621,7 @@ export const DEFAULT_LAYOUT: Record<
   table: { w: 6, h: 260 },
   map: { w: 6, h: 300 },
   picker: { w: 3, h: 260 },
+  area: { w: 4, h: 480 },
   // A line of text and the tile's own padding; the width is a guess at a
   // heading over a pair of tiles, and the words say when to widen it.
   text: { w: 4, h: 56 },

@@ -17,6 +17,7 @@ import {
   type ComponentDef,
   type ComponentKind,
   type ComponentSpec,
+  optionFor,
   withDefaults,
 } from "@/lib/workspace/components";
 import { type DataRef, domainOf, schemaById } from "@/lib/workspace/catalog";
@@ -154,6 +155,8 @@ export interface StagedComponent {
   refs?: DataRef[];
   layout: { w: number; h: number };
   wireTo?: number;
+  /** Its place within the group, from the anchor; absent, it stacks. */
+  at?: { x: number; y: number };
 }
 
 export interface TrayPayload {
@@ -423,19 +426,31 @@ export function BuildPanel({
     const color = String(
       WIRE_SLOTS[wiredGroupCount(manifest) % WIRE_SLOTS.length],
     );
+    // A group laid out as a dashboard ghosts as its own bounding box; a
+    // plain group as the stack it lands as.
+    const placed = g.members.every((m) => m.at);
     onDragStateChange({
       kind: g.members[0].kind,
-      layout: {
-        w: Math.max(...g.members.map((m) => m.layout.w)),
-        h:
-          g.members.reduce((a, m) => a + m.layout.h, 0) +
-          (g.members.length - 1) * GRID.gap,
-      },
+      layout: placed
+        ? {
+            w: Math.min(
+              GRID.cols,
+              Math.max(...g.members.map((m) => m.at!.x + m.layout.w)),
+            ),
+            h: Math.max(...g.members.map((m) => m.at!.y + m.layout.h)),
+          }
+        : {
+            w: Math.max(...g.members.map((m) => m.layout.w)),
+            h:
+              g.members.reduce((a, m) => a + m.layout.h, 0) +
+              (g.members.length - 1) * GRID.gap,
+          },
       group: g.members.map((m) => ({
         kind: m.kind,
         refs: m.refs,
         layout: m.layout,
         wireTo: m.wireTo,
+        at: m.at,
         options:
           m.wireTo !== undefined
             ? { ...(m.options ?? {}), wireColor: color }
@@ -853,23 +868,38 @@ export function PreviewPane({
       )}
       {tunable && def.options.length > 0 && (
         <div className="flex shrink-0 flex-wrap gap-1.5">
-          {def.options.map((o) => (
-            <label
-              key={o.key}
-              className="flex items-center gap-1 text-[10.5px] text-faint"
-            >
-              {o.label}
-              <Select
-                value={options[o.key] ?? o.fallback}
-                onChange={(v) => onOption(o.key, v)}
-                options={o.choices.map((ch) => ({
-                  value: ch.value,
-                  label: ch.label,
-                }))}
-                size="sm"
-              />
-            </label>
-          ))}
+          {/*
+            As offered for this selection: permits get their own spans in
+            the same Window select, and a setting the selection has no use
+            for is not shown. A stored value the choices no longer hold
+            reads as the default here — the generator falls back the same way.
+          */}
+          {def.options.flatMap((raw) => {
+            const o = optionFor(raw, refs);
+            if (!o) return [];
+            const value = o.choices.some(
+              (ch) => ch.value === options[o.key],
+            )
+              ? options[o.key]
+              : o.fallback;
+            return [
+              <label
+                key={o.key}
+                className="flex items-center gap-1 text-[10.5px] text-faint"
+              >
+                {o.label}
+                <Select
+                  value={value}
+                  onChange={(v) => onOption(o.key, v)}
+                  options={o.choices.map((ch) => ({
+                    value: ch.value,
+                    label: ch.label,
+                  }))}
+                  size="sm"
+                />
+              </label>,
+            ];
+          })}
         </div>
       )}
 

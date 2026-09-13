@@ -93,6 +93,12 @@ export async function POST(
         refs?: DataRef[];
         layout: { w: number; h: number };
         wireTo?: number;
+        /**
+         * Where the member sits within the group — columns right and pixels
+         * down from the anchor — for a group that is a dashboard rather than
+         * a column. Absent, it stacks under the one before it.
+         */
+        at?: { x: number; y: number };
       }[];
     };
 
@@ -131,6 +137,17 @@ export async function POST(
       const stack = (anchor: { x: number; y: number }): Placed[] => {
         let down = 0;
         return group.map((m) => {
+          // A member that names its place sits there, relative to the
+          // anchor: a published dashboard is a layout, not a column. The
+          // packer steps down anything that lands on ground already taken.
+          if (m.at) {
+            return {
+              x: Math.max(0, Math.min(anchor.x + m.at.x, GRID.cols - m.layout.w)),
+              y: anchor.y + m.at.y,
+              w: m.layout.w,
+              h: m.layout.h,
+            };
+          }
           const box = {
             x: Math.max(0, Math.min(anchor.x, GRID.cols - m.layout.w)),
             y: anchor.y + down,

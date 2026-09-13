@@ -485,6 +485,7 @@ export default function AppPage() {
                     refs: m.refs,
                     layout: m.layout,
                     wireTo: m.wireTo,
+                    at: m.at,
                   })),
                   layout: at ? { ...payload.layout, x: at.x, y: at.y } : undefined,
                 }

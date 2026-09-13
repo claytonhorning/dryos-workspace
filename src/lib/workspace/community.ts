@@ -4,6 +4,8 @@ import {
   makeRef,
   querySnippet,
   schemaById,
+  streamRef,
+  withTally,
   type DataRef,
   type Schema,
 } from "./catalog";
@@ -60,6 +62,12 @@ interface Piece {
   layers?: string[];
   options?: Record<string, string>;
   layout?: { w: number; h: number };
+  /** Which variable the whole-stream reference reads — a tally's count or value. */
+  variable?: string;
+  /** An event stream's narrowing, as the explorer's filters would make it. */
+  tally?: DataRef["tally"];
+  /** Its place within a group, from the anchor; absent, it stacks. */
+  at?: { x: number; y: number };
 }
 
 interface Recipe extends Piece {
@@ -145,6 +153,12 @@ function wholeRef(schema: Schema): DataRef {
 function refsOf(recipe: Piece): DataRef[] | null {
   const schema = schemaById(recipe.schemaId);
   if (!schema) return null;
+  // An event stream's recipe is the explorer's own chip: the variable it
+  // counts or totals, and the narrowing its filters would have made.
+  if (!recipe.entities && (recipe.variable || recipe.tally)) {
+    const ref = streamRef(schema, recipe.variable);
+    return [recipe.tally ? withTally(ref, schema, recipe.tally) : ref];
+  }
   if (!recipe.entities) {
     const layers = (recipe.layers ?? []).map((id) => schemaById(id));
     if (layers.some((s) => !s)) return null;
@@ -195,6 +209,8 @@ export interface PublishedGroupMember {
   options?: Record<string, string>;
   layout: { w: number; h: number };
   wireTo?: number;
+  /** Its place within the group, from the anchor; absent, it stacks. */
+  at?: { x: number; y: number };
 }
 
 export interface PublishedGroup {
@@ -220,6 +236,125 @@ interface GroupRecipe {
 }
 
 const PUBLISHED_GROUPS: GroupRecipe[] = [
+  /*
+    A trade's market, for the owner of a trade business: the area picker on
+    the left and everything else following it — this span's jobs, the week
+    against the one before, who is winning, the jobs themselves. Laid out as
+    a dashboard (`at`) rather than a column, because it is one: the picker is
+    the question and the rest are its answer, side by side.
+  */
+  {
+    slug: "hvac-market-austin",
+    name: "HVAC market · Austin",
+    blurb:
+      "Pick your ZIP codes and see HVAC jobs there: the weekly count, replacements against new installs, who is pulling the permits and the latest jobs.",
+    author: "Dryos",
+    members: [
+      {
+        kind: "area",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        options: { span: "28", lead: "HVAC", share: "action=Replace" },
+        layout: { w: 4, h: 600 },
+        at: { x: 0, y: 0 },
+      },
+      {
+        kind: "ticker",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: ["HVAC"] } },
+        layout: { w: 4, h: 130 },
+        at: { x: 4, y: 0 },
+      },
+      {
+        kind: "ticker",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: ["HVAC"], action: ["Replace"] } },
+        layout: { w: 4, h: 130 },
+        at: { x: 8, y: 0 },
+      },
+      {
+        kind: "chart",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: ["HVAC"] }, by: "action" },
+        options: { window: "-90d", shape: "stacked", order: "size" },
+        layout: { w: 8, h: 230 },
+        at: { x: 4, y: 140 },
+      },
+      {
+        kind: "bar",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: ["HVAC"] }, by: "contractor" },
+        options: { span: "-90d", orient: "h", sort: "size" },
+        layout: { w: 8, h: 220 },
+        at: { x: 4, y: 380 },
+      },
+      {
+        kind: "table",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: ["HVAC"] } },
+        options: { show: "records" },
+        layout: { w: 12, h: 280 },
+        at: { x: 0, y: 610 },
+      },
+    ],
+  },
+  {
+    slug: "roofing-market-sanantonio",
+    name: "Roofing market · San Antonio",
+    blurb:
+      "Re-roofs by ZIP code in San Antonio — the week's count, the year by week, the roofers pulling them and the latest jobs.",
+    author: "Dryos",
+    members: [
+      {
+        kind: "area",
+        schemaId: "property.permits.sanantonio",
+        variable: "samples",
+        options: { span: "28", lead: "Roof" },
+        layout: { w: 4, h: 600 },
+        at: { x: 0, y: 0 },
+      },
+      {
+        kind: "ticker",
+        schemaId: "property.permits.sanantonio",
+        variable: "samples",
+        tally: { where: { subject: ["Roof"] } },
+        layout: { w: 8, h: 130 },
+        at: { x: 4, y: 0 },
+      },
+      {
+        kind: "chart",
+        schemaId: "property.permits.sanantonio",
+        variable: "samples",
+        tally: { where: { subject: ["Roof"] } },
+        options: { window: "-365d", shape: "area" },
+        layout: { w: 8, h: 230 },
+        at: { x: 4, y: 140 },
+      },
+      {
+        kind: "bar",
+        schemaId: "property.permits.sanantonio",
+        variable: "samples",
+        tally: { where: { subject: ["Roof"] }, by: "contractor" },
+        options: { span: "-90d", orient: "h", sort: "size" },
+        layout: { w: 8, h: 220 },
+        at: { x: 4, y: 380 },
+      },
+      {
+        kind: "table",
+        schemaId: "property.permits.sanantonio",
+        variable: "samples",
+        tally: { where: { subject: ["Roof"] } },
+        options: { show: "records" },
+        layout: { w: 12, h: 280 },
+        at: { x: 0, y: 610 },
+      },
+    ],
+  },
   {
     slug: "node-prices",
     name: "Node prices",
@@ -299,6 +434,7 @@ export function communityGroups(): PublishedGroup[] {
         options: p.m.options,
         layout: p.m.layout ?? DEFAULT_LAYOUT[p.m.kind],
         wireTo: follows ? source : undefined,
+        at: p.m.at,
       };
     });
     return [{ id: g.slug, name: g.name, author: g.author, blurb: g.blurb, members }];

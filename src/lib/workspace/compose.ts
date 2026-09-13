@@ -837,7 +837,7 @@ function askPayload(index, target, x, y) {
 // the number gets the rest of the box.
 // \`expand\` off hides the ⤢ full-screen control: a ticker is one number, and
 // a number that already fills its tile has nothing to gain from the screen.
-function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, minW, sourceTz, headerAsOf, expand, plain, children }) {
+function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, minW, sourceTz, headerAsOf, day, expand, plain, children }) {
   const MIN_H = minH || 120;
   const MIN_W = minW || 2;
   const box = useRef(null);
@@ -1250,10 +1250,12 @@ function Section({ index, title, sub, unit, loading, error, w, h, fill, minH, mi
           {/* Off for a shape that draws the time itself (the ticker). */}
           {asOf != null && headerAsOf !== false && (
             <span
-              title={"Newest interval on this tile: " + tzDate(asOf, tz) + " " + tzTime(asOf, tz) + " " + tzShort(asOf, tz)}
+              title={day ? "Newest day on this tile: " + tzDayKey(asOf, tz) : "Newest interval on this tile: " + tzDate(asOf, tz) + " " + tzTime(asOf, tz) + " " + tzShort(asOf, tz)}
               style={{ color: "var(--info)", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".04em", whiteSpace: "nowrap" }}
             >
-              <Clock /> {tzTime(asOf, tz)}
+              {/* A tally's newest point is a date stamped at noon; its hour
+                  is the stamp's, so the date is what it says. */}
+              <Clock /> {day ? tzDate(asOf, tz) : tzTime(asOf, tz)}
             </span>
           )}
         </div>
@@ -1545,7 +1547,11 @@ function TimeTick({ x, y, payload, labels, tz }) {
 // measure different things; absent, every row wears the chart's one unit.
 // \`tz\` is the display timezone; absent, UTC — and the short zone name rides
 // beside the clock, because a time with no zone on it is a number, not a time.
-function ChartTip({ active, payload, label, unit, units, tz }) {
+// \`day\` is set for a tally — permits counted by day or by week — whose
+// points are calendar dates stamped at midday: the readout names the date,
+// since the hour on it is the stamp's, not an event's. \`digits\` is how a
+// value prints; a count of permits has no cents.
+function ChartTip({ active, payload, label, unit, units, tz, day, digits }) {
   // The point being read, for the double click that asks about it (see
   // askPayload). A plain assignment during render, on purpose: recharts
   // renders this on every pointer move, and an effect would be a render
@@ -1561,16 +1567,20 @@ function ChartTip({ active, payload, label, unit, units, tz }) {
     return null;
   }
   const zone = tz || "UTC";
+  const heading = day
+    ? (day === "week" ? "week of " : "") + tzDayKey(label, zone)
+    : tzTime(label, zone) + " " + tzShort(label, zone);
+  const places = digits == null ? 2 : digits;
   window.__dryosHover = {
     owner: me.current,
     when: typeof label === "number" ? new Date(label).toISOString() : String(label),
-    label: tzTime(label, zone) + " " + tzShort(label, zone),
+    label: heading,
     values: payload.map((p) => ({ name: p.name, value: p.value, unit: (units && units[p.dataKey]) || unit || "" })),
   };
   return (
     <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 6, fontSize: 12, padding: "6px 9px" }}>
       <div style={{ color: "var(--faint)", fontFamily: "var(--mono)", fontSize: 10 }}>
-        {tzTime(label, zone)} {tzShort(label, zone)}
+        {heading}
       </div>
       {payload.map((p) => (
         <div key={p.dataKey} style={{ color: "var(--ink)" }}>
@@ -1586,7 +1596,7 @@ function ChartTip({ active, payload, label, unit, units, tz }) {
             the rule.
           */}
           <span style={{ color: p.stroke && p.stroke !== "var(--surface)" ? p.stroke : p.fill }}>■ </span>
-          {p.name}: <strong>{p.value == null ? "—" : Number(p.value).toFixed(2)}</strong> {(units && units[p.dataKey]) || unit}
+          {p.name}: <strong>{p.value == null ? "—" : Number(p.value).toLocaleString("en-US", { maximumFractionDigits: places, minimumFractionDigits: places })}</strong> {(units && units[p.dataKey]) || unit}
         </div>
       ))}
     </div>

@@ -31,6 +31,8 @@ import {
   mapTreatment,
   pinStreams,
   streamRef,
+  tallyValue,
+  withTally,
   type MapTreatment,
 } from "@/lib/workspace/catalog";
 import {
@@ -771,6 +773,66 @@ function SetView({
   } | null>(null);
   const [farBusy, setFarBusy] = useState(false);
 
+  /*
+    An event stream's narrowing — permits by type, class, work, a word in the
+    description, and what to break them down by. It rides on every chip this
+    view hands out (the whole stream and each ZIP alike), so "re-roofs in
+    78245" is one pick, and it outlives the ZIP search beside it. The values
+    on offer are the data's own, one fetch per column when the set opens.
+  */
+  const tallyDecl = schema.tally;
+  const [where, setWhere] = useState<Record<string, string[]>>({});
+  const [text, setText] = useState("");
+  const [by, setBy] = useState("");
+  const [dimValues, setDimValues] = useState<
+    Record<string, { value: string; rows: number }[]>
+  >({});
+  /*
+    Each row counts within the others: pick HVAC and the Job row says how
+    many of HVAC's permits were replacements, repairs, new installs — the
+    faceted-search rule, a row never filtered by its own picks so its other
+    chips stay on offer. Re-asked when a pick changes, and a quarter second
+    after typing stops, one small call per row.
+  */
+  const whereKey = JSON.stringify(where);
+  useEffect(() => {
+    if (!tallyDecl) return;
+    let live = true;
+    const searchCol = tallyDecl.search?.column;
+    const t = setTimeout(() => {
+      Promise.all(
+        tallyDecl.dims.map(async (d) => {
+          try {
+            const url = new URL("/api/workspace/values", window.location.origin);
+            url.searchParams.set("dataset", schema.dataset!);
+            url.searchParams.set("column", d.column);
+            for (const [c, vs] of Object.entries(where)) {
+              if (c === d.column) continue;
+              for (const v of vs) url.searchParams.append("where", `${c}=${v}`);
+            }
+            if (searchCol && text.trim())
+              url.searchParams.set("search", `${searchCol}:${text.trim()}`);
+            const res = await fetch(url);
+            const json = await res.json();
+            return [d.column, res.ok ? (json.values ?? []) : []] as const;
+          } catch {
+            return [d.column, []] as const;
+          }
+        }),
+      ).then((out) => {
+        if (live) setDimValues(Object.fromEntries(out));
+      });
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+    // `where` is read through its key: the object is new on every pick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schema.dataset, tallyDecl, whereKey, text]);
+  const decorate = (ref: DataRef) =>
+    tallyDecl ? withTally(ref, schema, { where, search: text, by }) : ref;
+
   // Once per set. The response carries the tiers and the true entity count
   // beside the rows, so one call opens the view.
   useEffect(() => {
@@ -928,12 +990,14 @@ function SetView({
     ? settled &&
       scope.rows.length > 0 &&
       scope.rows.length <= SUBSET_CAP
-      ? streamRef(schema, varKey, {
-          label: scope.label,
-          entities: scope.rows.map((r) => r.node),
-        })
+      ? decorate(
+          streamRef(schema, varKey, {
+            label: scope.label,
+            entities: scope.rows.map((r) => r.node),
+          }),
+        )
       : null
-    : streamRef(schema, varKey);
+    : decorate(streamRef(schema, varKey));
   const allCount = scope
     ? scope.rows.length
     : schema.entities.count;
@@ -984,6 +1048,20 @@ function SetView({
             ))}
           </div>
         )}
+        {tallyDecl && (
+          <TallyFilters
+            tally={tallyDecl}
+            entityColumn={schema.entityColumn ?? schema.entityKey}
+            entityLabel={schema.entities.label ?? "entities"}
+            values={dimValues}
+            where={where}
+            onWhere={setWhere}
+            text={text}
+            onText={setText}
+            by={by}
+            onBy={setBy}
+          />
+        )}
         {facets && !q.trim() && (
           <div className="dr-scroll flex gap-1 overflow-x-auto">
             {Object.entries(facets)
@@ -1021,6 +1099,16 @@ function SetView({
             {scope ? scope.label : "of this stream"} ·{" "}
             {allCount.toLocaleString()}{" "}
             {allCount === 1 ? "entity" : "entities"}
+            {/* A tally of the whole stream is one number unless broken
+                down, and the button should not promise fifty series. */}
+            {tallyDecl &&
+              (by
+                ? ` · by ${
+                    byLabel(schema, by)
+                  }`
+                : scope
+                  ? ""
+                  : " · one total")}
           </button>
         ) : scope &&
           settled &&
@@ -1064,6 +1152,7 @@ function SetView({
                 schema={schema}
                 row={row}
                 varKey={varKey}
+                decorate={decorate}
                 chosen={chosen}
                 onToggle={onToggle}
               />
@@ -1086,6 +1175,7 @@ function SetView({
                     schema={schema}
                     row={row}
                     varKey={varKey}
+                decorate={decorate}
                     chosen={chosen}
                     onToggle={onToggle}
                   />
@@ -1112,16 +1202,19 @@ function EntityButton({
   schema,
   row,
   varKey,
+  decorate,
   chosen,
   onToggle,
 }: {
   schema: Schema;
   row: EntityRow;
   varKey: string;
+  /** The set view's narrowing, applied to this entity's chip. */
+  decorate: (ref: DataRef) => DataRef;
   chosen: Set<string>;
   onToggle: (ref: DataRef) => void;
 }) {
-  const ref = entityRef(schema, row.node, varKey);
+  const ref = decorate(entityRef(schema, row.node, varKey));
   const picked = chosen.has(`${ref.snippet}::${ref.label}`);
   const note = entityNote(row.node);
   const fresh = freshness(row.lastSeen);
@@ -1169,16 +1262,20 @@ function EntityButton({
           }
           className="ml-auto flex shrink-0 items-baseline gap-1.5 whitespace-nowrap font-mono text-[9.5px] text-faint"
         >
+          {/* An event stream's row is permits, and its newest one is a
+              day old the moment it lands — "late" in amber would be a
+              claim about a feed that is on time. */}
           <span>
-            {row.observations.toLocaleString()} readings
+            {row.observations.toLocaleString()}{" "}
+            {schema.tally ? "permits" : "readings"}
           </span>
           {fresh && (
             <>
               <span className="text-line-strong">·</span>
               <span
-                className={cx(fresh.stale && "text-warn")}
+                className={cx(!schema.tally && fresh.stale && "text-warn")}
               >
-                last collected {fresh.short}
+                {schema.tally ? "newest" : "last collected"} {fresh.short}
               </span>
             </>
           )}
@@ -1190,5 +1287,160 @@ function EntityButton({
         </span>
       )}
     </button>
+  );
+}
+
+/** A breakdown column in words — "Type", or the entity's own noun. */
+function byLabel(schema: Schema, column: string): string {
+  return (
+    schema.tally?.dims.find((d) => d.column === column)?.label ??
+    (column === (schema.entityColumn ?? schema.entityKey)
+      ? (schema.entities.label ?? column).replace(/s$/, "")
+      : column)
+  );
+}
+
+/**
+ * An event stream's filters, above its ZIP list.
+ *
+ * A row of chips per declared column — the data's own values, most-issued
+ * first, eight at a time — a search over the description, and what the tally
+ * breaks down by. Values within a row are alternatives (re-roof *or* repair),
+ * rows narrow each other. Every control only reshapes the chips this view
+ * hands out; nothing here fetches, and nothing is selected until a chip below
+ * is picked, so the filter reads as a setting on the picks rather than a pick.
+ */
+function TallyFilters({
+  tally,
+  entityColumn,
+  entityLabel,
+  values,
+  where,
+  onWhere,
+  text,
+  onText,
+  by,
+  onBy,
+}: {
+  tally: NonNullable<Schema["tally"]>;
+  entityColumn?: string;
+  entityLabel: string;
+  values: Record<string, { value: string; rows: number }[]>;
+  where: Record<string, string[]>;
+  onWhere: (w: Record<string, string[]>) => void;
+  text: string;
+  onText: (t: string) => void;
+  by: string;
+  onBy: (b: string) => void;
+}) {
+  const CUT = 8;
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const toggle = (column: string, value: string) => {
+    const cur = where[column] ?? [];
+    onWhere({
+      ...where,
+      [column]: cur.includes(value)
+        ? cur.filter((v) => v !== value)
+        : [...cur, value],
+    });
+  };
+  const byChoices = [
+    { value: "", label: "One total" },
+    ...(entityColumn
+      ? [{ value: entityColumn, label: entityLabel.replace(/s$/, "") }]
+      : []),
+    ...tally.dims.map((d) => ({ value: d.column, label: d.label })),
+  ];
+  const active =
+    Object.values(where).some((v) => v.length) || text.trim() || by;
+  const pill = (on: boolean) =>
+    cx(
+      "shrink-0 rounded-full border px-2 py-[2px] text-[10.5px] transition-colors",
+      on
+        ? "border-accent-line bg-accent-dim text-accent"
+        : "border-line text-muted hover:border-line-strong hover:text-ink",
+    );
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-line px-2 py-1.5">
+      <div className="flex items-baseline">
+        <span className="font-mono text-[9.5px] tracking-[0.13em] text-faint uppercase">
+          Filter
+        </span>
+        {active && (
+          <button
+            onClick={() => {
+              onWhere({});
+              onText("");
+              onBy("");
+            }}
+            className="ml-auto text-[10.5px] text-muted hover:text-ink"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {tally.dims.map((d) => {
+        const vals = values[d.column] ?? [];
+        if (!vals.length) return null;
+        const picked = where[d.column] ?? [];
+        const shown = open[d.column] ? vals : vals.slice(0, CUT);
+        // A value picked from the long tail stays in view once the row folds.
+        const tail = picked
+          .filter((p) => !shown.some((v) => v.value === p))
+          .map(
+            (p) => vals.find((v) => v.value === p) ?? { value: p, rows: 0 },
+          );
+        return (
+          <div key={d.column} className="flex flex-wrap items-baseline gap-1">
+            <span className="w-[78px] shrink-0 text-[10.5px] text-faint">
+              {d.label}
+            </span>
+            {[...shown, ...tail].map((v) => (
+              <button
+                key={v.value}
+                onClick={() => toggle(d.column, v.value)}
+                className={pill(picked.includes(v.value))}
+              >
+                {tallyValue(v.value)}{" "}
+                <span className="font-mono text-[9px] opacity-60">
+                  {v.rows.toLocaleString()}
+                </span>
+              </button>
+            ))}
+            {vals.length > CUT && (
+              <button
+                onClick={() =>
+                  setOpen({ ...open, [d.column]: !open[d.column] })
+                }
+                className="text-[10.5px] text-muted hover:text-ink"
+              >
+                {open[d.column] ? "fewer" : `+${vals.length - CUT} more`}
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {tally.search && (
+        <input
+          value={text}
+          onChange={(e) => onText(e.target.value)}
+          placeholder={`${tally.search.label} contains… (e.g. roof)`}
+          className="w-full rounded-md border border-line bg-surface-2 px-2 py-1 text-[12px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
+        />
+      )}
+      <div className="flex flex-wrap items-baseline gap-1">
+        <span className="w-[78px] shrink-0 text-[10.5px] text-faint">By</span>
+        {byChoices.map((c) => (
+          <button
+            key={c.value || "total"}
+            onClick={() => onBy(c.value)}
+            className={pill(c.value === by)}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

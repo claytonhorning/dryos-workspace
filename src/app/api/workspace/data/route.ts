@@ -51,6 +51,18 @@ export async function POST(req: Request) {
      * into 1,101 requests.
      */
     located?: boolean;
+    /**
+     * An event stream's narrowing, passed through as the API spells it:
+     * `where` is `column=value` (the same column twice means either), `search`
+     * is `column:text`, `by` regroups a rollup (`none` for one total), and
+     * `stamp: "noon"` labels a day bucket at midday so it reads as the right
+     * date in every US zone. The API validates every column; nothing here
+     * needs to know which ones exist.
+     */
+    where?: string[];
+    search?: string;
+    by?: string;
+    stamp?: "start" | "noon";
     /** Which screen asked, so a screen can be told what it costs. */
     appId?: string;
   };
@@ -104,6 +116,10 @@ export async function POST(req: Request) {
         if (body.interval) url.searchParams.set("interval", body.interval);
         if (body.agg) url.searchParams.set("agg", body.agg);
         if (body.located) url.searchParams.set("located", "true");
+        for (const w of body.where ?? []) url.searchParams.append("where", w);
+        if (body.search) url.searchParams.set("search", body.search);
+        if (body.by) url.searchParams.set("by", body.by);
+        if (body.stamp) url.searchParams.set("stamp", body.stamp);
         url.searchParams.set("limit", String(limit));
 
         const res = await fetch(url, { cache: "no-store", headers: auth });
