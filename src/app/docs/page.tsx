@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CodeBlock, CopyButton } from "@/components/CodeBlock";
+import { CurlLine, StreamBrowser } from "@/components/docs/StreamBrowser";
 import { cx } from "@/components/ui";
 import {
   PUBLIC_API,
@@ -105,35 +106,7 @@ export default function DocsPage() {
           </span>
         }
       >
-        <div className="dr-scroll overflow-x-auto rounded-lg border border-line bg-surface">
-          <table className="w-full min-w-[640px] text-left text-[13px]">
-            <thead>
-              <tr className="border-b border-line font-mono text-[10.5px] tracking-[0.12em] text-faint uppercase">
-                <th className="px-4 py-2.5 font-normal">Stream</th>
-                <th className="px-4 py-2.5 font-normal">Slug</th>
-                <th className="px-4 py-2.5 font-normal">Cadence</th>
-                <th className="px-4 py-2.5 text-right font-normal">Entities</th>
-              </tr>
-            </thead>
-            <tbody>
-              {streams.map((s) => (
-                <tr key={s.id} className="border-b border-line last:border-0 hover:bg-surface-2/50">
-                  <td className="px-4 py-2.5">
-                    <div className="text-ink">{s.name}</div>
-                    <div className="text-[11.5px] text-faint">{s.path.join(" › ")}</div>
-                  </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <code className="font-mono text-[12px] text-muted">{s.dataset}</code>
-                  </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-muted">{s.cadence.label}</td>
-                  <td className="px-4 py-2.5 text-right text-muted tabular-nums">
-                    {s.entities.count ? s.entities.count.toLocaleString() : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <StreamBrowser domain={domain} />
       </Section>
 
       <Section id="agents" title="For AI agents">
@@ -189,7 +162,6 @@ function Mono({ children }: { children: React.ReactNode }) {
 
 function RouteCard({ route }: { route: Route }) {
   const [open, setOpen] = useState(route.path.endsWith("/query"));
-  const url = `${PUBLIC_API}${route.example}`;
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-surface">
       <button
@@ -236,21 +208,8 @@ function RouteCard({ route }: { route: Route }) {
               </tbody>
             </table>
           )}
-          <div className="mt-3 flex items-center gap-2">
-            <code className="dr-scroll min-w-0 flex-1 overflow-x-auto rounded-md border border-line bg-code px-2.5 py-1.5 font-mono text-[12px] whitespace-nowrap text-muted">
-              curl &quot;{url}&quot;
-            </code>
-            <CopyButton value={`curl "${url}"`} />
-            {!route.path.includes("events") && (
-              <a
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded border border-line-strong bg-surface-2 px-2 py-1 font-mono text-[10.5px] tracking-[0.08em] text-muted uppercase hover:text-ink"
-              >
-                Try
-              </a>
-            )}
+          <div className="mt-3">
+            <CurlLine path={route.example} tryIt={!route.path.includes("events")} />
           </div>
         </div>
       )}

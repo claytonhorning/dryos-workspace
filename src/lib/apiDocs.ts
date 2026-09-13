@@ -151,11 +151,43 @@ export function apiStreams(domain?: string | null): Schema[] {
   );
 }
 
-function every(seconds: number): string {
+export function every(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${seconds / 60}m`;
   if (seconds < 86400) return `${seconds / 3600}h`;
   return `${seconds / 86400}d`;
+}
+
+/**
+ * Requests that work as written against one stream — what the docs page
+ * shows when a stream is opened. Built from the catalogue so a stream added
+ * later gets its own without anyone writing them: a system-level feed sends
+ * no `node` (the API answers 400 to one), a large stream names a real entity
+ * from its own sample, and an event stream is counted in buckets rather than
+ * read row by row.
+ */
+export function streamExamples(s: Schema): { label: string; path: string }[] {
+  const base = `/v1/datasets/${s.dataset}`;
+  const system = s.entities.count <= 1 && s.entities.sample.length === 0;
+  const node = system ? null : s.entities.sample[0] ?? null;
+  const nodeParam = node ? `node=${encodeURIComponent(node)}&` : "";
+  const out = [{ label: "The catalogue entry — every column, its type and the source", path: base }];
+  if (!system) out.push({ label: "The entities in it, with coverage", path: `${base}/nodes?limit=20` });
+  if (s.tally) {
+    out.push({
+      label: "How many were issued a day",
+      path: `${base}/query?interval=1d&by=none&stamp=noon&limit=30`,
+    });
+    return out;
+  }
+  out.push({ label: node ? `The newest rows for ${node}` : "The newest rows", path: `${base}/query?${nodeParam}limit=12` });
+  if (grainSeconds(s) < 3600) {
+    out.push({
+      label: node ? `Hourly maximum for ${node}` : "Hourly maximum",
+      path: `${base}/query?${nodeParam}interval=1h&agg=max&limit=24`,
+    });
+  }
+  return out;
 }
 
 export const QUICKSTART = `curl "${PUBLIC_API}/v1/datasets/ercot-realtime-lmp/query?node=HB_NORTH&limit=2"`;

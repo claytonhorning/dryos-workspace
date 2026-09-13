@@ -68,7 +68,21 @@ interface Piece {
   tally?: DataRef["tally"];
   /** Its place within a group, from the anchor; absent, it stacks. */
   at?: { x: number; y: number };
+  /**
+   * Series from other streams drawn beside it — storage against a price on
+   * a second axis. Each is one entity, or a stream's own variable.
+   */
+  with?: { schemaId: string; entity?: string; variable?: string; label?: string }[];
+  /**
+   * What the header calls a stream or tally reference — "EV charger" where
+   * the chip's own "Austin construction permits · EV charger" is cut off
+   * before the part that differs. Never on an entity, whose label is its node.
+   */
+  label?: string;
 }
+
+/** A piece as a recipe file spells it — what `scripts/seed-page --recipe` reads. */
+export type RecipePiece = Piece;
 
 interface Recipe extends Piece {
   slug: string;
@@ -151,6 +165,23 @@ function wholeRef(schema: Schema): DataRef {
 
 /** A recipe's references, rebuilt against the catalogue as it stands now. */
 function refsOf(recipe: Piece): DataRef[] | null {
+  // A title reads nothing; a reference on it would wear the stream's name.
+  if (recipe.kind === "text") return [];
+  const named = (ref: DataRef, label?: string) =>
+    label && ref.kind !== "entity" ? { ...ref, label } : ref;
+  const own = ownRefs(recipe)?.map((r) => named(r, recipe.label)) ?? null;
+  if (!own || !recipe.with) return own;
+  const more = recipe.with.map((w) => {
+    const s = schemaById(w.schemaId);
+    if (!s) return null;
+    return w.entity
+      ? entityRef(s, w.entity, w.variable)
+      : named(streamRef(s, w.variable), w.label);
+  });
+  return more.some((r) => !r) ? null : [...own, ...(more as DataRef[])];
+}
+
+function ownRefs(recipe: Piece): DataRef[] | null {
   const schema = schemaById(recipe.schemaId);
   if (!schema) return null;
   // An event stream's recipe is the explorer's own chip: the variable it
@@ -235,7 +266,155 @@ interface GroupRecipe {
   members: Piece[];
 }
 
+/** The permit subjects that are a home wiring itself for the grid (`permit_classes.py`). */
+const ELECTRIFY = ["Solar & battery", "EV charger", "Generator"] as const;
+
 const PUBLISHED_GROUPS: GroupRecipe[] = [
+  /*
+    Energy and property as one story: the grid Texas runs on now — solar
+    through the afternoon, grid batteries charging on the cheap midday price
+    and discharging into the evening peak (2026-09-12: 8 GW in at $19, 11.8
+    GW out at $62 as solar fell from 16 GW to 2) — and Austin's homes doing
+    the same thing at their own scale, in the permits for rooftop solar,
+    batteries, EV chargers and standby generators (solar & battery went from
+    10–30 a week in June to 50–76 a week by late August). The headings
+    describe the shape rather than the figures, so they stay true.
+
+    The price map is listed before the permits map on purpose: a group has
+    one pick source, the first map, and only the price tiles follow it —
+    the permit tiles are on another stream (see `onSource`).
+  */
+  {
+    slug: "austin-plugs-in",
+    name: "Austin plugs in · grid and homes",
+    blurb:
+      "ERCOT's solar and grid batteries beside Austin's permits for rooftop solar, home batteries, EV chargers and generators — the grid, and the homes wiring themselves for it.",
+    author: "Dryos",
+    members: [
+      {
+        kind: "text",
+        schemaId: "",
+        options: { text: "Austin is building its own grid, one roof at a time." },
+        layout: { w: 12, h: 56 },
+        at: { x: 0, y: 0 },
+      },
+      {
+        kind: "text",
+        schemaId: "",
+        options: {
+          text: "Permits for rooftop solar, batteries, EV chargers and standby generators, beside the ERCOT grid they plug into",
+          color: "muted",
+        },
+        layout: { w: 12, h: 40 },
+        at: { x: 0, y: 58 },
+      },
+      ...(["Solar & battery", "EV charger", "Generator"] as const).map((subject, i) => ({
+        kind: "ticker" as const,
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: [subject] } },
+        label: subject,
+        layout: { w: 3, h: 120 },
+        at: { x: i * 3, y: 108 },
+      })),
+      {
+        kind: "ticker",
+        schemaId: "energy.power.realtime",
+        entities: ["LZ_AEN"],
+        layout: { w: 3, h: 120 },
+        at: { x: 9, y: 108 },
+      },
+      {
+        kind: "text",
+        schemaId: "",
+        options: {
+          text: "1 · The grid — solar floods the afternoon, batteries carry the evening",
+          color: "s3",
+        },
+        layout: { w: 12, h: 40 },
+        at: { x: 0, y: 244 },
+      },
+      {
+        kind: "chart",
+        schemaId: "energy.power.genmix",
+        entities: ["SOLAR"],
+        with: [{ schemaId: "energy.load.supplydemand", variable: "demand_mw", label: "Demand" }],
+        options: { window: "-7d", shape: "area" },
+        layout: { w: 6, h: 270 },
+        at: { x: 0, y: 290 },
+      },
+      {
+        kind: "chart",
+        schemaId: "energy.power.genmix",
+        entities: ["POWER_STORAGE"],
+        with: [{ schemaId: "energy.power.realtime", entity: "LZ_AEN" }],
+        options: { window: "-7d", shape: "line", series: JSON.stringify({ s1: { a: "r" } }) },
+        layout: { w: 6, h: 270 },
+        at: { x: 6, y: 290 },
+      },
+      {
+        kind: "text",
+        schemaId: "",
+        options: {
+          text: "2 · The homes — what Austin permits for solar, batteries, EV chargers and generators",
+          color: "s3",
+        },
+        layout: { w: 12, h: 40 },
+        at: { x: 0, y: 576 },
+      },
+      {
+        kind: "chart",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: [...ELECTRIFY] }, by: "subject" },
+        options: { window: "-365d", shape: "stacked", order: "size" },
+        layout: { w: 7, h: 300 },
+        at: { x: 0, y: 622 },
+      },
+      {
+        kind: "bar",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: [...ELECTRIFY] }, by: "zip" },
+        options: { span: "-90d", orient: "h", sort: "size" },
+        layout: { w: 5, h: 300 },
+        at: { x: 7, y: 622 },
+      },
+      {
+        kind: "text",
+        schemaId: "",
+        options: {
+          text: "3 · On the map — the price at every generator, and the homes adding their own",
+          color: "s3",
+        },
+        layout: { w: 12, h: 40 },
+        at: { x: 0, y: 938 },
+      },
+      {
+        kind: "map",
+        schemaId: "energy.power.realtime",
+        layout: { w: 6, h: 460 },
+        at: { x: 0, y: 984 },
+      },
+      {
+        kind: "map",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: [...ELECTRIFY] } },
+        layout: { w: 6, h: 460 },
+        at: { x: 6, y: 984 },
+      },
+      {
+        kind: "table",
+        schemaId: "property.permits.austin",
+        variable: "samples",
+        tally: { where: { subject: [...ELECTRIFY] } },
+        options: { show: "records" },
+        layout: { w: 12, h: 300 },
+        at: { x: 0, y: 1454 },
+      },
+    ],
+  },
   /*
     A trade's market, for the owner of a trade business: the area picker on
     the left and everything else following it — this span's jobs, the week
@@ -419,25 +598,49 @@ const PUBLISHED_GROUPS: GroupRecipe[] = [
  */
 export function communityGroups(): PublishedGroup[] {
   return PUBLISHED_GROUPS.flatMap((g) => {
-    const pieces = g.members.map((m) => ({ m, refs: refsOf(m) }));
-    if (pieces.some((p) => !p.refs)) return [];
-    const source = pieces.findIndex((p) => emitsPicks({ kind: p.m.kind }));
-    const members: PublishedGroupMember[] = pieces.map((p, i) => {
-      const refs = p.refs!;
-      const follows =
-        source !== -1 &&
-        i !== source &&
-        followable({ kind: p.m.kind, options: p.m.options, refs });
-      return {
-        kind: p.m.kind,
-        refs,
-        options: p.m.options,
-        layout: p.m.layout ?? DEFAULT_LAYOUT[p.m.kind],
-        wireTo: follows ? source : undefined,
-        at: p.m.at,
-      };
-    });
-    return [{ id: g.slug, name: g.name, author: g.author, blurb: g.blurb, members }];
+    const members = groupMembers(g.members);
+    return members
+      ? [{ id: g.slug, name: g.name, author: g.author, blurb: g.blurb, members }]
+      : [];
+  });
+}
+
+/**
+ * A recipe's members with their references rebuilt and their wiring
+ * resolved, or null when any names a stream the catalogue no longer has.
+ * Exported for `scripts/seed-page`, which lands an unpublished recipe the
+ * same way a published one lands.
+ */
+export function groupMembers(recipe: RecipePiece[]): PublishedGroupMember[] | null {
+  const pieces = recipe.map((m) => ({ m, refs: refsOf(m) }));
+  if (pieces.some((p) => !p.refs)) return null;
+  const source = pieces.findIndex((p) => emitsPicks({ kind: p.m.kind }));
+  // A node pick retargets every query a follower makes, whatever stream it
+  // reads, so only a member wholly on the source's streams can follow one —
+  // a fuel-mix ticker wired to a price map would ask the fuel mix for a
+  // substation. An area picker's filter only narrows its own stream, so a
+  // tile elsewhere would wear the wire and never move. A title follows only
+  // when its words have a `{pick}` to fill.
+  const streams = new Set(source === -1 ? [] : pieces[source].refs!.map((r) => r.schemaId));
+  const onSource = (p: (typeof pieces)[number]) =>
+    p.m.kind === "text"
+      ? (p.m.options?.text ?? "").includes("{pick}")
+      : p.refs!.every((r) => streams.has(r.schemaId));
+  return pieces.map((p, i) => {
+    const refs = p.refs!;
+    const follows =
+      source !== -1 &&
+      i !== source &&
+      followable({ kind: p.m.kind, options: p.m.options, refs }) &&
+      onSource(p);
+    return {
+      kind: p.m.kind,
+      refs,
+      options: p.m.options,
+      layout: p.m.layout ?? DEFAULT_LAYOUT[p.m.kind],
+      wireTo: follows ? source : undefined,
+      at: p.m.at,
+    };
   });
 }
 

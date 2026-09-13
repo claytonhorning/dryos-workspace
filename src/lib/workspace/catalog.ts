@@ -4261,6 +4261,162 @@ export const SCHEMAS: Schema[] = [
       ],
     },
   },
+  // Fort Worth is the freshest permit feed in Dallas–Fort Worth and the one
+  // that names the equipment: a battery is in the words of a hundred-odd
+  // permits a month. A row is an application — its day is the day it was
+  // filed and `status` says how far it got — because the city's layer
+  // carries no issue date. Located on the city's own coordinates.
+  {
+    id: "property.permits.fortworth",
+    path: ["Property", "Permits", "Fort Worth"],
+    name: "Fort Worth permits",
+    short: "Fort Worth permits",
+    dataset: "fortworth-permits",
+    availability: "live",
+    cadence: { label: "daily", seconds: 86_400 },
+    tokens: 0.25,
+    entities: {
+      count: 44,
+      label: "ZIP codes",
+      sample: ["76179", "76052", "76036"],
+    },
+    entityColumn: "zip",
+    located: true,
+    sourceTz: "America/Chicago",
+    blurb:
+      "Every building and trade permit filed with the City of Fort Worth, one " +
+      "row per permit, by the day it was filed: the work described, the " +
+      "declared value, its status as it moves from plan review to issued, " +
+      "and the place. Fort Worth names no contractor; an installer is kept " +
+      "only where the project title is a registered business.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "samples",
+        label: "Permits filed",
+        unit: "permits",
+        availability: "live",
+        rollup: "count",
+        description:
+          "How many permit applications were filed in the day or week — the " +
+          "rollup's own row count, after any filter. Filter on status for " +
+          "issued work.",
+        mock: { base: 190, swing: 70, noise: 35, floor: 0 },
+      },
+      {
+        key: "valuation_usd",
+        label: "Declared value",
+        unit: "$",
+        availability: "live",
+        rollup: "sum",
+        description:
+          "Total job value declared on the applications in the day or week. " +
+          "Trade permits carry none; about one permit in four declares a value.",
+        mock: { base: 12_000_000, swing: 6_000_000, noise: 3_000_000, floor: 0 },
+      },
+    ],
+    tally: {
+      key: "permit_id",
+      dims: [
+        { column: "subject", label: "Work on" },
+        { column: "action", label: "Job" },
+        { column: "status", label: "Status" },
+        { column: "permit_class", label: "Class" },
+        { column: "permit_type", label: "City type" },
+        { column: "work_class", label: "City work class" },
+      ],
+      search: { column: "description", label: "Description" },
+      list: [
+        { column: "interval_start_utc", label: "Filed", kind: "date" },
+        { column: "subject", label: "Work on" },
+        { column: "action", label: "Job" },
+        { column: "description", label: "Work" },
+        { column: "status", label: "Status" },
+        { column: "valuation_usd", label: "Value", kind: "money" },
+        { column: "contractor", label: "Contractor" },
+        { column: "zip", label: "ZIP" },
+      ],
+    },
+  },
+  // Collin County is forty-odd cities in one feed — Plano, Frisco, McKinney,
+  // Allen — because the appraisal district gathers every city's permit
+  // report. Most cities report monthly, so a permit lands weeks after its
+  // issue date and the newest weeks are always thin. No coordinates: the
+  // ZIP is the place, and the city is a filter.
+  {
+    id: "property.permits.collin",
+    path: ["Property", "Permits", "Collin County"],
+    name: "Collin County permits",
+    short: "Collin permits",
+    dataset: "collin-permits",
+    availability: "live",
+    cadence: { label: "daily", seconds: 86_400 },
+    tokens: 0.25,
+    entities: {
+      count: 38,
+      label: "ZIP codes",
+      sample: ["75071", "75009", "75098"],
+    },
+    entityColumn: "zip",
+    sourceTz: "America/Chicago",
+    blurb:
+      "Building permits from every city in Collin County, as the Collin " +
+      "Central Appraisal District records them: the city, the work, the " +
+      "builder and the ZIP. Cities report to the district monthly, so the " +
+      "last few weeks fill in late — a dip at the right edge is lag.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 13),
+    },
+    variables: [
+      {
+        key: "samples",
+        label: "Permits issued",
+        unit: "permits",
+        availability: "live",
+        rollup: "count",
+        description:
+          "How many permits were issued in the day or week, as reported so " +
+          "far — the rollup's own row count, after any filter.",
+        mock: { base: 70, swing: 30, noise: 15, floor: 0 },
+      },
+      {
+        key: "valuation_usd",
+        label: "Reported value",
+        unit: "$",
+        availability: "live",
+        rollup: "sum",
+        description:
+          "Total value the cities reported on the permits in the day or week. " +
+          "About half the permits carry one.",
+        mock: { base: 8_000_000, swing: 4_000_000, noise: 2_000_000, floor: 0 },
+      },
+    ],
+    tally: {
+      key: "permit_id",
+      dims: [
+        { column: "subject", label: "Work on" },
+        { column: "action", label: "Job" },
+        { column: "jurisdiction", label: "City" },
+        { column: "permit_class", label: "Class" },
+        { column: "permit_type", label: "District type" },
+      ],
+      search: { column: "description", label: "Description" },
+      list: [
+        { column: "interval_start_utc", label: "Issued", kind: "date" },
+        { column: "jurisdiction", label: "City" },
+        { column: "subject", label: "Work on" },
+        { column: "action", label: "Job" },
+        { column: "description", label: "Work" },
+        { column: "valuation_usd", label: "Value", kind: "money" },
+        { column: "contractor", label: "Builder" },
+        { column: "zip", label: "ZIP" },
+      ],
+    },
+  },
 ];
 
 /** The one schema with a collector behind it. */
