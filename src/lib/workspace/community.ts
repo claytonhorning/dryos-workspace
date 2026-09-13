@@ -75,7 +75,7 @@ const PUBLISHED: Recipe[] = [
     slug: "rt-lmp-everywhere",
     name: "Real-time LMP, every operator",
     blurb:
-      "Every placed node in ERCOT, MISO, PJM, SPP, CAISO and NYISO on one map, colored by its newest price on one scale.",
+      "Every placed node in ERCOT, MISO, PJM, SPP, CAISO, NYISO and ISO-NE on one map, colored by its newest price on one scale.",
     author: "Dryos",
     kind: "map",
     schemaId: "energy.power.realtime",
@@ -85,6 +85,7 @@ const PUBLISHED: Recipe[] = [
       "energy.spp.realtime",
       "energy.caiso.realtime",
       "energy.nyiso.realtime",
+      "energy.isone.realtime",
     ],
     layout: { w: 12, h: 420 },
   },

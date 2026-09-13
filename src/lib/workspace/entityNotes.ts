@@ -107,6 +107,24 @@ export const ENTITY_NOTES: Record<string, string> = {
   "H Q": "Hydro-Québec proxy — the price at NYISO's border with Quebec.",
   NPX: "New England proxy — the price at NYISO's seam with ISO-NE.",
   "O H": "Ontario proxy — the price at NYISO's seam with Ontario's IESO.",
+
+  // ISO-NE — the Hub, the eight load zones and the external nodes, spelled
+  // as ISO-NE spells them, leading dots and inner spaces included.
+  ".H.INTERNAL_HUB": "ISO-NE's Internal Hub — the price New England power trades at, averaged over 32 nodes.",
+  ".Z.MAINE": "Maine load zone.",
+  ".Z.NEWHAMPSHIRE": "New Hampshire load zone.",
+  ".Z.VERMONT": "Vermont load zone.",
+  ".Z.CONNECTICUT": "Connecticut load zone.",
+  ".Z.RHODEISLAND": "Rhode Island load zone.",
+  ".Z.SEMASS": "Southeastern Massachusetts load zone — the South Coast, Cape Cod and the islands.",
+  ".Z.WCMASS": "Western and Central Massachusetts load zone — Springfield and Worcester.",
+  ".Z.NEMASSBOST": "Northeastern Massachusetts and Boston load zone.",
+  ".I.ROSETON 345 1": "New York interface — the price at ISO-NE's main seam with NYISO.",
+  ".I.SHOREHAM138 99": "Cross-Sound Cable — the DC link to Long Island.",
+  ".I.NRTHPORT138 5": "Northport–Norwalk cable — the AC link to Long Island.",
+  ".I.HQ_P1_P2345 5": "Phase II — the DC line from Hydro-Québec into Massachusetts.",
+  ".I.HQHIGATE120 2": "Highgate — Hydro-Québec's tie into Vermont.",
+  ".I.SALBRYNB345 1": "New Brunswick interface — the tie with NB Power.",
 };
 
 export function entityNote(node: string): string | undefined {

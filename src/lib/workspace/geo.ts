@@ -73,6 +73,8 @@ const OPERATOR_BOUNDS: Record<string, [number, number, number, number]> = {
   CAISO: [-125.5, 31.0, -103.0, 52.0],
   // New York State, Long Island's tip included.
   NYISO: [-80.0, 40.4, -71.8, 45.1],
+  // The six New England states, Nantucket to northern Maine.
+  "ISO-NE": [-73.8, 40.9, -66.9, 47.5],
 };
 
 /**
