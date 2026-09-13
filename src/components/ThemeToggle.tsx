@@ -11,18 +11,30 @@ export type Theme = "dark" | "light";
  * Inlined into <head> as a blocking script. It resolves the theme once and
  * writes it to the root element, which is why the CSS only needs to define
  * `[data-theme="light"]` and not a parallel media-query copy.
+ *
+ * It also stays to put the attribute back. The attribute is written outside
+ * React, and when a hydration error sends the root to a client render, React 19
+ * clears every attribute off the <html> it reuses — `data-theme` included. The
+ * page then silently reverts to its dark default, whatever the reader chose,
+ * until the next full load.
  */
 export const THEME_INIT_SCRIPT = `
 (function () {
-  try {
-    var stored = localStorage.getItem('dryos-theme');
-    var theme = stored === 'light' || stored === 'dark'
-      ? stored
-      : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-    document.documentElement.dataset.theme = theme;
-  } catch (e) {
-    document.documentElement.dataset.theme = 'dark';
+  var root = document.documentElement;
+  function resolve() {
+    try {
+      var stored = localStorage.getItem('dryos-theme');
+      return stored === 'light' || stored === 'dark'
+        ? stored
+        : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    } catch (e) {
+      return 'dark';
+    }
   }
+  root.dataset.theme = resolve();
+  new MutationObserver(function () {
+    if (!root.dataset.theme) root.dataset.theme = resolve();
+  }).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
 })();
 `;
 
