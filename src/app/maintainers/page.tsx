@@ -2,7 +2,8 @@ import { CodeBlock } from "@/components/CodeBlock";
 import { ButtonLink, Panel, PanelHeader } from "@/components/ui";
 
 export const metadata = {
-  title: "For maintainers — Dryos",
+  title: "For maintainers",
+  alternates: { canonical: "/maintainers" },
 };
 
 export default function MaintainersPage() {

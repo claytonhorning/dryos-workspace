@@ -11,6 +11,7 @@ import {
 } from "./catalog";
 import {
   DEFAULT_LAYOUT,
+  GRID,
   emitsPicks,
   followable,
   type ComponentKind,
@@ -150,6 +151,31 @@ const PUBLISHED: Recipe[] = [
     kind: "ticker",
     schemaId: "energy.power.realtime",
     entities: ["HB_NORTH"],
+  },
+  {
+    slug: "zone-weather",
+    name: "Texas temperatures",
+    blurb:
+      "The hourly temperature forecast for Austin and San Antonio, Dallas–Fort Worth and Houston.",
+    author: "Dryos",
+    kind: "chart",
+    schemaId: "weather.forecast.zone",
+    entities: ["SOUTH_C", "NORTH_C", "COAST"],
+    options: { window: "-24h", shape: "line" },
+    layout: { w: 8, h: 300 },
+  },
+  {
+    slug: "austin-solar",
+    name: "Austin solar & battery permits",
+    blurb: "Permits for rooftop solar and home batteries in Austin, counted by week over the past year.",
+    author: "Dryos",
+    kind: "chart",
+    schemaId: "property.permits.austin",
+    variable: "samples",
+    tally: { where: { subject: ["Solar & battery"] } },
+    label: "Solar & battery",
+    options: { window: "-365d", shape: "area" },
+    layout: { w: 8, h: 300 },
   },
 ];
 
@@ -646,4 +672,46 @@ export function groupMembers(recipe: RecipePiece[]): PublishedGroupMember[] | nu
 
 export function communityGroup(slug: string): PublishedGroup | undefined {
   return communityGroups().find((g) => g.id === slug);
+}
+
+/**
+ * A group laid onto an empty page: each member at its `at`, or stacked
+ * under the one before, with its group-relative wire as the slot itself
+ * (an empty page is base 0). The edit route's group branch does the same
+ * onto a page that already has tiles, offset by where the drop landed.
+ */
+export function placeGroup(members: PublishedGroupMember[]): ComponentSpec[] {
+  let down = 0;
+  return members.map((m) => {
+    const at = m.at ?? { x: 0, y: down };
+    if (!m.at) down += m.layout.h + GRID.gap;
+    return {
+      kind: m.kind,
+      refs: m.refs,
+      options:
+        m.wireTo !== undefined
+          ? { ...(m.options ?? {}), follow: String(m.wireTo), wireColor: "1" }
+          : { ...(m.options ?? {}) },
+      layout: { x: at.x, y: at.y, w: m.layout.w, h: m.layout.h },
+    };
+  });
+}
+
+/**
+ * A whole first page from a published slug — a group, or one component —
+ * unpacked and named. What the landing page's try-it opens a new workspace
+ * on, so a visitor lands on exactly what they clicked.
+ */
+export function recipePage(slug: string): { name: string; manifest: ComponentSpec[] } | null {
+  const group = communityGroup(slug);
+  if (group) return { name: group.name, manifest: placeGroup(group.members) };
+  const c = communityComponent(slug);
+  if (!c) return null;
+  const layout = c.layout ?? DEFAULT_LAYOUT[c.kind];
+  return {
+    name: c.name,
+    manifest: [
+      { kind: c.kind, refs: c.refs, options: { ...(c.options ?? {}) }, layout: { x: 0, y: 0, w: layout.w, h: layout.h } },
+    ],
+  };
 }

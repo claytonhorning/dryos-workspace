@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { SITE } from "@/lib/apiDocs";
 
 /**
  * Crawlers are told to stay out of `/deck/` by prefix, deliberately not by
@@ -10,12 +11,38 @@ import type { MetadataRoute } from "next";
  * Login, auth callbacks and the API are listed for the ordinary reason:
  * there is nothing on them to index.
  */
+const DISALLOW = ["/deck/", "/api/", "/auth/", "/login"];
+
+/**
+ * The model crawlers, welcomed by name. `*` already lets them in; naming
+ * them says so to anyone auditing the file, and outlives a later blanket
+ * rule written for some other bot. A crawler that matches a named group
+ * ignores `*` entirely, so each group repeats the disallows.
+ */
+const AI_CRAWLERS = [
+  "GPTBot",
+  "OAI-SearchBot",
+  "ChatGPT-User",
+  "ClaudeBot",
+  "Claude-User",
+  "Claude-SearchBot",
+  "anthropic-ai",
+  "PerplexityBot",
+  "Perplexity-User",
+  "Google-Extended",
+  "Applebot-Extended",
+  "Amazonbot",
+  "meta-externalagent",
+  "CCBot",
+];
+
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: {
-      userAgent: "*",
-      allow: "/",
-      disallow: ["/deck/", "/api/", "/auth/", "/login"],
-    },
+    rules: [
+      { userAgent: "*", allow: "/", disallow: DISALLOW },
+      { userAgent: AI_CRAWLERS, allow: "/", disallow: DISALLOW },
+    ],
+    sitemap: `${SITE}/sitemap.xml`,
+    host: SITE,
   };
 }

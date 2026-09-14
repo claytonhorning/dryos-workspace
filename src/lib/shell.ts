@@ -5,8 +5,9 @@
  */
 export type Shell = "marketing" | "space" | "app" | "none";
 
-/** Still selling something: the landing page and the maintainer pitch. */
-const MARKETING = ["/", "/maintainers"];
+/** Still selling something: the landing page, the maintainer pitch, and the
+    MCP server's page, which is read mostly by people who have no account. */
+const MARKETING = ["/", "/maintainers", "/mcp"];
 
 /**
  * The door is still outside. A signed-out visitor who pressed "Open Dryos"
@@ -15,7 +16,7 @@ const MARKETING = ["/", "/maintainers"];
  * bar they came from; the callback route the email link lands on is the
  * same threshold.
  */
-const DOOR = ["/login", "/auth"];
+const DOOR = ["/login", "/auth", "/oauth"];
 
 export function shellFor(pathname: string): Shell {
   // The deck is a room with the lights down: no bar, no links out.

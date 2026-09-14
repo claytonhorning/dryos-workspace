@@ -74,6 +74,7 @@ export function AppSidebar({ pathname }: { pathname: string }) {
           icon={<ApiGlyph />}
           active={pathname.startsWith("/docs")}
         />
+        <SideLink href="/mcp" label="MCP server" icon={<ApiGlyph />} active={pathname.startsWith("/mcp")} />
       </nav>
     </aside>
   );

@@ -18,12 +18,11 @@ import { MobileStrip, NavLink, Shell } from "./shared";
  * pages did: the data is browsed inside the workspace now.
  */
 const LINKS = [
+  { href: "/#try", label: "Try it" },
+  { href: "/#data", label: "The data" },
   { href: "/#how-it-works", label: "How it works" },
-  { href: "/#the-data", label: "The data" },
-  { href: "/#the-bill", label: "The bill" },
-  { href: "/#workspaces", label: "Workspaces" },
+  { href: "/mcp", label: "MCP server" },
   { href: "/#pricing", label: "Pricing" },
-  { href: "/#about", label: "Who we are" },
   { href: "/maintainers", label: "For maintainers" },
 ];
 

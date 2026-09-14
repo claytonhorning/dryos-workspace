@@ -10,7 +10,7 @@ import { LIVE_SCHEMA, SCHEMAS } from "@/lib/workspace/catalog";
  * is the point; nobody browsing can find it, which is the other point.
  */
 export const metadata: Metadata = {
-  title: "Dryos — the deck",
+  title: { absolute: "Dryos — the deck" },
   robots: { index: false, follow: false, nocache: true },
 };
 

@@ -2,77 +2,61 @@ import { Reveal, RevealGroup } from "@/components/hero/Reveal";
 import { Eyebrow, Heading, Lead, Section } from "./Section";
 
 /**
- * The marketplace, in the order money moves: a source, a person who knows it,
- * Dryos in the middle, and you. The return arrow is the whole model, so it is
- * drawn rather than implied.
+ * Three steps a first-time visitor can repeat back, and then the one thing
+ * that makes Dryos different — who the money goes to — as a strip under
+ * them rather than as the headline.
  */
-const FLOW = [
+const STEPS = [
   {
     n: "01",
-    title: "A maintainer claims a source",
-    body: "Someone who knows the data source better than anyone else. They collect it, adapt when the source changes, make revisions when something needs cleaning up, and get it to Dryos fast.",
+    title: "Pick your data",
+    body: "Browse energy, weather and property streams, or just ask for what you want in plain English.",
   },
   {
     n: "02",
-    title: "Dryos hosts, validates and meters it",
-    body: "Every run is checked against the source before it is promoted. Every query passes one place that counts it. That is the whole of what we add.",
+    title: "See it on a workspace",
+    body: "Charts, maps, tickers and tables land on a page in seconds, on live data. Drag them where you want them, or ask the AI to change one.",
   },
   {
     n: "03",
-    title: "You use the data",
-    body: "In a workspace, through the API or the MCP server, or delivered into the Snowflake or Databricks warehouse you already treat as the truth. A stream costs the same whichever way it arrives.",
-  },
-  {
-    n: "04",
-    title: "They get paid",
-    body: "When you use the data, the maintainer earns. That's it. No org chart.",
+    title: "Share it, or build on it",
+    body: "Share the workspace with your team, call the same data from the API, or give your AI agent the MCP server.",
   },
 ];
 
 export function HowItWorks() {
   return (
-    <Section id="how-it-works" band>
+    <Section id="how-it-works">
       <Reveal when="view">
         <Eyebrow>How it works</Eyebrow>
-        <Heading>Dryos is a marketplace.</Heading>
+        <Heading>From question to live dashboard in a minute.</Heading>
         <Lead>
-          We work with maintainers who know a data source better than anyone else. They get
-          paid for collecting and maintaining it: adapting when the source changes, making
-          revisions when something needs cleaning up, and getting it to Dryos fast.
+          No scrapers to keep alive and no data team to hire. Ask for the data, see it, and use it
+          wherever you work.
         </Lead>
       </Reveal>
 
-      <RevealGroup className="mt-10 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-        {FLOW.map((s, i) => (
-          <div key={s.n} className="relative rounded-lg border border-line bg-surface p-5">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-[11px] tracking-[0.14em] text-accent">{s.n}</span>
-              {i < FLOW.length - 1 && (
-                <span aria-hidden className="font-mono text-[13px] text-faint">
-                  →
-                </span>
-              )}
-            </div>
-            <h3 className="mt-3 text-[15.5px] font-semibold text-ink">{s.title}</h3>
+      <RevealGroup className="mt-10 grid gap-3 md:grid-cols-3">
+        {STEPS.map((s) => (
+          <div key={s.n} className="rounded-lg border border-line bg-surface p-5">
+            <span className="font-mono text-[11px] tracking-[0.14em] text-accent">{s.n}</span>
+            <h3 className="mt-3 text-[16px] font-semibold text-ink">{s.title}</h3>
             <p className="mt-2 text-[13.5px] leading-relaxed text-muted">{s.body}</p>
           </div>
         ))}
       </RevealGroup>
 
-      {/* The return leg: money going back the way the data came. */}
       <Reveal when="view" className="mt-3">
-        <div className="flex items-center gap-3 rounded-lg border border-dashed border-accent-line bg-accent-dim/40 px-5 py-3">
-          <span aria-hidden className="font-mono text-[13px] text-accent">
+        <div className="flex items-start gap-3 rounded-lg border border-dashed border-accent-line bg-accent-dim/40 px-5 py-3.5">
+          <span aria-hidden className="mt-[1px] font-mono text-[13px] text-accent">
             ←
           </span>
-          <p className="text-[13.5px] text-muted">
-            <span className="font-semibold text-ink">Your usage flows back to the maintainer.</span>{" "}
-            Not to a sales quota, not to a lease, not to a roadmap.
+          <p className="text-[13.5px] leading-relaxed text-muted">
+            <span className="font-semibold text-ink">Every stream has a maintainer,</span> an expert
+            who keeps it correct when the source changes. When you use their data, they get paid.
           </p>
         </div>
       </Reveal>
-
     </Section>
   );
 }
-

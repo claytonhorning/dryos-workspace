@@ -1,27 +1,62 @@
 import { Hero } from "@/components/hero/Hero";
+import { JsonLd } from "@/components/JsonLd";
+import { ForAgents } from "@/components/landing/ForAgents";
 import { HowItWorks } from "@/components/landing/HowItWorks";
-import { TheData } from "@/components/landing/TheData";
-import { TheBill } from "@/components/landing/TheBill";
+import { MCP_URL, OPERATORS, PUBLIC_API, SITE } from "@/lib/apiDocs";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = { alternates: { canonical: "/" } };
+import { Domains } from "@/components/landing/Domains";
 import { Tiers } from "@/components/landing/Tiers";
 import { WhoWeAre } from "@/components/landing/WhoWeAre";
-import { Workspaces } from "@/components/landing/Workspaces";
 
 /**
- * One page, six arguments, each a nav destination. The order is the pitch:
- * what this is, what the data is and why one roof, where the money goes, how
- * a team uses it without repeating itself, how you can buy it, who is saying
- * so. The workspace sits after the bill because it is the answer to a second
- * kind of waste — the same dashboard built four times — and reads as that
- * only once the first kind has been named.
+ * One page a first-time visitor can follow top to bottom: what Dryos is, with
+ * a try-it that answers a real question on live data (the hero); the three
+ * domains; three steps; the MCP server for people who work through an agent;
+ * three plans; who we are. Plain words throughout — the argument about data
+ * vendors lives in the deck, not on the front door.
  */
 export default function LandingPage() {
   return (
     <div>
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "Organization",
+              "@id": `${SITE}/#org`,
+              name: "Dryos",
+              url: SITE,
+              logo: `${SITE}/web-app-manifest-512x512.png`,
+            },
+            {
+              "@type": "WebSite",
+              name: "Dryos",
+              url: SITE,
+              publisher: { "@id": `${SITE}/#org` },
+            },
+            {
+              "@type": "Dataset",
+              name: "Dryos US power market data",
+              description: `Real-time and day-ahead electricity prices, load, generation and forecasts from ${OPERATORS.join(", ")}, with weather and building permits, collected live from each source and reconciled against it.`,
+              url: SITE,
+              creator: { "@id": `${SITE}/#org` },
+              isAccessibleForFree: true,
+              keywords: ["electricity prices", "LMP", "power markets", ...OPERATORS],
+              distribution: [
+                { "@type": "DataDownload", encodingFormat: "application/json", contentUrl: `${PUBLIC_API}/v1/datasets` },
+                { "@type": "DataDownload", encodingFormat: "application/json", contentUrl: MCP_URL, name: "MCP server" },
+              ],
+            },
+          ],
+        }}
+      />
       <Hero />
+      <Domains />
       <HowItWorks />
-      <TheData />
-      <TheBill />
-      <Workspaces />
+      <ForAgents />
       <Tiers />
       <WhoWeAre />
     </div>

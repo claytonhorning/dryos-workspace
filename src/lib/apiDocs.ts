@@ -210,12 +210,104 @@ export const MCP_TOOLS: { name: string; summary: string }[] = [
   },
 ];
 
-export const MCP_CLIENTS: { label: string; code: string }[] = [
+/** The site, for links that leave this deployment — the same reason
+    `PUBLIC_API` is fixed. The www host is the primary one: the apex
+    redirects to it, so a canonical, a sitemap entry or an MCP URL on the
+    apex would name a redirect — which search engines read as a mixed signal
+    and which MCP clients will not follow on a POST. */
+export const SITE = "https://www.dryos.ai";
+
+/**
+ * The public repo people clone to build on Dryos data from their own
+ * infrastructure. Not created yet: until GitHub answers for it as a public
+ * repo, the clone block renders nothing (`lib/github.ts`), so the site never
+ * links to a 404. Set `DRYOS_GITHUB_REPO` to point somewhere else.
+ */
+export const GITHUB_REPO = process.env.DRYOS_GITHUB_REPO || "claytonhorning/dryos-starter";
+
+/** The operators the power streams cover, in the order the product names them. */
+export const OPERATORS = ["ERCOT", "MISO", "PJM", "SPP", "CAISO", "NYISO", "ISO-NE"];
+
+/** One line an agent directory or a search result can quote whole. Kept
+    under the registry's hundred characters, because `server.json` reads it. */
+export const MCP_TAGLINE = "Live US power market prices, load, generation, weather and permits for AI agents.";
+
+/**
+ * How each client adds a remote server. A UI-only client gets its steps as
+ * `code` too, so every entry renders as one copyable block. The first two are
+ * what the docs page shows; `/mcp` shows them all.
+ */
+export const MCP_CLIENTS: { label: string; code: string; lang?: string }[] = [
   { label: "Claude Code", code: `claude mcp add --transport http dryos ${MCP_URL}` },
   {
-    label: "Cursor and other JSON configs",
+    label: "Cursor · ~/.cursor/mcp.json",
+    lang: "json",
     code: JSON.stringify({ mcpServers: { dryos: { url: MCP_URL } } }, null, 2),
   },
+  {
+    label: "Claude.ai & Claude Desktop",
+    lang: "steps",
+    code: `Settings → Connectors → Add custom connector\nName: Dryos\nURL:  ${MCP_URL}`,
+  },
+  {
+    label: "ChatGPT (developer mode)",
+    lang: "steps",
+    code: `Settings → Apps & Connectors → Create\nURL: ${MCP_URL}\nAuthentication: none`,
+  },
+  {
+    label: "VS Code · .vscode/mcp.json",
+    lang: "json",
+    code: JSON.stringify({ servers: { dryos: { type: "http", url: MCP_URL } } }, null, 2),
+  },
+  {
+    label: "Windsurf · mcp_config.json",
+    lang: "json",
+    code: JSON.stringify({ mcpServers: { dryos: { serverUrl: MCP_URL } } }, null, 2),
+  },
+  { label: "Gemini CLI", code: `gemini mcp add --transport http dryos ${MCP_URL}` },
+  {
+    label: "Codex · ~/.codex/config.toml",
+    lang: "toml",
+    code: `[mcp_servers.dryos]\nurl = "${MCP_URL}"`,
+  },
+];
+
+/** One-click installs, where the client registers a link scheme for it. */
+export const MCP_DEEPLINKS: { label: string; href: string }[] = [
+  {
+    label: "Add to Cursor",
+    href: `cursor://anysphere.cursor-deeplink/mcp/install?name=dryos&config=${btoa(JSON.stringify({ url: MCP_URL }))}`,
+  },
+  {
+    label: "Add to VS Code",
+    href: `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: "dryos", type: "http", url: MCP_URL }))}`,
+  },
+];
+
+/**
+ * The second MCP server: workspaces in the signed-in user's own account.
+ * Written from `lib/workspace/mcpTools.ts`; a tool added there is added here.
+ */
+export const WORKSPACE_MCP_URL = `${SITE}/api/mcp`;
+
+export const WORKSPACE_MCP_TOOLS: { name: string; summary: string }[] = [
+  { name: "list_workspaces", summary: "Your workspaces and their pages, with links." },
+  { name: "list_components", summary: "The tile shapes and their settings, and the published recipes a page can start from." },
+  { name: "create_workspace", summary: "A new workspace with its first page, blank or from a recipe." },
+  { name: "add_page", summary: "Another page in a workspace." },
+  { name: "add_tile", summary: "A chart, ticker, bar, table, map, heatmap or title on live data — compiled before it is saved." },
+  { name: "get_page", summary: "What is on a page and where." },
+];
+
+export const WORKSPACE_MCP_ADD = `claude mcp add --transport http dryos-workspace ${WORKSPACE_MCP_URL}`;
+
+/** Questions the tools answer as written — what to try first. */
+export const MCP_PROMPTS = [
+  "What was the highest real-time price at ERCOT's Houston hub in the last 24 hours, and when?",
+  "Compare the hourly average price at ERCOT's North hub, PJM's Western hub and MISO's Indiana hub over the past week.",
+  "Which NYISO zones are pricing above $100 right now?",
+  "Build me a React dashboard of CAISO's NP15 and SP15 real-time prices that refreshes every five minutes.",
+  "How many roofing permits did San Antonio issue each week this quarter?",
 ];
 
 export const QUICKSTART = `curl "${PUBLIC_API}/v1/datasets/ercot-realtime-lmp/query?node=HB_NORTH&limit=2"`;
@@ -261,14 +353,47 @@ export function agentInstructions(): string {
 
   const routes = ROUTES.map((r) => `- \`GET ${r.path}\` — ${r.summary}`).join("\n");
 
-  return `# Dryos API — instructions for AI agents
+  const tools = MCP_TOOLS.map((t) => `- \`${t.name}\` — ${t.summary}`).join("\n");
+  const connect = MCP_CLIENTS.filter((c) => !c.lang || c.lang === "toml")
+    .map((c) => `- ${c.label}: \`${c.code.replace(/\n/g, " ")}\``)
+    .join("\n");
 
-Dryos serves real, reconciled data — US power markets (ERCOT, MISO, PJM, SPP, CAISO, NYISO, ISO-NE), weather, and building permits — collected live from the source and served as read-only JSON.
+  // Shaped to llmstxt.org: a title, a one-paragraph summary as a quote, then
+  // sections. The MCP server leads because an agent that can take tools
+  // should never be building URLs.
+  return `# Dryos
+
+> Dryos serves real, reconciled data — US power markets (${OPERATORS.join(", ")}), weather, and building permits — collected live from the source, through a remote MCP server for AI agents and a public read-only REST API. No key needed.
+
+## MCP server
+
+URL: ${MCP_URL}
+Transport: Streamable HTTP. No key, no sign-up, read-only. Details and every client: ${SITE}/mcp
+
+Tools:
+${tools}
+
+Connect:
+${connect}
+- Cursor, VS Code, Windsurf and other JSON configs: \`{"mcpServers": {"dryos": {"url": "${MCP_URL}"}}}\`
+- Claude.ai, Claude Desktop, ChatGPT: add a custom connector with the URL above and no authentication.
+
+The rules below hold for the tools and the REST API alike.
+
+## Workspace MCP server (builds in the user's account)
+
+URL: ${WORKSPACE_MCP_URL}
+Transport: Streamable HTTP. Requires signing in with a Dryos account (OAuth 2.1; the client opens the login and consent page itself). Use it with the data server: find streams and entity names there, then build here.
+
+Tools:
+${WORKSPACE_MCP_TOOLS.map((t) => `- \`${t.name}\` — ${t.summary}`).join("\n")}
+
+Connect: \`${WORKSPACE_MCP_ADD}\`, or add a custom connector with the URL above in Claude.ai, Claude Desktop or ChatGPT.
+
+## REST API
 
 Base URL: ${PUBLIC_API}
-Every route is GET and answers JSON. No API key is needed today. If you send \`Authorization: Bearer <token>\`, it must be a valid Dryos access token: a bad or expired token is refused with 401, never served anonymously.
-
-If you can take MCP tools, connect to \`${MCP_URL}\` (Streamable HTTP, no key) instead of building URLs: ${MCP_TOOLS.map((t) => `\`${t.name}\``).join(", ")}. The rules below hold either way.
+Every route is GET and answers JSON. No API key is needed today. If you send \`Authorization: Bearer <token>\`, it must be a valid Dryos access token: a bad or expired token is refused with 401, never served anonymously. Reference: ${SITE}/docs
 
 ## How to answer a question
 

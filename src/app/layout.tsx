@@ -4,6 +4,7 @@ import { Geist, Geist_Mono, Sora } from "next/font/google";
 import { AppFrame } from "@/components/AppFrame";
 import { Nav } from "@/components/Nav";
 import { THEME_INIT_SCRIPT } from "@/components/ThemeToggle";
+import { SITE } from "@/lib/apiDocs";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -21,10 +22,44 @@ const sora = Sora({
   display: "swap",
 });
 
+const DESCRIPTION =
+  "Live, reconciled US power market data — ERCOT, MISO, PJM, SPP, CAISO, NYISO and ISO-NE prices, load, generation and forecasts, plus weather and building permits — in dashboards, a public API, and an MCP server for AI agents.";
+
 export const metadata: Metadata = {
-  title: "Dryos — build on data from the people who maintain it",
-  description:
-    "Industry dashboards running on production data, changed by talking to an agent and shared with your team. You pay for the queries you make. Starting with ERCOT real-time locational marginal prices.",
+  // Every relative URL below — canonicals, Open Graph images — resolves
+  // against the real domain, never whichever host served the build.
+  metadataBase: new URL(SITE),
+  title: {
+    default: "Dryos — live US power market data for dashboards, APIs and AI agents",
+    template: "%s — Dryos",
+  },
+  description: DESCRIPTION,
+  applicationName: "Dryos",
+  keywords: [
+    "power market data",
+    "electricity prices",
+    "LMP",
+    "ERCOT",
+    "MISO",
+    "PJM",
+    "SPP",
+    "CAISO",
+    "NYISO",
+    "ISO-NE",
+    "MCP server",
+    "energy data API",
+  ],
+  // No canonical and no og:url here: both are inherited by every page that
+  // does not set its own, and a canonical of "/" on /maintainers tells a
+  // search engine the page is a duplicate of the home page. Each page names
+  // its own address.
+  openGraph: {
+    type: "website",
+    siteName: "Dryos",
+    title: "Dryos — live US power market data",
+    description: DESCRIPTION,
+  },
+  twitter: { card: "summary_large_image", title: "Dryos — live US power market data", description: DESCRIPTION },
   /*
     Declared here rather than by the `app/icon.*` file convention, because the
     generated package is a set that has to agree with itself: the webmanifest

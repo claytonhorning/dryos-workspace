@@ -128,10 +128,17 @@ export default function DocsPage() {
           <CopyButton value={MCP_URL} />
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {MCP_CLIENTS.map((c) => (
+          {MCP_CLIENTS.slice(0, 2).map((c) => (
             <CodeBlock key={c.label} code={c.code} title={c.label} wrap />
           ))}
         </div>
+        <p className="mt-3">
+          Claude.ai, ChatGPT, VS Code, Windsurf, Gemini CLI and Codex are on{" "}
+          <a href="/mcp" className="text-accent hover:underline">
+            the MCP server&apos;s page
+          </a>
+          .
+        </p>
         <table className="mt-4 w-full text-left text-[13px]">
           <tbody>
             {MCP_TOOLS.map((t) => (

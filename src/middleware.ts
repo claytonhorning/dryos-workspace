@@ -77,7 +77,9 @@ export async function middleware(request: NextRequest) {
     const login = request.nextUrl.clone();
     login.pathname = "/login";
     login.search = "";
-    login.searchParams.set("next", request.nextUrl.pathname);
+    // The query rides along: `/workspace/start?recipe=…` from the landing
+    // page's try-it is a destination only with its recipe attached.
+    login.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
     return NextResponse.redirect(login);
   }
 

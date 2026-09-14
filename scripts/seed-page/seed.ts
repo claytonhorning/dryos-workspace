@@ -10,10 +10,10 @@
 // the only credential that can write another user's rows, so `user_id` is set
 // explicitly (its default is `auth.uid()`, which the secret key has none of).
 // Without the key, `--sql` writes the statements to a file instead.
-import { communityComponents, communityGroups, groupMembers, type RecipePiece } from "../../src/lib/workspace/community";
+import { communityComponents, communityGroups, groupMembers, placeGroup, type RecipePiece } from "../../src/lib/workspace/community";
 import { composeApp } from "../../src/lib/workspace/compose";
 import { compile } from "../../src/lib/workspace/runtime";
-import { GRID, packLayout, type ComponentSpec } from "../../src/lib/workspace/components";
+import { packLayout, type ComponentSpec } from "../../src/lib/workspace/components";
 import type { PublishedGroupMember } from "../../src/lib/workspace/community";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -93,22 +93,9 @@ async function resolveUser(c: Creds | null, who: string): Promise<string> {
 /* ── The page ──────────────────────────────────────────────────────────── */
 
 /** Group members as the edit route lands them at anchor (0, 0) on an empty page. */
+/** An empty page is base 0, so a group-relative wire is the slot itself. */
 function place(members: PublishedGroupMember[]): ComponentSpec[] {
-  let down = 0;
-  return members.map((m) => {
-    const at = m.at ?? { x: 0, y: down };
-    if (!m.at) down += m.layout.h + GRID.gap;
-    return {
-      kind: m.kind,
-      refs: m.refs,
-      // An empty page is base 0, so a group-relative wire is the slot itself.
-      options:
-        m.wireTo !== undefined
-          ? { ...(m.options ?? {}), follow: String(m.wireTo), wireColor: "1" }
-          : { ...(m.options ?? {}) },
-      layout: { x: at.x, y: at.y, w: m.layout.w, h: m.layout.h },
-    };
-  });
+  return placeGroup(members);
 }
 
 function source(a: Record<string, string>): { name: string; manifest: ComponentSpec[] } {
