@@ -2313,6 +2313,82 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // CAISO's ancillary clearing prices (`caiso_ancillary.py`): a row per
+  // region, a column per product, so a region charts as one line per product.
+  {
+    id: "energy.caiso.asdam",
+    path: ["Energy", "Ancillary", "DAM prices"],
+    name: "CAISO day-ahead ancillary prices",
+    short: "AS · DA",
+    dataset: "caiso-dam-as",
+    availability: "live",
+    cadence: { label: "daily, early afternoon PT", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: {
+      count: 6,
+      label: "AS regions",
+      sample: ["AS_CAISO_EXP", "AS_NP26", "AS_SP26"],
+    },
+    entityKey: "zone",
+    blurb:
+      "Hourly day-ahead clearing prices for regulation up and down, spinning and " +
+      "non-spinning reserve and regulation mileage, in CAISO's six ancillary service " +
+      "regions — the system, north and south of Path 26, each with and without the interties.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "reg_up_mcp", label: "Regulation up", unit: "$/MW", availability: "live",
+        description: "Regulation up clearing price.", mock: { base: 8, swing: 6, noise: 2, floor: 0 } },
+      { key: "reg_down_mcp", label: "Regulation down", unit: "$/MW", availability: "live",
+        description: "Regulation down clearing price.", mock: { base: 5, swing: 4, noise: 1.5, floor: 0 } },
+      { key: "spin_mcp", label: "Spinning", unit: "$/MW", availability: "live",
+        description: "Spinning reserve clearing price.", mock: { base: 4, swing: 4, noise: 1.5, floor: 0 } },
+      { key: "nonspin_mcp", label: "Non-spinning", unit: "$/MW", availability: "live",
+        description: "Non-spinning reserve clearing price.", mock: { base: 1, swing: 2, noise: 0.5, floor: 0 } },
+      { key: "reg_mileage_up_mcp", label: "Mileage up", unit: "$/MW", availability: "live",
+        description: "Regulation mileage up price. AS_CAISO_EXP only; null elsewhere.",
+        mock: { base: 0.2, swing: 0.2, noise: 0.05, floor: 0 } },
+      { key: "reg_mileage_down_mcp", label: "Mileage down", unit: "$/MW", availability: "live",
+        description: "Regulation mileage down price. AS_CAISO_EXP only; null elsewhere.",
+        mock: { base: 0.2, swing: 0.2, noise: 0.05, floor: 0 } },
+    ],
+  },
+  {
+    id: "energy.caiso.asrt",
+    path: ["Energy", "Ancillary", "RT prices"],
+    name: "CAISO real-time ancillary prices",
+    short: "AS · RT",
+    dataset: "caiso-rt-as",
+    availability: "live",
+    cadence: { label: "every 15 min", seconds: 900 },
+    tokens: 0.25,
+    entities: {
+      count: 6,
+      label: "AS regions",
+      sample: ["AS_CAISO_EXP", "AS_NP26", "AS_SP26"],
+    },
+    entityKey: "zone",
+    blurb:
+      "Fifteen-minute real-time clearing prices for regulation up and down, spinning and " +
+      "non-spinning reserve and regulation mileage, in CAISO's six ancillary service regions.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "reg_up_mcp", label: "Regulation up", unit: "$/MW", availability: "live",
+        description: "Regulation up clearing price.", mock: { base: 8, swing: 6, noise: 2, floor: 0 } },
+      { key: "reg_down_mcp", label: "Regulation down", unit: "$/MW", availability: "live",
+        description: "Regulation down clearing price.", mock: { base: 5, swing: 4, noise: 1.5, floor: 0 } },
+      { key: "spin_mcp", label: "Spinning", unit: "$/MW", availability: "live",
+        description: "Spinning reserve clearing price.", mock: { base: 4, swing: 4, noise: 1.5, floor: 0 } },
+      { key: "nonspin_mcp", label: "Non-spinning", unit: "$/MW", availability: "live",
+        description: "Non-spinning reserve clearing price.", mock: { base: 1, swing: 2, noise: 0.5, floor: 0 } },
+      { key: "reg_mileage_up_mcp", label: "Mileage up", unit: "$/MW", availability: "live",
+        description: "Regulation mileage up price. AS_CAISO_EXP only; null elsewhere.",
+        mock: { base: 0.2, swing: 0.2, noise: 0.05, floor: 0 } },
+      { key: "reg_mileage_down_mcp", label: "Mileage down", unit: "$/MW", availability: "live",
+        description: "Regulation mileage down price. AS_CAISO_EXP only; null elsewhere.",
+        mock: { base: 0.2, swing: 0.2, noise: 0.05, floor: 0 } },
+    ],
+  },
   // CAISO's load and wind/solar from OASIS (`caiso_forecasts.py`): one stream
   // per horizon, because a series is keyed on the area alone. CA ISO-TAC is
   // the sum of CAISO's five areas, so a fan-out leaves it out.
