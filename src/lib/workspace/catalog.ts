@@ -2313,6 +2313,79 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // CAISO's binding constraints (`caiso_constraints.py`): rows only while a
+  // constraint binds, so the set of names is whatever the grid did.
+  {
+    id: "energy.caiso.constraintsdam",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "CAISO day-ahead binding constraints",
+    short: "Constraints · DA",
+    dataset: "caiso-dam-shadow-prices",
+    availability: "live",
+    cadence: { label: "daily, early afternoon PT", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 32,
+      label: "constraints",
+      sample: [
+        "31336_HPLND JT_60.0_31370_CLVRDLJT_60.0_BR_1 _1",
+        "24701_KRAMER  _230_24601_VICTOR  _230_BR_2 _1",
+        "7820_TL 230S_OVERLOAD_NG",
+      ],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "Every transmission constraint CAISO's day-ahead market bound on, hour by hour, " +
+      "with the contingency it bound for and its shadow price, posted for the whole of " +
+      "tomorrow each afternoon. The set of constraints is whatever the grid did that day.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Shadow price",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The constraint's shadow price for the hour, in CAISO's sign.",
+        mock: { base: 40, swing: 80, noise: 20 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.constraintsrt",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "CAISO real-time binding constraints",
+    short: "Constraints · RT",
+    dataset: "caiso-rt-shadow-prices",
+    availability: "live",
+    cadence: { label: "every 5 min, when bound", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 28,
+      label: "constraints",
+      sample: [
+        "31336_HPLND JT_60.0_31370_CLVRDLJT_60.0_BR_1 _1",
+        "24114_PARDEE  _230_24115_PASTORIA_230_BR_1 _1",
+        "7820_TL 230S_OVERLOAD_NG",
+      ],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "Every transmission constraint CAISO's real-time dispatch was up against, five " +
+      "minutes at a time, with the contingency it bound for and its shadow price. Empty " +
+      "when nothing binds, which is a fact and not a gap.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Shadow price",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The constraint's shadow price for the interval, in CAISO's sign.",
+        mock: { base: 40, swing: 120, noise: 30 },
+      },
+    ],
+  },
   // CAISO's ancillary clearing prices (`caiso_ancillary.py`): a row per
   // region, a column per product, so a region charts as one line per product.
   {

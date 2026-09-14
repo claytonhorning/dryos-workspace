@@ -71,16 +71,14 @@ export const metadata: Metadata = {
     a build hash in its URL and half not.
 
     The SVG is first because that is what a modern browser should take: it is
-    the only one that stays sharp at any size, and the only one that can
-    follow the theme. The mark is four tiles, one lit — a screen with a tile
-    just updated — on no ground, so it switches palette inside the file
-    (`prefers-color-scheme`: chartreuse on dark, the light theme's olive on
-    light), since chartreuse on a white tab strip is invisible. Safari ignores
-    SVG favicons, so the ICO and the 96px PNG are one palette that reads on
-    both; the touch and manifest icons keep the ink ground because iOS fills
-    transparency with black and a maskable icon must be full bleed. The API
-    serves the tiles on a chartreuse ground (`status_page.ICON`). Redraw the
-    set together.
+    the only one that stays sharp at any size. The mark is four tiles, one
+    lit — a screen with a tile just updated — grey (`#aeb9c6`, the API
+    icon's light-theme grey) and chartreuse on no ground, in every theme. The ICO and the 96px PNG (Safari ignores SVG
+    favicons) are the same; the touch and manifest icons put it on the ink
+    ground because iOS fills transparency with black and a maskable icon must
+    be full bleed. The API serves the same tiles muted (`status_page.ICON`):
+    the solid tiles are the site, the quiet ones the API. Redraw the set
+    together.
   */
   icons: {
     icon: [
