@@ -2129,6 +2129,191 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // SPP's interchange (`spp_interchange.py`): a row per tie per minute, both
+  // markets in one stream since the tie names do not collide, and each
+  // authority's own net as a row under its name — left out of a fan-out,
+  // since stacked on the ties it counts them twice.
+  {
+    id: "energy.spp.ties",
+    path: ["Energy", "Grid", "Tie flows"],
+    name: "SPP interchange by tie",
+    short: "Ties",
+    dataset: "spp-interchange",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    intervalSeconds: 60,
+    tokens: 0.5,
+    entities: { count: 34, label: "ties", sample: ["AECI", "TVA", "PACE"] },
+    entityKey: "counterparty",
+    entityOmit: ["SPP", "SWPW"],
+    blurb:
+      "Actual flow every minute on each of SPP's ties with its neighbours — MISO's " +
+      "areas, TVA, ERCOT, and RTO West's western neighbours — with each authority's " +
+      "net actual and net scheduled interchange. SPP keeps a day of it.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "actual_mw", label: "Actual", unit: "MW", availability: "live",
+        description: "Actual flow over the tie at the reading, in SPP's sign; on SPP and " +
+          "SWPW, the net actual interchange.",
+        mock: { base: 200, swing: 500, noise: 60 } },
+      { key: "scheduled_mw", label: "Scheduled (net)", unit: "MW", availability: "live",
+        description: "Net scheduled interchange — on the SPP and SWPW rows only.",
+        mock: { base: 1_500, swing: 1_000, noise: 50 } },
+    ],
+  },
+  {
+    id: "energy.spp.reserves",
+    path: ["Energy", "Ancillary", "Reserves"],
+    name: "SPP real-time reserves cleared",
+    short: "Reserves",
+    dataset: "spp-rt-reserves-cleared",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: { count: 8, label: "reserve zones", sample: ["1", "4", "21"] },
+    entityKey: "zone",
+    // SPP is the sum of zones 1–5 and SWPW equals zone 21; stacked, both double.
+    entityOmit: ["SPP", "SWPW"],
+    blurb:
+      "The megawatts of each reserve product SPP's real-time market cleared, every " +
+      "five minutes, by reserve zone — the quantities beside SPP's reserve prices.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "reg_up_mw", label: "Regulation up", unit: "MW", availability: "live",
+        description: "Cleared regulation up.", mock: { base: 130, swing: 100, noise: 10, floor: 0 } },
+      { key: "reg_down_mw", label: "Regulation down", unit: "MW", availability: "live",
+        description: "Cleared regulation down.", mock: { base: 120, swing: 100, noise: 10, floor: 0 } },
+      { key: "spin_mw", label: "Spinning", unit: "MW", availability: "live",
+        description: "Cleared spinning reserve.", mock: { base: 130, swing: 100, noise: 10, floor: 0 } },
+      { key: "supp_mw", label: "Supplemental", unit: "MW", availability: "live",
+        description: "Cleared supplemental reserve.", mock: { base: 130, swing: 100, noise: 10, floor: 0 } },
+      { key: "ramp_up_mw", label: "Ramp up", unit: "MW", availability: "live",
+        description: "Cleared ramp capability up.", mock: { base: 120, swing: 150, noise: 20, floor: 0 } },
+      { key: "ramp_down_mw", label: "Ramp down", unit: "MW", availability: "live",
+        description: "Cleared ramp capability down.", mock: { base: 800, swing: 1_500, noise: 80, floor: 0 } },
+      { key: "uncertainty_up_mw", label: "Uncertainty up", unit: "MW", availability: "live",
+        description: "Cleared uncertainty reserve up.", mock: { base: 250, swing: 300, noise: 30, floor: 0 } },
+      { key: "sts_uncertainty_up_mw", label: "STS uncertainty up", unit: "MW", availability: "live",
+        description: "SPP's STSUncUP product; equal to uncertainty up on every row read.",
+        mock: { base: 250, swing: 300, noise: 30, floor: 0 } },
+    ],
+  },
+  // SPP's load and wind/solar (`spp_forecasts.py`): the RTO (SPP) and RTO West
+  // (SWPW) as the two zones of every stream. Forecasts keep every publication;
+  // the actuals are the rows published beside them.
+  {
+    id: "energy.spp.load",
+    path: ["Energy", "Load", "System demand"],
+    name: "SPP system load",
+    short: "Load",
+    dataset: "spp-system-load",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: { count: 2, label: "balancing authorities", sample: ["SPP", "SWPW"] },
+    entityKey: "zone",
+    blurb:
+      "Load every five minutes in SPP's RTO and in RTO West, with SPP's own short-term " +
+      "forecast for each interval beside it.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "load_mw", label: "Load", unit: "MW", availability: "live",
+        description: "Actual load in the interval.", mock: { base: 42_000, swing: 9_000, noise: 400 } },
+      { key: "stlf_mw", label: "Short-term forecast", unit: "MW", availability: "live",
+        description: "SPP's short-term forecast for the same interval.",
+        mock: { base: 42_000, swing: 9_000, noise: 500 } },
+    ],
+  },
+  {
+    id: "energy.spp.renewables",
+    path: ["Energy", "Generation", "Wind and solar"],
+    name: "SPP wind and solar output",
+    short: "Wind · solar",
+    dataset: "spp-renewables-actual",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: { count: 2, label: "balancing authorities", sample: ["SPP", "SWPW"] },
+    entityKey: "zone",
+    blurb:
+      "Wind and solar output every five minutes in SPP's RTO and in RTO West — the " +
+      "actuals SPP publishes beside its short-term resource forecast.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "wind_mw", label: "Wind", unit: "MW", availability: "live",
+        description: "Actual wind output.", mock: { base: 16_000, swing: 9_000, noise: 600 } },
+      { key: "solar_mw", label: "Solar", unit: "MW", availability: "live",
+        description: "Actual solar output.", mock: { base: 1_500, swing: 1_500, noise: 100, floor: 0 } },
+    ],
+  },
+  {
+    id: "energy.spp.renewablesfc5",
+    path: ["Energy", "Generation", "Wind and solar forecast"],
+    name: "SPP short-term wind and solar forecast",
+    short: "Wind · solar fc · 4h",
+    dataset: "spp-renewables-forecast-5min",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: { count: 2, label: "balancing authorities", sample: ["SPP", "SWPW"] },
+    entityKey: "zone",
+    blurb:
+      "SPP's wind and solar forecast four hours ahead at five-minute grain, for the RTO " +
+      "and RTO West, every five-minute publication kept.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "wind_mw", label: "Wind", unit: "MW", availability: "live",
+        description: "Forecast wind output.", mock: { base: 16_000, swing: 9_000, noise: 400 } },
+      { key: "solar_mw", label: "Solar", unit: "MW", availability: "live",
+        description: "Forecast solar output.", mock: { base: 1_500, swing: 1_500, noise: 80, floor: 0 } },
+    ],
+  },
+  {
+    id: "energy.spp.loadfc7",
+    path: ["Energy", "Load", "Seven-day forecast"],
+    name: "SPP seven-day load forecast",
+    short: "Load fc · 7d",
+    dataset: "spp-load-forecast-7day",
+    availability: "live",
+    cadence: { label: "hourly", seconds: 3_600 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: { count: 2, label: "balancing authorities", sample: ["SPP", "SWPW"] },
+    entityKey: "zone",
+    blurb:
+      "SPP's hourly load forecast seven days ahead for the RTO and RTO West, every " +
+      "hourly publication kept.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "load_forecast_mw", label: "Load forecast", unit: "MW", availability: "live",
+        description: "SPP's mid-term forecast of the hour's load.",
+        mock: { base: 42_000, swing: 9_000, noise: 300 } },
+    ],
+  },
+  {
+    id: "energy.spp.renewablesfc7",
+    path: ["Energy", "Generation", "Wind and solar forecast"],
+    name: "SPP seven-day wind and solar forecast",
+    short: "Wind · solar fc · 7d",
+    dataset: "spp-renewables-forecast-7day",
+    availability: "live",
+    cadence: { label: "hourly", seconds: 3_600 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: { count: 2, label: "balancing authorities", sample: ["SPP", "SWPW"] },
+    entityKey: "zone",
+    blurb:
+      "SPP's hourly wind and solar forecast seven days ahead for the RTO and RTO West, " +
+      "every hourly publication kept.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "wind_mw", label: "Wind", unit: "MW", availability: "live",
+        description: "Forecast wind output for the hour.", mock: { base: 16_000, swing: 9_000, noise: 400 } },
+      { key: "solar_mw", label: "Solar", unit: "MW", availability: "live",
+        description: "Forecast solar output for the hour.",
+        mock: { base: 1_500, swing: 1_500, noise: 80, floor: 0 } },
+    ],
+  },
   // SPP's transmission constraints (`spp_constraints.py`). Real time lists every
   // constraint in the dispatch, activated ones at a shadow price of zero beside
   // the binding and breached; `state` says which. SPP's sign is negative.
