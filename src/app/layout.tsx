@@ -71,11 +71,16 @@ export const metadata: Metadata = {
     a build hash in its URL and half not.
 
     The SVG is first because that is what a modern browser should take: it is
-    the only one that stays sharp at any size, and it carries its own ink
-    ground so the letter reads on a light tab strip too. The mark is a d whose
-    counter is the chartreuse dot the feeds menu lights for arriving data;
-    the API serves the same mark inverted (`status_page.ICON`). The PNGs and
-    the ICO are rasterised from the same glyph — redraw them together.
+    the only one that stays sharp at any size, and the only one that can
+    follow the theme. The mark is four tiles, one lit — a screen with a tile
+    just updated — on no ground, so it switches palette inside the file
+    (`prefers-color-scheme`: chartreuse on dark, the light theme's olive on
+    light), since chartreuse on a white tab strip is invisible. Safari ignores
+    SVG favicons, so the ICO and the 96px PNG are one palette that reads on
+    both; the touch and manifest icons keep the ink ground because iOS fills
+    transparency with black and a maskable icon must be full bleed. The API
+    serves the tiles on a chartreuse ground (`status_page.ICON`). Redraw the
+    set together.
   */
   icons: {
     icon: [
