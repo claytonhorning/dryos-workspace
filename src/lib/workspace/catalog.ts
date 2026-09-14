@@ -2129,6 +2129,165 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // SPP's transmission constraints (`spp_constraints.py`). Real time lists every
+  // constraint in the dispatch, activated ones at a shadow price of zero beside
+  // the binding and breached; `state` says which. SPP's sign is negative.
+  {
+    id: "energy.spp.constraintsrt",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "SPP real-time binding constraints",
+    short: "Constraints · RT",
+    dataset: "spp-rt-shadow-prices",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 88,
+      label: "constraints",
+      sample: ["TMP845_30027", "TMP459_32122", "TP1125_33384"],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "Every transmission constraint in SPP's real-time dispatch, five minutes at a " +
+      "time — binding, breached, or activated at a zero price — with the contingency " +
+      "it is monitored for, its limits and its shadow price.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Shadow price",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "The constraint's shadow price for the interval, in SPP's sign — zero or " +
+          "negative. Zero on every activated, non-binding constraint.",
+        mock: { base: -40, swing: 120, noise: 30 },
+      },
+    ],
+  },
+  {
+    id: "energy.spp.constraintsdam",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "SPP day-ahead binding constraints",
+    short: "Constraints · DA",
+    dataset: "spp-dam-shadow-prices",
+    availability: "live",
+    cadence: { label: "daily, afternoon CT", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: {
+      count: 84,
+      label: "constraints",
+      sample: ["OSAWEBCLESOO", "SOONER_SONR_SONR_PHSHFT_PS", "TMP630_33215"],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "Every transmission constraint that bound in SPP's day-ahead market, hour by " +
+      "hour, with the contingency it bound for and its shadow price, posted for the " +
+      "whole of tomorrow each afternoon.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Shadow price",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The constraint's shadow price for the hour, in SPP's sign — negative almost always.",
+        mock: { base: -30, swing: 100, noise: 25 },
+      },
+    ],
+  },
+  // SPP's reserve prices (`spp_ancillary.py`): a row per reserve zone, a column
+  // per product. The zones of one market price alike, so SPP and SWPW — each
+  // market's system-wide row — are the two worth charting; the fan-out keeps
+  // all eight because SPP publishes all eight.
+  {
+    id: "energy.spp.asrt",
+    path: ["Energy", "Ancillary", "RT prices"],
+    name: "SPP real-time ancillary prices",
+    short: "AS · RT",
+    dataset: "spp-rt-as",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 8,
+      label: "reserve zones",
+      sample: ["SPP", "SWPW", "1"],
+    },
+    entityKey: "zone",
+    blurb:
+      "Five-minute clearing prices for SPP's reserve products — regulation up and down " +
+      "and their mileage, spinning, supplemental, ramp capability and uncertainty " +
+      "reserve — in every reserve zone of the RTO and RTO West.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "reg_up_mcp", label: "Regulation up", unit: "$/MW", availability: "live",
+        description: "Regulation up clearing price.", mock: { base: 12, swing: 10, noise: 3, floor: 0 } },
+      { key: "reg_down_mcp", label: "Regulation down", unit: "$/MW", availability: "live",
+        description: "Regulation down clearing price.", mock: { base: 6, swing: 5, noise: 2, floor: 0 } },
+      { key: "spin_mcp", label: "Spinning", unit: "$/MW", availability: "live",
+        description: "Spinning reserve clearing price.", mock: { base: 3, swing: 4, noise: 1, floor: 0 } },
+      { key: "supp_mcp", label: "Supplemental", unit: "$/MW", availability: "live",
+        description: "Supplemental (non-spinning) reserve clearing price.",
+        mock: { base: 1, swing: 2, noise: 0.5, floor: 0 } },
+      { key: "ramp_up_mcp", label: "Ramp up", unit: "$/MW", availability: "live",
+        description: "Ramp capability up clearing price. Often zero.",
+        mock: { base: 0.5, swing: 1, noise: 0.3, floor: 0 } },
+      { key: "ramp_down_mcp", label: "Ramp down", unit: "$/MW", availability: "live",
+        description: "Ramp capability down clearing price. Often zero.",
+        mock: { base: 0.1, swing: 0.2, noise: 0.05, floor: 0 } },
+      { key: "uncertainty_up_mcp", label: "Uncertainty up", unit: "$/MW", availability: "live",
+        description: "Uncertainty reserve up clearing price. Often zero.",
+        mock: { base: 0.2, swing: 0.5, noise: 0.1, floor: 0 } },
+      { key: "reg_mileage_up_mcp", label: "Mileage up", unit: "$/MW", availability: "live",
+        description: "Regulation mileage up price.", mock: { base: 1, swing: 1, noise: 0.3, floor: 0 } },
+      { key: "reg_mileage_down_mcp", label: "Mileage down", unit: "$/MW", availability: "live",
+        description: "Regulation mileage down price.", mock: { base: 1, swing: 1, noise: 0.3, floor: 0 } },
+    ],
+  },
+  {
+    id: "energy.spp.asdam",
+    path: ["Energy", "Ancillary", "DAM prices"],
+    name: "SPP day-ahead ancillary prices",
+    short: "AS · DA",
+    dataset: "spp-dam-as",
+    availability: "live",
+    cadence: { label: "daily, afternoon CT", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: {
+      count: 8,
+      label: "reserve zones",
+      sample: ["SPP", "SWPW", "1"],
+    },
+    entityKey: "zone",
+    blurb:
+      "Hourly day-ahead clearing prices for SPP's reserve products — regulation up and " +
+      "down, spinning, supplemental, ramp capability and uncertainty reserve — in every " +
+      "reserve zone, posted for the whole of tomorrow each afternoon.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "reg_up_mcp", label: "Regulation up", unit: "$/MW", availability: "live",
+        description: "Regulation up clearing price.", mock: { base: 12, swing: 10, noise: 3, floor: 0 } },
+      { key: "reg_down_mcp", label: "Regulation down", unit: "$/MW", availability: "live",
+        description: "Regulation down clearing price.", mock: { base: 6, swing: 5, noise: 2, floor: 0 } },
+      { key: "spin_mcp", label: "Spinning", unit: "$/MW", availability: "live",
+        description: "Spinning reserve clearing price.", mock: { base: 3, swing: 4, noise: 1, floor: 0 } },
+      { key: "supp_mcp", label: "Supplemental", unit: "$/MW", availability: "live",
+        description: "Supplemental (non-spinning) reserve clearing price.",
+        mock: { base: 1, swing: 2, noise: 0.5, floor: 0 } },
+      { key: "ramp_up_mcp", label: "Ramp up", unit: "$/MW", availability: "live",
+        description: "Ramp capability up clearing price.",
+        mock: { base: 2, swing: 3, noise: 0.5, floor: 0 } },
+      { key: "ramp_down_mcp", label: "Ramp down", unit: "$/MW", availability: "live",
+        description: "Ramp capability down clearing price. Often zero.",
+        mock: { base: 0.1, swing: 0.2, noise: 0.05, floor: 0 } },
+      { key: "uncertainty_up_mcp", label: "Uncertainty up", unit: "$/MW", availability: "live",
+        description: "Uncertainty reserve up clearing price.",
+        mock: { base: 1, swing: 2, noise: 0.5, floor: 0 } },
+    ],
+  },
   // The two fuel-mix streams are one file per balancing authority — the RTO
   // (`SPP`) and RTO West (`SWPW`) — kept apart because a series is keyed on
   // the fuel alone, and two authorities' WIND on one timestamp would chart
