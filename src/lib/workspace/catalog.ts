@@ -2063,7 +2063,7 @@ export const SCHEMAS: Schema[] = [
     cadence: { label: "every 5 min", seconds: 300 },
     tokens: 1,
     entities: {
-      count: 2757,
+      count: 2711,
       label: "pricing nodes",
       sample: ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "DLAP_PGAE-APND"],
     },
@@ -2077,7 +2077,9 @@ export const SCHEMAS: Schema[] = [
     locatedBy:
       "EIA-860M plant coordinates, matched by name within the area the node's energy " +
       "price puts it in; and the substations CAISO's own price map draws",
-    locatedCount: 438,
+    // 438 are placed in the node table, 426 among the priced nodes: twelve
+    // placed EIM nodes are listed at zero in every component and not stored.
+    locatedCount: 426,
     blurb:
       "Real-time dispatch prices at every CAISO aggregated pricing node — the NP15, " +
       "SP15 and ZP26 trading hubs, the utilities' load aggregation points, resources, " +
@@ -2133,6 +2135,90 @@ export const SCHEMAS: Schema[] = [
           "Marginal energy component, published by CAISO. Not one number per " +
           "interval: the Western EIM areas balance separately, and their energy " +
           "prices part when transfers between them bind.",
+        mock: { base: 26, swing: 10, noise: 2 },
+      },
+      {
+        key: "lmp_ghg",
+        label: "Greenhouse gas",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Greenhouse-gas component — CAISO's price for compliance on energy " +
+          "delivered into California. Usually zero.",
+        mock: { base: 0, swing: 0.5, noise: 0.1 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.fmm",
+    path: ["Energy", "Pricing", "Fifteen-minute"],
+    name: "CAISO fifteen-minute LMP",
+    short: "FMM · LMP",
+    dataset: "caiso-fmm-lmp",
+    availability: "live",
+    cadence: { label: "every 15 min, ~25 min ahead", seconds: 900 },
+    tokens: 1,
+    entities: {
+      count: 2711,
+      label: "pricing nodes",
+      sample: ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "DLAP_PGAE-APND"],
+    },
+    // The real-time stream's node table and its nodes: the same 2,711 priced.
+    located: true,
+    locatedBy:
+      "EIA-860M plant coordinates, matched by name within the area the node's energy " +
+      "price puts it in; and the substations CAISO's own price map draws",
+    locatedCount: 426,
+    blurb:
+      "Prices from CAISO's fifteen-minute market at every aggregated pricing node — the " +
+      "trading hubs, load aggregation points, resources and Western EIM areas — with the " +
+      "energy, congestion, loss and greenhouse-gas components, posted about 25 minutes " +
+      "before each interval. What intertie schedules settle on.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The fifteen-minute market price at the pricing node.",
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
+        mock: { base: 26, swing: 14, noise: 3 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 8, noise: 2 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0, swing: 1.5, noise: 0.4 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Marginal energy component, published by CAISO. Not one number per interval: " +
+          "the Western EIM areas balance separately.",
         mock: { base: 26, swing: 10, noise: 2 },
       },
       {
