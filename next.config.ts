@@ -52,9 +52,16 @@ const nextConfig: NextConfig = {
   // (`lib/workspace/templates`). The path is built from a variable, so the
   // build's file tracer never sees them and a serverless function creating a
   // page from a template finds no file. Every workspace route gets them; it
-  // is a few kilobytes, and any of them may come to read a template.
+  // is a few kilobytes, and any of them may come to read a template. The
+  // workspace MCP server (`/api/mcp`) compiles every tile it adds, so it needs
+  // the same closure — outside `/api/workspace` it had none, and every
+  // `add_tile` in production failed on `react-dom/client`.
   outputFileTracingIncludes: {
     "/api/workspace/**": [
+      "./src/lib/workspace/templates/*.txt",
+      ...sandboxPackages(),
+    ],
+    "/api/mcp": [
       "./src/lib/workspace/templates/*.txt",
       ...sandboxPackages(),
     ],
