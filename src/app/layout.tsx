@@ -72,8 +72,10 @@ export const metadata: Metadata = {
 
     The SVG is first because that is what a modern browser should take: it is
     the only one that stays sharp at any size. The mark is four tiles, one
-    lit — a screen with a tile just updated — grey (`#aeb9c6`, the API
-    icon's light-theme grey) and chartreuse on no ground, in every theme. The ICO and the 96px PNG (Safari ignores SVG
+    lit — a screen with a tile just updated — three pearl tiles (a pale
+    diagonal gradient with a white rim, so they catch the eye on a dark strip
+    and hold their edge on a light one) and one chartreuse in the same
+    finish, on no ground, in every theme. The ICO and the 96px PNG (Safari ignores SVG
     favicons) are the same; the touch and manifest icons put it on the ink
     ground because iOS fills transparency with black and a maskable icon must
     be full bleed. The API serves the same tiles muted (`status_page.ICON`):
