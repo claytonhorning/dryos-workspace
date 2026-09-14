@@ -2147,6 +2147,172 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  {
+    id: "energy.caiso.dayahead",
+    path: ["Energy", "Pricing", "Day-ahead"],
+    name: "CAISO day-ahead LMP",
+    short: "DA · LMP",
+    dataset: "caiso-dam-lmp",
+    availability: "live",
+    cadence: { label: "daily, early afternoon PT", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 1907,
+      label: "pricing nodes",
+      sample: ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "TH_PACE_GEN-APND"],
+    },
+    // The real-time stream's node table; 185 of the day-ahead nodes are placed.
+    // Fewer than real time's 438 because the Western EIM nodes are listed in
+    // the day-ahead file at zero and not stored — their areas are outside the
+    // day-ahead market — and 111 of them were placed.
+    located: true,
+    locatedBy:
+      "EIA-860M plant coordinates, matched by name within the area the node's energy " +
+      "price puts it in; and the substations CAISO's own price map draws",
+    locatedCount: 185,
+    blurb:
+      "Hourly day-ahead prices at every node CAISO clears in its day-ahead market — " +
+      "the NP15, SP15 and ZP26 trading hubs, the utilities' load aggregation points, " +
+      "resources and PacifiCorp's Extended Day-Ahead Market nodes — with the energy, " +
+      "congestion, loss and greenhouse-gas components, posted for the whole of " +
+      "tomorrow each afternoon.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 14),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The hourly day-ahead price at the pricing node.",
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
+        mock: { base: 30, swing: 14, noise: 2.5 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 8, noise: 2 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0, swing: 1.5, noise: 0.4 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Marginal energy component, published by CAISO. A few values an hour, " +
+          "not one: the areas in the day-ahead market balance separately.",
+        mock: { base: 28, swing: 10, noise: 2 },
+      },
+      {
+        key: "lmp_ghg",
+        label: "Greenhouse gas",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Greenhouse-gas component — CAISO's price for compliance on energy " +
+          "delivered into California. Often around $10 in the day-ahead market, " +
+          "where the real-time price usually carries none.",
+        mock: { base: 9, swing: 2, noise: 0.5 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.genmix",
+    path: ["Energy", "Generation", "Fuel mix"],
+    name: "CAISO fuel mix",
+    short: "Fuel mix",
+    dataset: "caiso-fuel-mix",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.75,
+    entities: {
+      count: 13,
+      label: "fuel sources",
+      sample: ["SOLAR", "NATURAL_GAS", "BATTERIES"],
+    },
+    entityKey: "fuel",
+    blurb:
+      "What is generating across CAISO every five minutes — solar, wind, " +
+      "geothermal, biomass, biogas, small and large hydro, coal, nuclear, gas, " +
+      "batteries and net imports. From the files behind caiso.com's Today's " +
+      "Outlook; batteries run negative while they charge.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 14),
+    },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Output",
+        unit: "MW",
+        availability: "live",
+        description:
+          "Generation from the source at the reading. Batteries are negative " +
+          "while charging, solar slightly negative at night, and imports are net.",
+        mock: { base: 4_000, swing: 3_500, noise: 200 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.load",
+    path: ["Energy", "Load", "System demand"],
+    name: "CAISO system load",
+    short: "Demand",
+    dataset: "caiso-system-load",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 1,
+      label: "system series",
+      sample: [],
+    },
+    // The rows also carry `demand_response`, CAISO's flag for the evenings it
+    // is calling on demand response (a few a year, in heat) — a yes/no, not
+    // a series to chart, so it is not declared as a variable here.
+    blurb:
+      "CAISO-wide demand every five minutes — the Current demand line on " +
+      "caiso.com's Today's Outlook — flagged on the evenings CAISO is calling " +
+      "on demand response.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 14),
+    },
+    variables: [
+      {
+        key: "demand_mw",
+        label: "Demand",
+        unit: "MW",
+        availability: "live",
+        description: "CAISO-wide demand at the reading.",
+        mock: { base: 28_000, swing: 8_000, noise: 300, floor: 0 },
+      },
+    ],
+  },
   // ── NYISO ──────────────────────────────────────────────────────────────
   // NYISO's MIS: public files, no key, a day to a file and the newest
   // interval at a fixed path. Eastern prevailing, which `sourceTzOf` knows;

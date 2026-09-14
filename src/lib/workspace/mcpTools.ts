@@ -19,7 +19,7 @@ import { composeApp, describeComponent } from "./compose";
 import { compile } from "./runtime";
 import { ALL_DOMAINS, addPage, createSpace, getSpace, listSpaces, spaceOfPage } from "./spaces";
 import { addRevision, createApp, getApp, listApps } from "./store";
-import { listCommunitySpaces } from "./communitySpaces";
+import { CommunityCopyError, copyCommunityWorkspace, listCommunitySpaces } from "./communitySpaces";
 import { BLANK } from "./templates";
 
 /**
@@ -60,7 +60,7 @@ To build one:
 3. add_tile for each piece: a shape, a stream slug, and the entities it shows. Tiles land left to right, top to bottom.
 4. Give the user the page URL.
 
-To show what Dryos has already published, list_community lists the community workspaces (one per grid operator, and more to come) with a view URL for each page. They are read-only: the user opens one and presses Make a copy to have it as their own.
+To show what Dryos has already published, list_community lists the community workspaces (one per grid operator, and more to come) with a view URL for each page. Looking needs no copy: give the user the view URL. When they want one of their own to change or build on, copy_community makes it in their account, and add_tile works on its pages like on any other.
 
 A chart takes one to four series (up to eight of one unit); a ticker exactly one; a bar two to eight of one unit. add_tile refuses anything a shape cannot draw and says why. Nothing here deletes; every change is a revision the user can revert in the editor.`;
 
@@ -197,6 +197,39 @@ export const TOOLS: Tool[] = [
             })),
           })),
       };
+    },
+  },
+  {
+    name: "copy_community",
+    title: "Copy a community workspace",
+    description:
+      "Make the user their own editable copy of a community workspace (an id from list_community): a new workspace of the same name, or `name`, with a copy of every page in order. Use it when the user wants a copy to change or build on; to only look, give them the view URL from list_community instead. Each call makes a new workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspace_id: { type: "string", description: "A community workspace id from list_community." },
+        name: { type: "string", description: "What to call the copy. Default: the community workspace's name." },
+      },
+      required: ["workspace_id"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    async run(args, { origin }) {
+      const id = str(args.workspace_id);
+      if (!id) throw new ToolError("workspace_id is required. list_community lists them.");
+      try {
+        const { space, pages } = await copyCommunityWorkspace(id, str(args.name) || undefined);
+        return {
+          workspace_id: space.id,
+          name: space.name,
+          pages: pages.map((p) => ({ page_id: p.id, name: p.name, url: pageUrl(origin, space.id, p.id) })),
+        };
+      } catch (e) {
+        if (e instanceof CommunityCopyError) {
+          throw new ToolError(e.status === 404 ? `${e.message} list_community lists them.` : e.message);
+        }
+        throw e;
+      }
     },
   },
   {

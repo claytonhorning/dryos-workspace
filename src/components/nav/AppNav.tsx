@@ -6,7 +6,7 @@ import { Select } from "@/components/Select";
 import { CHOOSABLE, useDomain } from "@/lib/domain";
 import { AccountButton } from "./AccountButton";
 import { TimeSelect } from "./TimeSelect";
-import { UsageDock } from "@/components/workspace/UsageDock";
+import { USAGE_METER, UsageDock } from "@/components/workspace/UsageDock";
 import { MobileStrip, Shell } from "./shared";
 
 /**
@@ -51,10 +51,12 @@ export function AppNav({ pathname }: { pathname: string }) {
           Scoped to the workspace when the route is one — /workspace/{id} is
           the workspace's own list page — and to the whole account elsewhere.
         */}
-        <UsageDock
-          placement="nav"
-          spaceId={pathname.match(/^\/workspace\/([^/]+)$/)?.[1]}
-        />
+        {USAGE_METER && (
+          <UsageDock
+            placement="nav"
+            spaceId={pathname.match(/^\/workspace\/([^/]+)$/)?.[1]}
+          />
+        )}
         {/* Which clock the data reads in — source time, or a zone of yours. */}
         <TimeSelect />
         <AccountButton />

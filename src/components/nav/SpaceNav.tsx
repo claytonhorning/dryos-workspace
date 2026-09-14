@@ -9,7 +9,7 @@ import { cx } from "@/components/ui";
 import { useSelectOnMount } from "@/lib/useSelectOnMount";
 import { AccountButton } from "./AccountButton";
 import { TimeSelect } from "./TimeSelect";
-import { UsageDock } from "@/components/workspace/UsageDock";
+import { USAGE_METER, UsageDock } from "@/components/workspace/UsageDock";
 import { FeedsMenu, type FeedsDetail } from "@/components/workspace/FeedsMenu";
 
 /**
@@ -468,7 +468,7 @@ export function SpaceNav({
             the same corner. Up here it is one more number in a bar that is
             already there in both modes.
           */}
-          <UsageDock spaceId={spaceId} placement="nav" />
+          {USAGE_METER && <UsageDock spaceId={spaceId} placement="nav" />}
           {/* Which clock the data reads in — source time, or a zone of yours. */}
           <TimeSelect />
           <AccountButton />

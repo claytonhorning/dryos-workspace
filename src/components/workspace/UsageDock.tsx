@@ -33,6 +33,14 @@ import type { UsageSummary, WindowUsage } from "@/lib/workspace/meter";
  * Counted, never projected. Every figure here is a reading of the ledger the
  * data route writes on the way past.
  */
+/**
+ * Off while data is free. A running bill in the chrome argues a price nobody
+ * is being charged; the meter behind it still counts every query, so turning
+ * this back on is the whole of putting the readout back. Checked at the call
+ * sites rather than inside, so a hidden meter does not poll the ledger either.
+ */
+export const USAGE_METER = false;
+
 const WINDOWS = [
   { id: "today", label: "Today" },
   { id: "week", label: "This week" },

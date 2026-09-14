@@ -1,5 +1,10 @@
 import { supabaseServer } from "@/lib/supabase/server";
-import type { ComponentSpec } from "./components";
+import { packLayout, type ComponentSpec } from "./components";
+import { composeApp } from "./compose";
+import { compile } from "./runtime";
+import { addPage, createSpace } from "./spaces";
+import { createApp } from "./store";
+import { BLANK } from "./templates";
 
 /**
  * Community workspaces: ordinary workspaces with `community` set.
@@ -38,4 +43,54 @@ export async function getCommunityPage(
   const { data, error } = await supabase.rpc("community_page", { p_id: id });
   if (error) throw new Error(error.message);
   return (data as { name: string; manifest?: ComponentSpec[] } | null) ?? null;
+}
+
+/** Why a copy was refused, with the status the pages route answers it with. */
+export class CommunityCopyError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * One page of a community workspace, copied into one of the user's own: its
+ * manifest — the tiles, not the source or the history, which stay the
+ * publisher's — composed fresh, so it runs today's generator and passes
+ * today's compile gate. A page that does not build is not saved.
+ */
+export async function copyCommunityPage(
+  spaceId: string,
+  pageId: string,
+  opts: { name?: string; at?: number } = {},
+) {
+  const shared = await getCommunityPage(pageId);
+  if (!shared) throw new CommunityCopyError("No such community page.", 404);
+  if (!shared.manifest) {
+    throw new CommunityCopyError("That page was edited by a model and cannot be copied.", 422);
+  }
+  const placed = packLayout(shared.manifest);
+  const source = composeApp(placed);
+  const built = await compile(source);
+  if (!built.js) throw new CommunityCopyError(`The page did not compile: ${built.error}`, 500);
+  const app = await createApp({ name: opts.name ?? shared.name, template: BLANK.slug, source, manifest: placed });
+  await addPage(spaceId, app.id, opts.at);
+  return app;
+}
+
+/**
+ * A whole community workspace, copied: a workspace of the user's own under its
+ * name (or the one given) and domain, holding a copy of every page in order.
+ * What the workspace MCP server's `copy_community` does; the shelf's Make a
+ * copy is the same thing driven page by page from the browser.
+ */
+export async function copyCommunityWorkspace(id: string, name?: string) {
+  const shared = (await listCommunitySpaces()).find((s) => s.id === id);
+  if (!shared) throw new CommunityCopyError(`No community workspace "${id}".`, 404);
+  const space = await createSpace(name?.trim() || shared.name, shared.domain);
+  const pages: Awaited<ReturnType<typeof copyCommunityPage>>[] = [];
+  for (const p of shared.pages) pages.push(await copyCommunityPage(space.id, p.id));
+  return { space, pages };
 }

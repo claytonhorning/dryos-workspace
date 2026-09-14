@@ -3,7 +3,7 @@ import { addPage, getSpace, removePage, reorderPages } from "@/lib/workspace/spa
 import { createApp, getApp } from "@/lib/workspace/store";
 import { BLANK, TEMPLATES, templateSource } from "@/lib/workspace/templates";
 import { recipePage } from "@/lib/workspace/community";
-import { getCommunityPage } from "@/lib/workspace/communitySpaces";
+import { CommunityCopyError, copyCommunityPage } from "@/lib/workspace/communitySpaces";
 import { packLayout } from "@/lib/workspace/components";
 import { composeApp } from "@/lib/workspace/compose";
 import { compile } from "@/lib/workspace/runtime";
@@ -32,24 +32,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     at?: number;
   };
 
-  // A copy of a community workspace's page takes its manifest — the tiles, not
-  // the source or the history, which stay the publisher's — and is composed
-  // fresh, so it runs today's generator and passes today's compile gate.
+  // A copy of a community workspace's page — the one copy path, shared with
+  // the workspace MCP server's copy_community (see `copyCommunityPage`).
   if (body.community) {
-    const shared = await getCommunityPage(body.community);
-    if (!shared) return NextResponse.json({ error: "No such community page." }, { status: 404 });
-    if (!shared.manifest) {
-      return NextResponse.json({ error: "That page was edited by a model and cannot be copied." }, { status: 422 });
+    try {
+      const app = await copyCommunityPage(id, body.community, { name: body.name, at: body.at });
+      return NextResponse.json({ page: app });
+    } catch (e) {
+      if (e instanceof CommunityCopyError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
     }
-    const placed = packLayout(shared.manifest);
-    const source = composeApp(placed);
-    const built = await compile(source);
-    if (!built.js) {
-      return NextResponse.json({ error: `The page did not compile: ${built.error}` }, { status: 500 });
-    }
-    const app = await createApp({ name: body.name ?? shared.name, template: BLANK.slug, source, manifest: placed });
-    await addPage(id, app.id, body.at);
-    return NextResponse.json({ page: app });
   }
 
   // A page that starts as something published — the landing page's try-it.
