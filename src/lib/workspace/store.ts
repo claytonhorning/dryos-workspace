@@ -49,11 +49,18 @@ export async function listApps(): Promise<AppSummary[]> {
   }));
 }
 
-/** Just the ids — all the orphan sweep needs to know about the store. */
-export async function listAppIds(): Promise<string[]> {
+/**
+ * Ids and birth times — all the orphan sweep needs to know about the store.
+ *
+ * Throws rather than answering [] on a failed read: the sweep takes an empty
+ * list to mean every page was deleted and unfiles all of them, and the next
+ * sweep adopts the lot into the newest workspace.
+ */
+export async function listAppStubs(): Promise<{ id: string; createdAt: number }[]> {
   const supabase = await db();
-  const { data } = await supabase.from("apps").select("id");
-  return (data ?? []).map((r) => r.id as string);
+  const { data, error } = await supabase.from("apps").select("id, createdAt:data->createdAt");
+  if (error) throw new Error(`could not list pages (${error.message})`);
+  return (data ?? []).map((r) => ({ id: r.id as string, createdAt: Number(r.createdAt) || 0 }));
 }
 
 /**

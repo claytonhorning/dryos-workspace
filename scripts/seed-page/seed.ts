@@ -135,9 +135,13 @@ async function remove(c: Creds, user: string, a: Record<string, string>) {
   if (a["remove-space"]) {
     const [s] = (await rest(c, "GET", `/rest/v1/workspaces?select=id,pages&id=eq.${a["remove-space"]}&${u}`)) as SpaceRow[];
     if (!s) die(`no workspace ${a["remove-space"]} for that user`);
-    if (s.pages.length) await rest(c, "DELETE", `/rest/v1/apps?id=in.(${s.pages.join(",")})&${u}`);
+    // A page another workspace also lists stays, as `deleteSpace` leaves it.
+    const others = (await rest(c, "GET", `/rest/v1/workspaces?select=id,pages&${u}&id=neq.${s.id}`)) as SpaceRow[];
+    const elsewhere = new Set(others.flatMap((o) => o.pages));
+    const doomed = s.pages.filter((p) => !elsewhere.has(p));
     await rest(c, "DELETE", `/rest/v1/workspaces?id=eq.${s.id}&${u}`);
-    console.log(JSON.stringify({ removedSpace: s.id, removedPages: s.pages }));
+    if (doomed.length) await rest(c, "DELETE", `/rest/v1/apps?id=in.(${doomed.join(",")})&${u}`);
+    console.log(JSON.stringify({ removedSpace: s.id, removedPages: doomed, keptPages: s.pages.filter((p) => elsewhere.has(p)) }));
     return;
   }
   const page = a.remove;

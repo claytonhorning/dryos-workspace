@@ -8,6 +8,7 @@ import { Modal } from "@/components/Modal";
 import { PencilGlyph, TrashGlyph } from "@/components/Glyphs";
 import { CardGridSkeleton } from "@/components/Skeleton";
 import { Thumbnail } from "@/components/workspace/Thumbnail";
+import { DeleteSpaceBody } from "@/components/workspace/DeleteSpaceBody";
 import type { AppSummary } from "@/lib/workspace/types";
 import { useSelectOnMount } from "@/lib/useSelectOnMount";
 
@@ -27,6 +28,8 @@ interface Space {
   id: string;
   name: string;
   pageList: AppSummary[];
+  /** Pages another workspace also lists; deleting this one keeps them. */
+  shared?: string[];
 }
 
 export function SpaceView({ spaceId }: { spaceId: string }) {
@@ -230,29 +233,7 @@ export function SpaceView({ spaceId }: { spaceId: string }) {
           </>
         }
       >
-        <p className="text-[13.5px] leading-relaxed text-muted">
-          {space?.pageList.length === 0 ? (
-            "This workspace is empty."
-          ) : (
-            <>
-              Its{" "}
-              <strong className="text-ink">
-                {space?.pageList.length}{" "}
-                {space?.pageList.length === 1 ? "page" : "pages"}
-              </strong>{" "}
-              go with it, along with every change recorded on them:
-            </>
-          )}
-        </p>
-        {space && space.pageList.length > 0 && (
-          <ul className="mt-3 flex flex-col gap-1">
-            {space.pageList.map((p) => (
-              <li key={p.id} className="font-mono text-[12px] text-faint">
-                · {p.name}
-              </li>
-            ))}
-          </ul>
-        )}
+        {space && <DeleteSpaceBody pageList={space.pageList} shared={space.shared} />}
       </Modal>
     </div>
   );

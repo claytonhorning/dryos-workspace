@@ -12,6 +12,8 @@ export interface SpaceSummary {
   pages: string[];
   updatedAt: number;
   pageList: AppSummary[];
+  /** Pages another workspace also lists; deleting this one keeps them. */
+  shared?: string[];
 }
 
 /**

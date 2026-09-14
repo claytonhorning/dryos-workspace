@@ -7,6 +7,7 @@ import { Modal } from "@/components/Modal";
 import { CardGridSkeleton } from "@/components/Skeleton";
 import { Tabs } from "@/components/Tabs";
 import { SpaceCard, type SpaceSummary } from "@/components/workspace/SpaceCard";
+import { DeleteSpaceBody } from "@/components/workspace/DeleteSpaceBody";
 import { CommunityPanel } from "@/components/workspace/CommunityPanel";
 import { CommunityStarter } from "@/components/workspace/CommunityStarter";
 import { ALL, SUBJECTS, domainWord, useDomain } from "@/lib/domain";
@@ -305,28 +306,8 @@ export default function WorkspacePage() {
           </>
         }
       >
-        <p className="text-[13.5px] leading-relaxed text-muted">
-          {condemned?.pageList.length === 0 ? (
-            "This workspace is empty."
-          ) : (
-            <>
-              Its{" "}
-              <strong className="text-ink">
-                {condemned?.pageList.length}{" "}
-                {condemned?.pageList.length === 1 ? "page" : "pages"}
-              </strong>{" "}
-              go with it, along with every change recorded on them:
-            </>
-          )}
-        </p>
-        {condemned && condemned.pageList.length > 0 && (
-          <ul className="mt-3 flex flex-col gap-1">
-            {condemned.pageList.map((p) => (
-              <li key={p.id} className="font-mono text-[12px] text-faint">
-                · {p.name}
-              </li>
-            ))}
-          </ul>
+        {condemned && (
+          <DeleteSpaceBody pageList={condemned.pageList} shared={condemned.shared} />
         )}
       </Modal>
     </div>

@@ -1,18 +1,24 @@
 import { NextResponse } from "next/server";
-import { deleteSpace, getSpace, renameSpace } from "@/lib/workspace/spaces";
+import { deleteSpace, listSpaces, renameSpace, sharedPages } from "@/lib/workspace/spaces";
 import { listApps } from "@/lib/workspace/store";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const space = await getSpace(id);
+  const spaces = await listSpaces();
+  const space = spaces.find((s) => s.id === id);
   if (!space) return NextResponse.json({ error: "No such workspace." }, { status: 404 });
 
   const apps = await listApps();
   const byId = new Map(apps.map((a) => [a.id, a]));
   return NextResponse.json({
-    space: { ...space, pageList: space.pages.map((p) => byId.get(p)).filter(Boolean) },
+    space: {
+      ...space,
+      pageList: space.pages.map((p) => byId.get(p)).filter(Boolean),
+      // Pages another workspace also lists — deleting this one keeps them.
+      shared: sharedPages(space, spaces),
+    },
   });
 }
 

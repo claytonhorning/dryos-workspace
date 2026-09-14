@@ -61,10 +61,12 @@ async function run(userId: string): Promise<void> {
     const supabase = await supabaseServer();
     // Anything already in the account means this is not a first touch — a
     // user who deleted their imported pages must not get them back.
-    const { count } = await supabase
+    // A failed count is not an empty account: the upsert below would write
+    // the local files' filings over the account's own.
+    const { count, error } = await supabase
       .from("workspaces")
       .select("id", { count: "exact", head: true });
-    if ((count ?? 0) > 0) return;
+    if (error || (count ?? 0) > 0) return;
 
     const apps = await readApps();
     const spaces = await readJson<

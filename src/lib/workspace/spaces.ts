@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { supabaseServer } from "@/lib/supabase/server";
 import { importLocalOnce } from "./import";
-import { deleteApp, listAppIds } from "./store";
+import { deleteApp, listAppStubs } from "./store";
 
 /**
  * Workspaces: collections of pages.
@@ -68,11 +68,33 @@ async function readAll(): Promise<Space[]> {
   const supabase = await supabaseServer();
   // Newest first — createSpace used to unshift into the file, and the shelf
   // still expects the latest workspace on top.
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("workspaces")
     .select("id, name, domain, pages, created_at, updated_at")
     .order("created_at", { ascending: false });
+  // A failed read is not an empty account. Answered with [], the seed below
+  // made a fresh "My workspace" holding every page the account had, on top of
+  // the eleven workspaces already filing them (2026-09-13).
+  if (error) throw new Error(`could not read workspaces (${error.message})`);
   return (data ?? []).map(fromRow);
+}
+
+/**
+ * How long a page may sit unfiled before the sweep adopts it. Creating a page
+ * and filing it are two writes, and a sweep that ran between them — the
+ * shelf's own listing, or the nav's — filed the page into the newest
+ * workspace while the create went on to file it where it was asked for.
+ */
+const ADOPT_AFTER_MS = 60_000;
+
+/**
+ * The pages of `space` that another workspace also lists. A page belongs to
+ * exactly one workspace; these are the ones that do not, and deleting the
+ * workspace must leave them to the other.
+ */
+export function sharedPages(space: Space, spaces: Space[]): string[] {
+  const elsewhere = new Set(spaces.filter((s) => s.id !== space.id).flatMap((s) => s.pages));
+  return space.pages.filter((p) => elsewhere.has(p));
 }
 
 async function writeAll(spaces: Space[]): Promise<void> {
@@ -94,11 +116,15 @@ export async function listSpaces(): Promise<Space[]> {
   // The sweep only ever needs ids. Loading full summaries here cost every
   // space operation the whole apps listing, on top of the one its route
   // usually does anyway.
-  const [spaces_, appIds] = await Promise.all([readAll(), listAppIds()]);
-  let spaces = spaces_;
+  const [spaces, stubs] = await Promise.all([readAll(), listAppStubs()]);
+  const appIds = stubs.map((a) => a.id);
   const now = Date.now();
 
   if (spaces.length === 0) {
+    // Nothing to file, nothing to make: an empty "My workspace" is clutter,
+    // and the shelf has its own empty state.
+    if (appIds.length === 0) return [];
+
     // Seeding is a first touch of a signed-in account. Signed out, the empty
     // read was legitimately empty — there is nobody to seed for, and the
     // write would only bounce off RLS and turn a quiet [] into a 500.
@@ -108,21 +134,27 @@ export async function listSpaces(): Promise<Space[]> {
     } = await supabase.auth.getSession();
     if (!session) return [];
 
-    spaces = [
-      {
-        id: randomUUID().slice(0, 8),
-        name: "My workspace",
-        pages: [...appIds],
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-    await writeAll(spaces);
-    return spaces;
+    // A first visit fires several listings at once, and each used to seed its
+    // own "My workspace". One id per account, and a conflict ignored, makes
+    // the concurrent seeds one row.
+    const seed: Space = {
+      id: session.user.id.slice(0, 8),
+      name: "My workspace",
+      pages: [...appIds],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const { error } = await supabase
+      .from("workspaces")
+      .upsert([toRow(seed)], { ignoreDuplicates: true });
+    if (error) throw new Error(`could not save the workspace (${error.message})`);
+    return readAll();
   }
 
   const known = new Set(spaces.flatMap((s) => s.pages));
-  const orphans = appIds.filter((id) => !known.has(id));
+  const orphans = stubs
+    .filter((a) => !known.has(a.id) && now - a.createdAt > ADOPT_AFTER_MS)
+    .map((a) => a.id);
   const missing = new Set(appIds);
 
   // Deleted apps leave dangling ids behind; a tab pointing at nothing is worse
@@ -186,15 +218,22 @@ export async function addPage(
   pageId: string,
   at?: number,
 ): Promise<Space | null> {
-  const spaces = await listSpaces();
+  // A bare read, not listSpaces: the sweep in there saw the page this call is
+  // about to file as an orphan and adopted it into the newest workspace
+  // first, so every page added to any older workspace landed in two.
+  const spaces = await readAll();
   const space = spaces.find((s) => s.id === id);
   if (!space) return null;
   // Filed here rather than anywhere else, so a page created inside a workspace
-  // never has to be rescued by the orphan sweep above.
+  // never has to be rescued by the orphan sweep above — and filing is a move:
+  // a page belongs to exactly one workspace, so any other that lists it lets
+  // it go in the same write.
+  const released = spaces.filter((s) => s !== space && s.pages.includes(pageId));
+  for (const s of released) s.pages = s.pages.filter((p) => p !== pageId);
   space.pages = space.pages.filter((p) => p !== pageId);
   space.pages.splice(at ?? space.pages.length, 0, pageId);
   space.updatedAt = Date.now();
-  await writeAll([space]);
+  await writeAll([space, ...released]);
   return space;
 }
 
@@ -218,19 +257,27 @@ export async function removePage(
  * and leaving them behind would mean the orphan sweep quietly filing someone's
  * deleted work into a different workspace. So the caller has to say how many
  * pages are about to go, and the dialog does.
+ *
+ * Except a page another workspace also lists. That is a filing that should
+ * never have happened, but it happened, and the other workspace still shows
+ * the page — so it is only unfiled from this one, and survives.
  */
 export async function deleteSpace(
   id: string,
-): Promise<{ pages: number } | null> {
+): Promise<{ pages: number; kept: number } | null> {
   const spaces = await listSpaces();
   const space = spaces.find((s) => s.id === id);
   if (!space) return null;
 
-  const pages = space.pages.length;
-  for (const pageId of space.pages) await deleteApp(pageId);
+  const kept = new Set(sharedPages(space, spaces));
+  const doomed = space.pages.filter((p) => !kept.has(p));
+  // The row first: a failure after it leaves pages to the sweep, which is
+  // recoverable; a failure after deleting the pages but not the row is too.
   const supabase = await supabaseServer();
-  await supabase.from("workspaces").delete().eq("id", id);
-  return { pages };
+  const { error } = await supabase.from("workspaces").delete().eq("id", id);
+  if (error) throw new Error(`could not delete the workspace (${error.message})`);
+  for (const pageId of doomed) await deleteApp(pageId);
+  return { pages: doomed.length, kept: kept.size };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { domains } from "@/lib/workspace/catalog";
-import { ALL_DOMAINS, createSpace, listSpaces } from "@/lib/workspace/spaces";
+import { ALL_DOMAINS, createSpace, listSpaces, sharedPages } from "@/lib/workspace/spaces";
 import { listApps } from "@/lib/workspace/store";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,8 @@ export async function GET() {
     spaces: spaces.map((s) => ({
       ...s,
       pageList: s.pages.map((id) => byId.get(id)).filter(Boolean),
+      // Pages another workspace also lists — deleting this one keeps them.
+      shared: sharedPages(s, spaces),
     })),
   });
 }
