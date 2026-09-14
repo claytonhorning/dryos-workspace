@@ -5,6 +5,9 @@ import { CodeBlock, CopyButton } from "@/components/CodeBlock";
 import { CurlLine, StreamBrowser } from "@/components/docs/StreamBrowser";
 import { cx } from "@/components/ui";
 import {
+  MCP_CLIENTS,
+  MCP_TOOLS,
+  MCP_URL,
   PUBLIC_API,
   QUICKSTART,
   QUICKSTART_RESPONSE,
@@ -58,6 +61,7 @@ export default function DocsPage() {
           ["#auth", "Authentication"],
           ["#routes", "Routes"],
           ["#streams", "Streams"],
+          ["#mcp", "MCP server"],
           ["#agents", "For AI agents"],
         ].map(([href, label]) => (
           <a key={href} href={href} className="text-muted hover:text-ink">
@@ -107,6 +111,39 @@ export default function DocsPage() {
         }
       >
         <StreamBrowser domain={domain} />
+      </Section>
+
+      <Section id="mcp" title="MCP server">
+        <p>
+          The same data as tools, for agents and app builders that speak MCP — connect once and
+          ask for &ldquo;ERCOT&apos;s Houston price over the last day&rdquo; instead of building
+          URLs. Streamable HTTP, no key, read-only; the rules below ride along as the
+          server&apos;s instructions.
+        </p>
+        <div className="mt-4 flex items-center gap-2">
+          <span className="font-mono text-[11px] tracking-[0.12em] text-faint uppercase">URL</span>
+          <code className="rounded-md border border-line bg-surface-2 px-2 py-1 font-mono text-[12.5px] text-ink">
+            {MCP_URL}
+          </code>
+          <CopyButton value={MCP_URL} />
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {MCP_CLIENTS.map((c) => (
+            <CodeBlock key={c.label} code={c.code} title={c.label} wrap />
+          ))}
+        </div>
+        <table className="mt-4 w-full text-left text-[13px]">
+          <tbody>
+            {MCP_TOOLS.map((t) => (
+              <tr key={t.name} className="border-t border-line first:border-0">
+                <td className="py-2 pr-4 align-top whitespace-nowrap">
+                  <code className="font-mono text-[12.5px] text-ink">{t.name}</code>
+                </td>
+                <td className="py-2 align-top">{t.summary}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </Section>
 
       <Section id="agents" title="For AI agents">

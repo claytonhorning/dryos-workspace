@@ -70,8 +70,8 @@ export const ROUTES: Route[] = [
       "different claims.",
     params: [
       { name: "node", type: "string", desc: "The entity, whatever the stream calls it. Refused on system-level feeds." },
-      { name: "start", type: "ISO-8601", desc: "Inclusive lower bound on interval_start_utc." },
-      { name: "end", type: "ISO-8601", desc: "Exclusive upper bound." },
+      { name: "start", type: "ISO-8601 · -24h", desc: "Inclusive lower bound on interval_start_utc — a timestamp, or relative to now (-30m, -24h, -7d), which keeps a URL right forever." },
+      { name: "end", type: "ISO-8601 · -1h", desc: "Exclusive upper bound, same forms." },
       { name: "limit", type: "≤ 50000", desc: "Default 1000." },
       { name: "interval", type: "15m · 1h · 1d · all", desc: "Bucket size, 1m to 7d. Absent means raw rows." },
       { name: "agg", type: "avg · min · max · sum", desc: "How a bucket is reduced. Default avg." },
@@ -190,6 +190,33 @@ export function streamExamples(s: Schema): { label: string; path: string }[] {
   return out;
 }
 
+/**
+ * The same API as an MCP server, for agents that take tools rather than
+ * URLs. Written from `backend/src/dryos/api/mcp_server.py`: a tool added
+ * there is added here.
+ */
+export const MCP_URL = `${PUBLIC_API}/mcp`;
+
+export const MCP_TOOLS: { name: string; summary: string }[] = [
+  { name: "list_streams", summary: "Every stream, filterable by domain, grid operator or a word." },
+  { name: "describe_stream", summary: "One stream's columns, key, source, health and recent collector changes." },
+  { name: "find_entities", summary: "Look up node, zone or station names — never guess one." },
+  { name: "column_values", summary: "The distinct values of a text column, for filters." },
+  {
+    name: "query_stream",
+    summary:
+      "Rows, raw or bucketed; times in ISO-8601 or relative (-24h). At most 2,000 a call. Each result carries restUrl — the same request as a GET, ready for an app.",
+  },
+];
+
+export const MCP_CLIENTS: { label: string; code: string }[] = [
+  { label: "Claude Code", code: `claude mcp add --transport http dryos ${MCP_URL}` },
+  {
+    label: "Cursor and other JSON configs",
+    code: JSON.stringify({ mcpServers: { dryos: { url: MCP_URL } } }, null, 2),
+  },
+];
+
 export const QUICKSTART = `curl "${PUBLIC_API}/v1/datasets/ercot-realtime-lmp/query?node=HB_NORTH&limit=2"`;
 
 /** A real answer to the quick start (2026-09-13), trimmed of nothing. */
@@ -239,6 +266,8 @@ Dryos serves real, reconciled data — US power markets (ERCOT, MISO, PJM, SPP, 
 
 Base URL: ${PUBLIC_API}
 Every route is GET and answers JSON. No API key is needed today. If you send \`Authorization: Bearer <token>\`, it must be a valid Dryos access token: a bad or expired token is refused with 401, never served anonymously.
+
+If you can take MCP tools, connect to \`${MCP_URL}\` (Streamable HTTP, no key) instead of building URLs: ${MCP_TOOLS.map((t) => `\`${t.name}\``).join(", ")}. The rules below hold either way.
 
 ## How to answer a question
 
