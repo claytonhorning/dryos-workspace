@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono, Sora } from "next/font/google";
+import Script from "next/script";
 import { AppFrame } from "@/components/AppFrame";
 import { Nav } from "@/components/Nav";
 import { THEME_INIT_SCRIPT } from "@/components/ThemeToggle";
@@ -21,6 +22,8 @@ const sora = Sora({
   weight: "800",
   display: "swap",
 });
+
+const GA_ID = "G-EGBSDY4DE3";
 
 const DESCRIPTION =
   "Live, reconciled US power market data — ERCOT, MISO, PJM, SPP, CAISO, NYISO and ISO-NE prices, load, generation and forecasts, plus weather and building permits — in dashboards, a public API, and an MCP server for AI agents.";
@@ -68,8 +71,11 @@ export const metadata: Metadata = {
     a build hash in its URL and half not.
 
     The SVG is first because that is what a modern browser should take: it is
-    the only one that stays sharp at any size, and it carries its own dark
-    ground so the cream letterform reads on a light tab strip too.
+    the only one that stays sharp at any size, and it carries its own ink
+    ground so the letter reads on a light tab strip too. The mark is a d whose
+    counter is the chartreuse dot the feeds menu lights for arriving data;
+    the API serves the same mark inverted (`status_page.ICON`). The PNGs and
+    the ICO are rasterised from the same glyph — redraw them together.
   */
   icons: {
     icon: [
@@ -105,6 +111,17 @@ export default function RootLayout({
           <Nav />
         </Suspense>
         <AppFrame>{children}</AppFrame>
+        {/* Google Analytics — after hydration, so it never delays the page. */}
+        <Script
+          src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
+          strategy="afterInteractive"
+        />
+        <Script id="gtag-init" strategy="afterInteractive">
+          {`window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', '${GA_ID}');`}
+        </Script>
       </body>
     </html>
   );

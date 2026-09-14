@@ -2313,6 +2313,391 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // CAISO's load and wind/solar from OASIS (`caiso_forecasts.py`): one stream
+  // per horizon, because a series is keyed on the area alone. CA ISO-TAC is
+  // the sum of CAISO's five areas, so a fan-out leaves it out.
+  {
+    id: "energy.caiso.loadfc5",
+    path: ["Energy", "Load", "Five-minute forecast"],
+    name: "CAISO five-minute load forecast",
+    short: "Load fc · 5m",
+    dataset: "caiso-load-forecast-5min",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 37,
+      label: "load areas",
+      sample: ["CA ISO-TAC", "PGE-TAC", "SCE-TAC"],
+    },
+    entityKey: "zone",
+    entityOmit: ["CA ISO-TAC"],
+    blurb:
+      "The load forecast CAISO's real-time dispatch runs on, every five minutes, for " +
+      "its own areas and every Western EIM balancing authority.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "load_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast load for the area and interval.",
+        mock: { base: 6_000, swing: 2_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.loadfc15",
+    path: ["Energy", "Load", "Fifteen-minute forecast"],
+    name: "CAISO fifteen-minute load forecast",
+    short: "Load fc · 15m",
+    dataset: "caiso-load-forecast-15min",
+    availability: "live",
+    cadence: { label: "every 15 min, ~25 min ahead", seconds: 900 },
+    tokens: 0.5,
+    entities: {
+      count: 37,
+      label: "load areas",
+      sample: ["CA ISO-TAC", "PGE-TAC", "SCE-TAC"],
+    },
+    entityKey: "zone",
+    entityOmit: ["CA ISO-TAC"],
+    blurb:
+      "The load forecast behind CAISO's fifteen-minute market, posted about 25 minutes " +
+      "ahead, for its own areas and every Western EIM balancing authority.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "load_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast load for the area and interval.",
+        mock: { base: 6_000, swing: 2_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.loadact",
+    path: ["Energy", "Load", "Hourly actual by area"],
+    name: "CAISO hourly actual load",
+    short: "Load · actual",
+    dataset: "caiso-load-actual-hourly",
+    availability: "live",
+    cadence: { label: "hourly, ~1 h after the hour", seconds: 3_600 },
+    tokens: 0.25,
+    entities: {
+      count: 37,
+      label: "load areas",
+      sample: ["CA ISO-TAC", "PGE-TAC", "SCE-TAC"],
+    },
+    entityKey: "zone",
+    entityOmit: ["CA ISO-TAC"],
+    blurb:
+      "Hourly integrated actual load for each CAISO area and every Western EIM " +
+      "balancing authority — what the forecasts are scored against.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "load_mw",
+        label: "Actual",
+        unit: "MW",
+        availability: "live",
+        description: "Actual load for the area over the hour.",
+        mock: { base: 6_000, swing: 2_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.loadfcdam",
+    path: ["Energy", "Load", "Day-ahead forecast"],
+    name: "CAISO day-ahead load forecast",
+    short: "Load fc · DA",
+    dataset: "caiso-load-forecast-dam",
+    availability: "live",
+    cadence: { label: "checked every 15 min", seconds: 900 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 36,
+      label: "load areas",
+      sample: ["CA ISO-TAC", "PGE-TAC", "SCE-TAC"],
+    },
+    entityKey: "zone",
+    entityOmit: ["CA ISO-TAC"],
+    blurb:
+      "CAISO's hourly day-ahead load forecast by area. OASIS overwrites it in place, " +
+      "so it is kept as snapshots: every value it has held, stamped when Dryos first " +
+      "saw it — Dryos's time, not CAISO's issue time.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "load_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast load for the area and hour, as of this snapshot.",
+        mock: { base: 6_000, swing: 2_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.loadfc2d",
+    path: ["Energy", "Load", "Two-day forecast"],
+    name: "CAISO two-day load forecast",
+    short: "Load fc · 2d",
+    dataset: "caiso-load-forecast-2day",
+    availability: "live",
+    cadence: { label: "checked every 15 min", seconds: 900 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 36,
+      label: "load areas",
+      sample: ["CA ISO-TAC", "PGE-TAC", "SCE-TAC"],
+    },
+    entityKey: "zone",
+    entityOmit: ["CA ISO-TAC"],
+    blurb:
+      "CAISO's hourly load forecast two days ahead, by area, kept as snapshots " +
+      "stamped when Dryos first saw each value.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "load_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast load for the area and hour, as of this snapshot.",
+        mock: { base: 6_000, swing: 2_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.loadfc7d",
+    path: ["Energy", "Load", "Seven-day forecast"],
+    name: "CAISO seven-day load forecast",
+    short: "Load fc · 7d",
+    dataset: "caiso-load-forecast-7day",
+    availability: "live",
+    cadence: { label: "checked every 15 min, a week ahead", seconds: 900 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 36,
+      label: "load areas",
+      sample: ["CA ISO-TAC", "PGE-TAC", "SCE-TAC"],
+    },
+    entityKey: "zone",
+    entityOmit: ["CA ISO-TAC"],
+    blurb:
+      "CAISO's hourly load forecast for the next seven days, by area, kept as " +
+      "snapshots stamped when Dryos first saw each value.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "load_mw",
+        label: "Forecast",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast load for the area and hour, as of this snapshot.",
+        mock: { base: 6_000, swing: 2_000, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.renfc5",
+    path: ["Energy", "Generation", "Wind and solar forecast"],
+    name: "CAISO five-minute wind and solar forecast",
+    short: "Wind · solar fc 5m",
+    dataset: "caiso-renewables-forecast-5min",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: {
+      count: 24,
+      label: "hubs and areas",
+      sample: ["SP15", "NP15", "ZP26"],
+    },
+    entityKey: "zone",
+    blurb:
+      "The wind and solar forecast CAISO's real-time dispatch runs on, every five " +
+      "minutes, for NP15, SP15, ZP26 and every Western EIM balancing authority.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "solar_mw",
+        label: "Solar",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast solar for the hub. Null where the hub has none.",
+        mock: { base: 3_000, swing: 3_000, noise: 150, floor: 0 },
+      },
+      {
+        key: "wind_mw",
+        label: "Wind",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast wind for the hub. Null where the hub has none.",
+        mock: { base: 800, swing: 600, noise: 80, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.renfc15",
+    path: ["Energy", "Generation", "Wind and solar forecast"],
+    name: "CAISO fifteen-minute wind and solar forecast",
+    short: "Wind · solar fc 15m",
+    dataset: "caiso-renewables-forecast-15min",
+    availability: "live",
+    cadence: { label: "every 15 min, ~25 min ahead", seconds: 900 },
+    tokens: 0.25,
+    entities: {
+      count: 24,
+      label: "hubs and areas",
+      sample: ["SP15", "NP15", "ZP26"],
+    },
+    entityKey: "zone",
+    blurb:
+      "The wind and solar forecast behind CAISO's fifteen-minute market, for NP15, " +
+      "SP15, ZP26 and every Western EIM balancing authority.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "solar_mw",
+        label: "Solar",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast solar for the hub. Null where the hub has none.",
+        mock: { base: 3_000, swing: 3_000, noise: 150, floor: 0 },
+      },
+      {
+        key: "wind_mw",
+        label: "Wind",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast wind for the hub. Null where the hub has none.",
+        mock: { base: 800, swing: 600, noise: 80, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.renact",
+    path: ["Energy", "Generation", "Wind and solar"],
+    name: "CAISO hourly actual wind and solar",
+    short: "Wind · solar",
+    dataset: "caiso-renewables-actual-hourly",
+    availability: "live",
+    cadence: { label: "hourly, ~1 h after the hour", seconds: 3_600 },
+    tokens: 0.25,
+    entities: {
+      count: 3,
+      label: "trading hubs",
+      sample: ["SP15", "NP15", "ZP26"],
+    },
+    entityKey: "zone",
+    blurb:
+      "Hourly actual wind and solar generation at CAISO's three trading hubs. Solar " +
+      "reads a few MW negative at night — the plants' own draw.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "solar_mw",
+        label: "Solar",
+        unit: "MW",
+        availability: "live",
+        description: "Actual solar at the hub over the hour.",
+        mock: { base: 5_000, swing: 5_000, noise: 200 },
+      },
+      {
+        key: "wind_mw",
+        label: "Wind",
+        unit: "MW",
+        availability: "live",
+        description: "Actual wind at the hub over the hour.",
+        mock: { base: 1_200, swing: 900, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.renfcdam",
+    path: ["Energy", "Generation", "Wind and solar forecast"],
+    name: "CAISO day-ahead wind and solar forecast",
+    short: "Wind · solar fc DA",
+    dataset: "caiso-renewables-forecast-dam",
+    availability: "live",
+    cadence: { label: "checked every 15 min, two days out", seconds: 900 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: {
+      count: 4,
+      label: "hubs",
+      sample: ["SP15", "NP15", "ZP26"],
+    },
+    entityKey: "zone",
+    blurb:
+      "CAISO's hourly day-ahead wind and solar forecast for its three hubs (and one " +
+      "area OASIS spells AVA_), kept as snapshots stamped when Dryos first saw each value.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "solar_mw",
+        label: "Solar",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast solar for the hub and hour, as of this snapshot.",
+        mock: { base: 5_000, swing: 5_000, noise: 200, floor: 0 },
+      },
+      {
+        key: "wind_mw",
+        label: "Wind",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast wind for the hub and hour, as of this snapshot.",
+        mock: { base: 1_200, swing: 900, noise: 100, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.renfchasp",
+    path: ["Energy", "Generation", "Wind and solar forecast"],
+    name: "CAISO hour-ahead wind and solar forecast",
+    short: "Wind · solar fc HA",
+    dataset: "caiso-renewables-forecast-hasp",
+    availability: "live",
+    cadence: { label: "checked every 15 min", seconds: 900 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: {
+      count: 4,
+      label: "hubs",
+      sample: ["SP15", "NP15", "ZP26"],
+    },
+    entityKey: "zone",
+    blurb:
+      "CAISO's hourly hour-ahead wind and solar forecast for its three hubs, kept as " +
+      "snapshots stamped when Dryos first saw each value.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "solar_mw",
+        label: "Solar",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast solar for the hub and hour, as of this snapshot.",
+        mock: { base: 5_000, swing: 5_000, noise: 200, floor: 0 },
+      },
+      {
+        key: "wind_mw",
+        label: "Wind",
+        unit: "MW",
+        availability: "live",
+        description: "Forecast wind for the hub and hour, as of this snapshot.",
+        mock: { base: 1_200, swing: 900, noise: 100, floor: 0 },
+      },
+    ],
+  },
   // ── NYISO ──────────────────────────────────────────────────────────────
   // NYISO's MIS: public files, no key, a day to a file and the newest
   // interval at a fixed path. Eastern prevailing, which `sourceTzOf` knows;
