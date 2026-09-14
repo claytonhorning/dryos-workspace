@@ -2399,6 +2399,85 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // CAISO's Western EIM transfers (`caiso_transfers.py`): one directed flow a
+  // series, far too many to fan out, so the explorer opens the set.
+  {
+    id: "energy.caiso.transfers5",
+    path: ["Energy", "Grid", "WEIM transfers"],
+    name: "CAISO WEIM transfers, five-minute",
+    short: "WEIM · 5m",
+    dataset: "caiso-eim-transfers-5min",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 462,
+      label: "flows",
+      sample: ["CISO->SRP PVWEST", "SRP->CISO PVWEST", "NWMT->BPAT GARRISON"],
+    },
+    entityColumn: "transfer",
+    blurb:
+      "Energy moving between the Western Energy Imbalance Market's balancing authorities, " +
+      "tie by tie and direction by direction, every five minutes, with the limit each " +
+      "transfer ran against — the cause behind the WEIM areas' prices parting.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "transfer_mw",
+        label: "Transfer",
+        unit: "MW",
+        availability: "live",
+        description: "Energy moving from the exporter to the importer over the tie.",
+        mock: { base: 300, swing: 400, noise: 40 },
+      },
+      {
+        key: "limit_mw",
+        label: "Limit",
+        unit: "MW",
+        availability: "live",
+        description: "The transfer limit for the flow in the interval.",
+        mock: { base: 2_000, swing: 800, noise: 50, floor: 0 },
+      },
+    ],
+  },
+  {
+    id: "energy.caiso.transfers15",
+    path: ["Energy", "Grid", "WEIM transfers"],
+    name: "CAISO WEIM transfers, fifteen-minute",
+    short: "WEIM · 15m",
+    dataset: "caiso-eim-transfers-15min",
+    availability: "live",
+    cadence: { label: "every 15 min, ~30 min ahead", seconds: 900 },
+    tokens: 0.5,
+    entities: {
+      count: 462,
+      label: "flows",
+      sample: ["CISO->SRP PVWEST", "SRP->CISO PVWEST", "NWMT->BPAT GARRISON"],
+    },
+    entityColumn: "transfer",
+    blurb:
+      "The fifteen-minute market's Western EIM transfers, tie by tie and direction by " +
+      "direction, posted about half an hour ahead, with the limit each ran against.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "transfer_mw",
+        label: "Transfer",
+        unit: "MW",
+        availability: "live",
+        description: "Energy moving from the exporter to the importer over the tie.",
+        mock: { base: 300, swing: 400, noise: 40 },
+      },
+      {
+        key: "limit_mw",
+        label: "Limit",
+        unit: "MW",
+        availability: "live",
+        description: "The transfer limit for the flow in the interval.",
+        mock: { base: 2_000, swing: 800, noise: 50, floor: 0 },
+      },
+    ],
+  },
   // CAISO's binding constraints (`caiso_constraints.py`): rows only while a
   // constraint binds, so the set of names is whatever the grid did.
   {
