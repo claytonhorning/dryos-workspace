@@ -14,7 +14,7 @@ import { ALL, SUBJECTS, domainWord, useDomain } from "@/lib/domain";
 import type { CommunitySpace } from "@/lib/workspace/communitySpaces";
 
 /** What the pages route is asked for, one call per page of a new workspace. */
-type PageBody = { template: string } | { community: string };
+type PageBody = { template: string };
 
 /**
  * The workspace: what you have built, what you can start from, what reached you.
@@ -29,7 +29,7 @@ export default function WorkspacePage() {
   const [spaces, setSpaces] = useState<SpaceSummary[]>([]);
   /** Every workspace Dryos has published, whatever the domain. */
   const [community, setCommunity] = useState<CommunitySpace[]>([]);
-  /** What is being made: a community workspace's id, or "compose" for a blank one. */
+  /** What is being made — "compose", the one thing the shelf creates. */
   const [creating, setCreating] = useState<string | null>(null);
   const { domain, setDomain, ready } = useDomain();
   const [loaded, setLoaded] = useState(false);
@@ -79,19 +79,6 @@ export default function WorkspacePage() {
     }
   }
 
-  /**
-   * Take a copy of a community workspace: a workspace of your own under its
-   * name, holding a copy of every one of its pages, in its order.
-   */
-  async function take(ws: CommunitySpace) {
-    await make(
-      ws.id,
-      ws.name,
-      ws.domain,
-      ws.pages.map((p) => ({ community: p.id })),
-    );
-  }
-
   async function make(key: string, name: string, domain: string | undefined, pages: PageBody[]) {
     setCreating(key);
     const made = await fetch("/api/workspace/spaces", {
@@ -115,8 +102,7 @@ export default function WorkspacePage() {
 
     // A new workspace's one page is empty, and nobody makes one in order to
     // look at nothing — so it opens in edit mode, the same way a new page
-    // does. A community set lands launched: those pages have something to see.
-    // A blank one also arrives with its name armed in the nav (`?name=1`) —
+    // does. A blank one also arrives with its name armed in the nav (`?name=1`) —
     // the subject is the one thing already in your head when you press
     // Create, and "New workspace" names nothing. Typing over the selected
     // default or ignoring it are both one gesture.
@@ -278,13 +264,7 @@ export default function WorkspacePage() {
                   published.length > 0 ? (
                     <div className={grid}>
                       {published.map((ws) => (
-                        <CommunityStarter
-                          key={ws.id}
-                          space={ws}
-                          creating={creating === ws.id}
-                          busy={creating !== null}
-                          onStart={() => take(ws)}
-                        />
+                        <CommunityStarter key={ws.id} space={ws} />
                       ))}
                     </div>
                   ) : (

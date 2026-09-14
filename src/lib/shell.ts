@@ -3,7 +3,7 @@
  * — one to draw the sidebar, the other to make room for it — and two copies
  * of the rule would drift.
  */
-export type Shell = "marketing" | "space" | "app" | "none";
+export type Shell = "marketing" | "space" | "community" | "app" | "none";
 
 /** Still selling something: the landing page, the maintainer pitch, and the
     MCP server's page, which is read mostly by people who have no account. */
@@ -26,6 +26,10 @@ export function shellFor(pathname: string): Shell {
     DOOR.some((r) => pathname.startsWith(r))
   )
     return "marketing";
+  // Someone else's published workspace, being looked at: its pages as tabs
+  // and a copy button, never the owner's controls. Ahead of the rule below,
+  // which would read "community" as a workspace id.
+  if (pathname.startsWith("/workspace/community/")) return "community";
   // Any page inside a workspace, read or edited, gets the workspace chrome.
   // The workspace's own list page does not: nothing is open there.
   if (/^\/workspace\/[^/]+\/[^/]+/.test(pathname)) return "space";

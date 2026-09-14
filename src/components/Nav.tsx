@@ -5,6 +5,7 @@ import { cx } from "@/components/ui";
 import { shellFor } from "@/lib/shell";
 import { AppNav } from "./nav/AppNav";
 import { AppSidebar } from "./nav/AppSidebar";
+import { CommunityNav } from "./nav/CommunityNav";
 import { MarketingNav } from "./nav/MarketingNav";
 import { SpaceNav } from "./nav/SpaceNav";
 
@@ -44,6 +45,8 @@ export function Nav() {
       >
         {shell === "marketing" ? (
           <MarketingNav pathname={pathname} />
+        ) : shell === "community" ? (
+          <CommunityNav pathname={pathname} />
         ) : shell === "space" && inside ? (
           <SpaceNav
             spaceId={inside[1]}
