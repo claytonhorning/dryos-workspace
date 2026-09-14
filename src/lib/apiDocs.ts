@@ -78,6 +78,7 @@ export const ROUTES: Route[] = [
       { name: "by", type: "column · none", desc: "What a rollup splits by. Default the entity; none for one series." },
       { name: "where", type: "column=value", desc: "Text columns only. Repeat on one column for OR; across columns is AND." },
       { name: "search", type: "column:text", desc: "Case-insensitive substring of a text column." },
+      { name: "newest", type: "bool", desc: "One reading per entity — every row at each entity's most recent interval. The current value at every node in one call. Not with interval." },
       { name: "vintages", type: "latest · all", desc: "Forecasts keep every publication. Default is the newest per interval." },
       { name: "located", type: "bool", desc: "Only rows the map can place (located price streams)." },
       { name: "stamp", type: "start · noon", desc: "Label a daily bucket at noon UTC so the date reads right in US zones." },
