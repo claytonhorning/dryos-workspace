@@ -19,6 +19,7 @@ import { composeApp, describeComponent } from "./compose";
 import { compile } from "./runtime";
 import { ALL_DOMAINS, addPage, createSpace, getSpace, listSpaces, spaceOfPage } from "./spaces";
 import { addRevision, createApp, getApp, listApps } from "./store";
+import { listCommunitySpaces } from "./communitySpaces";
 import { BLANK } from "./templates";
 
 /**
@@ -58,6 +59,8 @@ To build one:
 2. create_workspace (optionally starting from a published recipe — list_components lists them).
 3. add_tile for each piece: a shape, a stream slug, and the entities it shows. Tiles land left to right, top to bottom.
 4. Give the user the page URL.
+
+To show what Dryos has already published, list_community lists the community workspaces (one per grid operator, and more to come) with a view URL for each page. They are read-only: the user opens one and presses Make a copy to have it as their own.
 
 A chart takes one to four series (up to eight of one unit); a ticker exactly one; a bar two to eight of one unit. add_tile refuses anything a shape cannot draw and says why. Nothing here deletes; every change is a revision the user can revert in the editor.`;
 
@@ -160,6 +163,39 @@ export const TOOLS: Tool[] = [
           domain: s.domain ?? null,
           pages: s.pages.map((p) => ({ id: p, name: names.get(p) ?? null, url: pageUrl(origin, s.id, p) })),
         })),
+      };
+    },
+  },
+  {
+    name: "list_community",
+    title: "List community workspaces",
+    description:
+      "The workspaces Dryos has published for everyone — ERCOT, MISO, PJM and the other grid operators — and their pages, each with a view URL. Read-only here: the user opens one and presses Make a copy to get their own. Filter with domain (Energy, Weather, Property).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: { type: "string", description: "Only this catalogue domain: Energy, Weather or Property." },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    async run(args, { origin }) {
+      const domain = str(args.domain).toLowerCase();
+      const spaces = await listCommunitySpaces();
+      return {
+        workspaces: spaces
+          .filter((s) => !domain || domain === "all" || !s.domain || s.domain.toLowerCase() === domain)
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            domain: s.domain ?? null,
+            url: s.pages[0] ? `${origin}/workspace/community/${s.id}/${s.pages[0].id}` : null,
+            pages: s.pages.map((p) => ({
+              id: p.id,
+              name: p.name,
+              url: `${origin}/workspace/community/${s.id}/${p.id}`,
+            })),
+          })),
       };
     },
   },

@@ -292,6 +292,7 @@ export const WORKSPACE_MCP_URL = `${SITE}/api/mcp`;
 
 export const WORKSPACE_MCP_TOOLS: { name: string; summary: string }[] = [
   { name: "list_workspaces", summary: "Your workspaces and their pages, with links." },
+  { name: "list_community", summary: "The workspaces Dryos publishes for everyone — one per grid operator — with a link to view each page and copy it." },
   { name: "list_components", summary: "The tile shapes and their settings, and the published recipes a page can start from." },
   { name: "create_workspace", summary: "A new workspace with its first page, blank or from a recipe." },
   { name: "add_page", summary: "Another page in a workspace." },
