@@ -3,6 +3,7 @@ import { addPage, getSpace, removePage, reorderPages } from "@/lib/workspace/spa
 import { createApp, getApp } from "@/lib/workspace/store";
 import { BLANK, TEMPLATES, templateSource } from "@/lib/workspace/templates";
 import { recipePage } from "@/lib/workspace/community";
+import { getCommunityPage } from "@/lib/workspace/communitySpaces";
 import { packLayout } from "@/lib/workspace/components";
 import { composeApp } from "@/lib/workspace/compose";
 import { compile } from "@/lib/workspace/runtime";
@@ -25,9 +26,31 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     template?: string;
     /** A published component or group slug: the page starts as that. */
     recipe?: string;
+    /** A page of a community workspace: the page starts as a copy of it. */
+    community?: string;
     name?: string;
     at?: number;
   };
+
+  // A copy of a community workspace's page takes its manifest — the tiles, not
+  // the source or the history, which stay the publisher's — and is composed
+  // fresh, so it runs today's generator and passes today's compile gate.
+  if (body.community) {
+    const shared = await getCommunityPage(body.community);
+    if (!shared) return NextResponse.json({ error: "No such community page." }, { status: 404 });
+    if (!shared.manifest) {
+      return NextResponse.json({ error: "That page was edited by a model and cannot be copied." }, { status: 422 });
+    }
+    const placed = packLayout(shared.manifest);
+    const source = composeApp(placed);
+    const built = await compile(source);
+    if (!built.js) {
+      return NextResponse.json({ error: `The page did not compile: ${built.error}` }, { status: 500 });
+    }
+    const app = await createApp({ name: body.name ?? shared.name, template: BLANK.slug, source, manifest: placed });
+    await addPage(id, app.id, body.at);
+    return NextResponse.json({ page: app });
+  }
 
   // A page that starts as something published — the landing page's try-it.
   // Composed, packed and compiled like the edit route's group branch: a page

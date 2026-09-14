@@ -11,7 +11,10 @@ import { DeleteSpaceBody } from "@/components/workspace/DeleteSpaceBody";
 import { CommunityPanel } from "@/components/workspace/CommunityPanel";
 import { CommunityStarter } from "@/components/workspace/CommunityStarter";
 import { ALL, SUBJECTS, domainWord, useDomain } from "@/lib/domain";
-import type { Template } from "@/lib/workspace/templates";
+import type { CommunitySpace } from "@/lib/workspace/communitySpaces";
+
+/** What the pages route is asked for, one call per page of a new workspace. */
+type PageBody = { template: string } | { community: string };
 
 /**
  * The workspace: what you have built, what you can start from, what reached you.
@@ -24,7 +27,9 @@ import type { Template } from "@/lib/workspace/templates";
 export default function WorkspacePage() {
   const router = useRouter();
   const [spaces, setSpaces] = useState<SpaceSummary[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
+  /** Every workspace Dryos has published, whatever the domain. */
+  const [community, setCommunity] = useState<CommunitySpace[]>([]);
+  /** What is being made: a community workspace's id, or "compose" for a blank one. */
   const [creating, setCreating] = useState<string | null>(null);
   const { domain, setDomain, ready } = useDomain();
   const [loaded, setLoaded] = useState(false);
@@ -33,16 +38,18 @@ export default function WorkspacePage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    fetch("/api/workspace/spaces")
-      .then((r) => r.json())
-      .then((d) => setSpaces(d.spaces ?? []))
-      .catch(() => {});
-    fetch("/api/workspace/apps")
-      .then((r) => r.json())
-      .then((d) => {
-        setTemplates(d.templates);
-        setLoaded(true);
-      });
+    // A failed community read is an empty tab, never an error on the shelf:
+    // your own workspaces are what somebody came back for.
+    Promise.all([
+      fetch("/api/workspace/spaces")
+        .then((r) => r.json())
+        .then((d) => setSpaces(d.spaces ?? []))
+        .catch(() => {}),
+      fetch("/api/workspace/community")
+        .then((r) => (r.ok ? r.json() : { spaces: [] }))
+        .then((d) => setCommunity(d.spaces ?? []))
+        .catch(() => {}),
+    ]).finally(() => setLoaded(true));
   }, []);
 
   /**
@@ -52,7 +59,7 @@ export default function WorkspacePage() {
    * thing already in your head.
    */
   async function newSpace() {
-    await make("New workspace", domain ?? undefined, ["compose"]);
+    await make("compose", "New workspace", domain ?? undefined, [{ template: "compose" }]);
   }
 
   /**
@@ -73,19 +80,20 @@ export default function WorkspacePage() {
   }
 
   /**
-   * Take a copy of a community workspace.
-   *
-   * `templates` are pages, and a page cannot live on its own any more — so
-   * taking one makes the workspace it needs and lands you in it, which is where
-   * you were going anyway. Passing several copies the whole set into one.
+   * Take a copy of a community workspace: a workspace of your own under its
+   * name, holding a copy of every one of its pages, in its order.
    */
-  async function create(...slugs: string[]) {
-    // A community set is ERCOT through and through, so it says so.
-    await make(slugs.length > 1 ? "ERCOT starters" : "New workspace", "Energy", slugs);
+  async function take(ws: CommunitySpace) {
+    await make(
+      ws.id,
+      ws.name,
+      ws.domain,
+      ws.pages.map((p) => ({ community: p.id })),
+    );
   }
 
-  async function make(name: string, domain: string | undefined, slugs: string[]) {
-    setCreating(slugs[0] ?? "all");
+  async function make(key: string, name: string, domain: string | undefined, pages: PageBody[]) {
+    setCreating(key);
     const made = await fetch("/api/workspace/spaces", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -93,13 +101,13 @@ export default function WorkspacePage() {
     }).then((r) => r.json());
 
     let first: string | undefined;
-    for (const template of slugs) {
+    for (const body of pages) {
       const { page } = await fetch(
         `/api/workspace/spaces/${made.space.id}/pages`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ template }),
+          body: JSON.stringify(body),
         },
       ).then((r) => r.json());
       first ??= page?.id;
@@ -112,7 +120,7 @@ export default function WorkspacePage() {
     // the subject is the one thing already in your head when you press
     // Create, and "New workspace" names nothing. Typing over the selected
     // default or ignoring it are both one gesture.
-    const blank = slugs.length === 1 && slugs[0] === "compose";
+    const blank = key === "compose";
     router.push(
       `/workspace/${made.space.id}/${first}${blank ? "?edit=1&name=1" : ""}`,
     );
@@ -127,8 +135,9 @@ export default function WorkspacePage() {
   const visible = spaces.filter(
     (sp) => domain === ALL || !sp.domain || sp.domain === domain,
   );
-  // The community set is ERCOT through and through.
-  const starterFits = domain === ALL || domain === "Energy";
+  const published = community.filter(
+    (ws) => domain === ALL || !ws.domain || ws.domain === domain,
+  );
   const word = domainWord(domain);
 
   /*
@@ -264,21 +273,26 @@ export default function WorkspacePage() {
               {
                 id: "community",
                 label: "Community workspaces",
-                badge: starterFits ? 1 : 0,
-                content: starterFits ? (
-                  <div className={grid}>
-                    <CommunityStarter
-                      templates={templates}
-                      creating={creating !== null}
-                      onStart={create}
+                badge: published.length,
+                content:
+                  published.length > 0 ? (
+                    <div className={grid}>
+                      {published.map((ws) => (
+                        <CommunityStarter
+                          key={ws.id}
+                          space={ws}
+                          creating={creating === ws.id}
+                          busy={creating !== null}
+                          onStart={() => take(ws)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <Empty
+                      title={`No ${word} workspaces published yet`}
+                      body="What the community publishes for this domain will show up here."
                     />
-                  </div>
-                ) : (
-                  <Empty
-                    title={`No ${word} workspaces published yet`}
-                    body="What the community publishes for this domain will show up here."
-                  />
-                ),
+                  ),
               },
             ]}
           />
