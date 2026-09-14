@@ -2049,6 +2049,194 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  {
+    id: "energy.spp.dayahead",
+    path: ["Energy", "Pricing", "Day-ahead"],
+    name: "SPP day-ahead LMP",
+    short: "DA · LMP",
+    dataset: "spp-dam-lmp",
+    availability: "live",
+    cadence: { label: "daily, afternoon CT", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 1612,
+      label: "settlement locations",
+      sample: ["SPPNORTH_HUB", "SPPSOUTH_HUB", "SWPW_HUB"],
+    },
+    // The real-time stream's node table: the day-ahead file carries the same
+    // 1,612 settlement locations, so the same 557 are placed.
+    located: true,
+    locatedBy:
+      "EIA-860M plant coordinates, matched by the plant and unit in the name; hubs, " +
+      "interfaces and DC ties where SPP's own price map draws them",
+    locatedCount: 557,
+    blurb:
+      "Hourly day-ahead prices at every SPP settlement location — the trading hubs, " +
+      "load areas, resources, demand response and the interfaces with its " +
+      "neighbours — with the energy, congestion and loss components, posted for the " +
+      "whole of tomorrow each afternoon. The western market clears in the same run " +
+      "on its own energy price.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 14),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The hourly day-ahead price at the settlement location.",
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
+        mock: { base: 24, swing: 14, noise: 2 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between locations.",
+        mock: { base: 0, swing: 8, noise: 2 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: 0, swing: 1.5, noise: 0.4 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "Marginal energy component, published by SPP. The RTO's and the western " +
+          "market's differ each hour.",
+        mock: { base: 24, swing: 10, noise: 2 },
+      },
+    ],
+  },
+  // The two fuel-mix streams are one file per balancing authority — the RTO
+  // (`SPP`) and RTO West (`SWPW`) — kept apart because a series is keyed on
+  // the fuel alone, and two authorities' WIND on one timestamp would chart
+  // as one line. They share a path, which groups them under one heading.
+  {
+    id: "energy.spp.genmix",
+    path: ["Energy", "Generation", "Fuel mix"],
+    name: "SPP fuel mix",
+    short: "Fuel mix",
+    dataset: "spp-fuel-mix",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.75,
+    entities: {
+      count: 11,
+      label: "fuel sources",
+      sample: ["WIND", "NATURAL_GAS", "COAL"],
+    },
+    entityKey: "fuel",
+    blurb:
+      "What is generating across SPP's RTO every five minutes — wind, gas, coal, " +
+      "nuclear, hydro, solar, storage and the rest — with each source split into " +
+      "what the market dispatched and what its owner self-scheduled.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 14),
+    },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Output",
+        unit: "MW",
+        availability: "live",
+        description:
+          "Generation from the source in the interval, dispatched and self-scheduled " +
+          "together — SPP's own chart figure. Storage is negative while charging.",
+        mock: { base: 6_000, swing: 5_000, noise: 300 },
+      },
+      {
+        key: "gen_market_mw",
+        label: "Market-dispatched",
+        unit: "MW",
+        availability: "live",
+        description: "The part of the source's output the market dispatched on price.",
+        mock: { base: 4_000, swing: 3_000, noise: 200 },
+      },
+      {
+        key: "gen_self_mw",
+        label: "Self-scheduled",
+        unit: "MW",
+        availability: "live",
+        description: "The part its owners ran on their own schedule rather than on price.",
+        mock: { base: 2_000, swing: 2_000, noise: 150 },
+      },
+    ],
+  },
+  {
+    id: "energy.spp.west.genmix",
+    path: ["Energy", "Generation", "Fuel mix"],
+    name: "SPP RTO West fuel mix",
+    short: "West · Fuel mix",
+    dataset: "spp-west-fuel-mix",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 11,
+      label: "fuel sources",
+      sample: ["HYDRO", "COAL", "WIND"],
+    },
+    entityKey: "fuel",
+    blurb:
+      "What is generating in SPP's western market, RTO West, every five minutes — " +
+      "hydro, coal, gas, wind, solar and storage — split into market-dispatched and " +
+      "self-scheduled output. RTO West went live on 1 April 2026.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 14),
+    },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Output",
+        unit: "MW",
+        availability: "live",
+        description:
+          "Generation from the source in the interval, dispatched and self-scheduled " +
+          "together. Storage is negative while charging.",
+        mock: { base: 400, swing: 300, noise: 30 },
+      },
+      {
+        key: "gen_market_mw",
+        label: "Market-dispatched",
+        unit: "MW",
+        availability: "live",
+        description: "The part of the source's output the market dispatched on price.",
+        mock: { base: 200, swing: 200, noise: 20 },
+      },
+      {
+        key: "gen_self_mw",
+        label: "Self-scheduled",
+        unit: "MW",
+        availability: "live",
+        description: "The part its owners ran on their own schedule rather than on price.",
+        mock: { base: 300, swing: 250, noise: 20 },
+      },
+    ],
+  },
   // ── CAISO ──────────────────────────────────────────────────────────────
   // CAISO's OASIS: public, no key, asked for a UTC window and answered with
   // long rows, one per node and price component. Every row carries GMT; the
