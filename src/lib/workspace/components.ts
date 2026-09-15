@@ -2995,8 +2995,8 @@ const map: ComponentDef = {
 
       Offered when any stream of pins has a counterpart (`marketPair`), and
       decided at compose time into one query set per market, so the frame
-      only swaps which set it asks for. A stream with no day-ahead — MISO,
-      ISO-NE — sits out the two markets that need one and the map names it,
+      only swaps which set it asks for. A stream with no day-ahead — ISO-NE's
+      — sits out the two markets that need one and the map names it,
       rather than leaving its real-time prices standing among day-ahead ones
       on one scale. The counterpart reads the same measure where it has it
       (congestion meets congestion), and the stream's headline price meets

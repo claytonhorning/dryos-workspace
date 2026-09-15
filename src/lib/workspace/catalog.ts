@@ -1704,6 +1704,86 @@ export const SCHEMAS: Schema[] = [
       },
     ],
   },
+  // The one MISO stream off the Data Exchange rather than the public API: a
+  // day-ahead market date is complete the afternoon before, which is what
+  // the Data Exchange waits for. Same 2,628 nodes, so the same node table.
+  {
+    id: "energy.miso.dayahead",
+    path: ["Energy", "Pricing", "Day-ahead"],
+    name: "MISO day-ahead LMP",
+    short: "DA · LMP",
+    dataset: "miso-dam-lmp",
+    availability: "live",
+    cadence: { label: "daily, afternoon ET", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 2628,
+      label: "pricing nodes",
+      sample: ["INDIANA.HUB", "ILLINOIS.HUB", "MICHIGAN.HUB"],
+    },
+    located: true,
+    locatedBy:
+      "EIA-860M plant coordinates, matched by the name in the node; hubs and 260 " +
+      "generators where MISO's own map draws them",
+    locatedCount: 731,
+    blurb:
+      "Hourly day-ahead ex-post prices for every MISO commercial pricing node — hubs, " +
+      "load zones, generator nodes and interfaces — with the energy, congestion and " +
+      "loss components, posted for the whole of tomorrow each afternoon. Collected " +
+      "from MISO's Data Exchange.",
+    maintainer: {
+      name: "Dryos",
+      since: Date.UTC(2026, 8, 14),
+    },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The hourly day-ahead price at the node.",
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
+        mock: { base: 26, swing: 12, noise: 2 },
+      },
+      {
+        key: "lmp_congestion",
+        label: "Congestion",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal congestion component — the part that differs between nodes.",
+        mock: { base: 0, swing: 6, noise: 1.5 },
+      },
+      {
+        key: "lmp_loss",
+        label: "Losses",
+        unit: "$/MWh",
+        availability: "live",
+        description: "Marginal loss component.",
+        mock: { base: -0.5, swing: 1.2, noise: 0.3 },
+      },
+      {
+        key: "lmp_energy",
+        label: "Energy",
+        unit: "$/MWh",
+        availability: "live",
+        description:
+          "System marginal energy cost, published by MISO — the same number at every " +
+          "node in an hour.",
+        mock: { base: 26, swing: 10, noise: 2 },
+      },
+    ],
+  },
   {
     id: "energy.miso.exante",
     path: ["Energy", "Pricing", "Ex-ante hubs"],
@@ -6762,7 +6842,7 @@ export function pinStreams(refs: DataRef[]): string[] {
   resource node that is the day-ahead LMP, and it is the day-ahead stream
   keyed on the settlement points (the LMP one is keyed on buses). CAISO's
   fifteen-minute market is real time too and meets the same day-ahead file.
-  MISO and ISO-NE collect no day-ahead price yet, so they have no pair.
+  ISO-NE collects no day-ahead price yet, so it has no pair.
 */
 const MARKET_PAIRS: [rt: string, da: string][] = [
   ["energy.power.realtime", "energy.power.damspp"],
@@ -6772,6 +6852,7 @@ const MARKET_PAIRS: [rt: string, da: string][] = [
   ["energy.caiso.realtime", "energy.caiso.dayahead"],
   ["energy.caiso.fmm", "energy.caiso.dayahead"],
   ["energy.nyiso.realtime", "energy.nyiso.dayahead"],
+  ["energy.miso.realtime", "energy.miso.dayahead"],
 ];
 
 /**
