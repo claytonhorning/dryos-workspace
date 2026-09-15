@@ -566,6 +566,11 @@ export const SCHEMAS: Schema[] = [
       label: "settlement points",
       sample: ["HB_NORTH", "HB_HOUSTON", "LZ_WEST"],
     },
+    // The real-time settlement points a day ahead, placed by the same table —
+    // which is what lets a map switch between the two markets.
+    located: true,
+    locatedBy: "EIA-860M plant coordinates, through ERCOT's unit mapping",
+    locatedCount: 698,
     blurb:
       "Day-ahead hourly settlement point prices for every settlement point, posted once after the DAM run. Collected from ERCOT MIS (NP4-190).",
     maintainer: {
@@ -580,6 +585,19 @@ export const SCHEMAS: Schema[] = [
         availability: "live",
         description:
           "Hourly day-ahead settlement point price.",
+        // The real-time LMP's stops, so a map switched to day-ahead keeps
+        // one color per dollar.
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
         // Preview-only — see the note on the real-time schema.
         mock: { base: 34, swing: 15, noise: 4 },
       },
@@ -6702,6 +6720,44 @@ export function pinStreams(refs: DataRef[]): string[] {
         .map((r) => r.schemaId),
     ),
   ];
+}
+
+/*
+  A real-time price stream and the day-ahead one at the same nodes.
+
+  Every pair names its entities the same way in both markets — PJM's bus
+  strings, SPP's settlement locations, CAISO's APnodes, NYISO's PTIDs, ERCOT's
+  settlement points — which is what lets a map set one beside the other node
+  by node. ERCOT's day-ahead side is the settlement point price: for a
+  resource node that is the day-ahead LMP, and it is the day-ahead stream
+  keyed on the settlement points (the LMP one is keyed on buses). CAISO's
+  fifteen-minute market is real time too and meets the same day-ahead file.
+  MISO and ISO-NE collect no day-ahead price yet, so they have no pair.
+*/
+const MARKET_PAIRS: [rt: string, da: string][] = [
+  ["energy.power.realtime", "energy.power.damspp"],
+  ["energy.power.rtspp", "energy.power.damspp"],
+  ["energy.pjm.rtbus", "energy.pjm.dabus"],
+  ["energy.spp.realtime", "energy.spp.dayahead"],
+  ["energy.caiso.realtime", "energy.caiso.dayahead"],
+  ["energy.caiso.fmm", "energy.caiso.dayahead"],
+  ["energy.nyiso.realtime", "energy.nyiso.dayahead"],
+];
+
+/**
+ * A price stream's other market, and which side of the pair it is on. A
+ * day-ahead stream in several pairs answers with the first, the five-minute
+ * market before the fifteen.
+ */
+export function marketPair(
+  id: string,
+): { rt: Schema; da: Schema; side: "rt" | "da" } | null {
+  const hit = MARKET_PAIRS.find(([rt, da]) => rt === id || da === id);
+  if (!hit) return null;
+  const rt = schemaById(hit[0]);
+  const da = schemaById(hit[1]);
+  if (!rt || !da) return null;
+  return { rt, da, side: hit[0] === id ? "rt" : "da" };
 }
 
 /** "698 of 1,118 have known locations" — what the picker says under a layer's name. */

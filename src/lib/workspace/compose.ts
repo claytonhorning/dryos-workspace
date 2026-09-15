@@ -185,6 +185,10 @@ function useSeries(queries, refreshMs, cursor) {
   // Which instant the rows on screen answer (null: live), for a shape that
   // paces itself on its frames arriving — the map's playback.
   const [rowsAt, setRowsAt] = useState(null);
+  // Which query set the rows on screen answer, as its JSON. A new set keeps
+  // the old rows up until it lands, so a shape whose queries mean different
+  // things per mode (the map's markets) reads this before reading the rows.
+  const [rowsSig, setRowsSig] = useState(null);
   // A moving cursor's bookkeeping; see load() below.
   const reqSeq = useRef(0);
   const shownSeq = useRef(0);
@@ -241,6 +245,7 @@ function useSeries(queries, refreshMs, cursor) {
         if ((!live && sigRef.current !== sig) || mine < shownSeq.current) return;
         shownSeq.current = mine;
         setRowsAt(cursor || null);
+        setRowsSig(sig);
         setRows(out.map((r) => r.rows));
         setError(null);
         have.current = out.some((r) => r.rows && r.rows.length);
@@ -349,7 +354,7 @@ function useSeries(queries, refreshMs, cursor) {
     // object each render, and the string is what says whether it changed.
   }, [cursor, JSON.stringify(queries)]);
 
-  return { rows, error, loading, fresh, asOf, at: rowsAt };
+  return { rows, error, loading, fresh, asOf, at: rowsAt, sig: rowsSig };
 }
 
 // Three beats of the ring, then gone.

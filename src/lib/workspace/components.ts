@@ -13,7 +13,7 @@ import {
   operatorBounds,
   hasGeography,
 } from "./geo";
-import { isoOf, schemaById } from "./catalog";
+import { isoOf, marketPair, schemaById, type Schema } from "./catalog";
 import { SERIES_PALETTE } from "./palette";
 
 /**
@@ -2697,6 +2697,23 @@ export function pinsAgree(refs: DataRef[]): boolean {
   );
 }
 
+/*
+  The day-ahead price less the real-time one, in $/MWh: grey where the two
+  markets agree to within five dollars, red where the day-ahead cleared above
+  real time, blue where real time ran above the day-ahead. Symmetric, because
+  neither sign is the ordinary one — a node is as likely to clear high a day
+  ahead as to spike in real time. `below` makes the first band read "< −50".
+*/
+const SPREAD_SCALE = [
+  { at: -100, color: "#2166ac", label: "below" },
+  { at: -50, color: "#4393c3" },
+  { at: -20, color: "#92c5de" },
+  { at: -5, color: "#c9c9c9" },
+  { at: 5, color: "#f4a582" },
+  { at: 20, color: "#d6604d" },
+  { at: 50, color: "#e0243a" },
+];
+
 const map: ComponentDef = {
   kind: "map",
   name: "Map",
@@ -2850,6 +2867,7 @@ const map: ComponentDef = {
             "node",
           subset,
           partial,
+          events: Boolean(record),
           count: record
             ? 250
             : (subset?.entities.length ??
@@ -2937,9 +2955,6 @@ const map: ComponentDef = {
     const trails = o.trails !== "off";
     // Enough readings back to draw a tail without hauling a history nobody sees.
     const motionLimit = trails ? 14 : 1;
-    // How many of the queries above are point queries, so the field and the
-    // fleet know which row slots are theirs.
-    const pointQueries = locatedSets.length || (nodes.length ? 1 : 0);
     // A layer spanning streams is named by its measure — "Total LMP by
     // location" — since naming it after the first stream would claim the
     // other two are ERCOT's.
@@ -2956,15 +2971,6 @@ const map: ComponentDef = {
     const openBounds = locatedSets.length
       ? operatorBounds(locatedSets.map((set) => isoOf(set.schema)))
       : null;
-    // The streams the time scale asks how far ahead they run. The fleet is
-    // left out: a positions feed has no future to scrub into.
-    const probeDatasets = Array.from(
-      new Set([
-        ...locatedSets.map((set) => set.dataset),
-        ...(!locatedSets.length && nodes.length ? [s[0]?.dataset ?? ""] : []),
-        ...(showField ? [fieldDataset] : []),
-      ]),
-    ).filter(Boolean);
     // The steps the time scale offers: the finest layer's own grain and
     // coarser. A step finer than every layer redraws the same picture; one
     // coarser than the finest skips readings, which is what the coarse
@@ -2981,7 +2987,257 @@ const map: ComponentDef = {
     // How far back a scrubbed frame looks: a little over one reading of the
     // stream, so a frame is the newest interval at the instant rather than
     // two of them — half the rows, and measured at 0.45s against 0.75s.
-    const scrubWindow = (r: DataRef) => "-" + Math.ceil((grainOf(r) * 1.4) / 60) + "m";
+    const scrubWindow = (sec: number) => "-" + Math.ceil((sec * 1.4) / 60) + "m";
+
+    /*
+      The markets a price map switches between: real time, the day-ahead
+      price at the same nodes, and the day-ahead less real time.
+
+      Offered when any stream of pins has a counterpart (`marketPair`), and
+      decided at compose time into one query set per market, so the frame
+      only swaps which set it asks for. A stream with no day-ahead — MISO,
+      ISO-NE — sits out the two markets that need one and the map names it,
+      rather than leaving its real-time prices standing among day-ahead ones
+      on one scale. The counterpart reads the same measure where it has it
+      (congestion meets congestion), and the stream's headline price meets
+      the counterpart's headline: ERCOT's SCED LMP meets the DAM settlement
+      point price.
+    */
+    type Market = "rt" | "da" | "spread";
+    type Read = {
+      dataset: string;
+      entity: string;
+      column: string;
+      partial: boolean;
+      count: number;
+      grain: number;
+      filter: ReturnType<typeof tallyFilter>;
+    };
+    const ownRead = (set: (typeof locatedSets)[number]): Read => ({
+      dataset: set.dataset,
+      entity: set.entity,
+      column: column(set.ref),
+      partial: set.partial,
+      count: set.count,
+      grain: grainOf(set.ref),
+      filter: tallyFilter(set.ref),
+    });
+    const pairs = locatedSets.map((set) => {
+      const pair = set.events ? null : marketPair(set.schema.id);
+      if (!pair) return null;
+      const col = column(set.ref);
+      const other = pair.side === "rt" ? pair.da : pair.rt;
+      const otherCol =
+        other.variables.find((v) => v.key === col)?.key ??
+        (set.schema.variables[0]?.key === col
+          ? other.variables[0]?.key
+          : undefined);
+      if (!otherCol) return null;
+      const own = ownRead(set);
+      const theirs: Read = {
+        dataset: other.dataset ?? other.id,
+        entity: other.entityColumn ?? other.entityKey ?? "node",
+        column: otherCol,
+        partial: other.locatedCount !== undefined,
+        count:
+          set.subset?.entities.length ??
+          other.locatedCount ??
+          other.entities.count,
+        grain: grainSeconds(other),
+        filter: {},
+      };
+      return {
+        side: pair.side,
+        other,
+        rt: pair.side === "rt" ? own : theirs,
+        da: pair.side === "da" ? own : theirs,
+        rtSchema: pair.rt,
+        daSchema: pair.da,
+      };
+    });
+    const firstPair = pairs.find((p) => p !== null) ?? null;
+    const native: Market = firstPair?.side ?? "rt";
+    const markets: Market[] = firstPair ? ["rt", "da", "spread"] : [native];
+
+    /*
+      One point query. A whole-stream reference carries no node filter: a
+      located stream fans out, so the query asks for everything and the pins
+      are whatever came back — everything the map can draw, that is, for a
+      partial table (`located`), so the limit is sized to the placed count
+      rather than to the stream. A subset chip filters at the server instead —
+      nine hubs' rows, not 1,118 thinned after delivery — and its limit is
+      sized to the subset; the counterpart market takes the same filter, since
+      a pair names its nodes alike. `end` is the load-bearing half either way
+      — a forecast's newest row is seven days out, and a map of "now" that
+      drew next Sunday would be wrong in a way nobody would catch by looking
+      at it. Bounded at now, the newest row is the current one for
+      observations and forecasts alike.
+    */
+    const pointQuery = (
+      read: Read,
+      subset: DataRef["subset"],
+      scrub: string,
+      per: number,
+    ) =>
+      `{ dataset: ${JSON.stringify(read.dataset)}, ${
+        // A tally's filter narrows the pins as it narrows a count:
+        // re-roofs on the map are the re-roofs in the chart.
+        Object.entries(read.filter)
+          .map(([k, v]) => `${k}: ${JSON.stringify(v)}, `)
+          .join("")
+      }${
+        subset
+          ? `node: ${JSON.stringify(subset.entities)}, `
+          : read.partial
+            ? "located: true, "
+            : ""
+      }scrubStart: ${JSON.stringify(scrub)}, end: "-0m", limit: ${Math.min(
+        DRAW_CAP,
+        Math.max(subset ? 30 : 60, read.count * per),
+      )} }`;
+    /*
+      The whole newest hour of the field, not one row. `limit: 1` was right
+      when a field was a handful of mock cells; a real grid needs every cell
+      of one hour, so the limit is the cell count with headroom and the
+      newest row per cell wins. `end` bounds it at now for the same reason
+      the point layer does — a forecast field's newest interval is two days
+      out, and a wind map of the day after tomorrow looks exactly like a
+      wind map of now.
+    */
+    const fieldQuery = showField
+      ? `{ dataset: ${JSON.stringify(fieldDataset)}, scrubStart: ${JSON.stringify(scrubWindow(grainOf(fieldRef!)))}, end: "-0m", limit: ${Math.min(4000, (fieldSchema?.entities.count ?? 200) * 2)} }`
+      : "";
+    const motionQuery = motionRef
+      ? `{ dataset: ${JSON.stringify(motionDataset)}, start: "-30m", limit: ${motionLimit} }`
+      : "";
+    const scaleOf = (schema: Schema, key: string) =>
+      schema.variables.find((v) => v.key === key)?.scale ?? null;
+    const nativeScale = pointScale(pointRefs.length ? pointRefs : refs);
+    const single = locatedSets.length === 1 ? firstPair : null;
+
+    type Pt = {
+      k: number;
+      entity: string;
+      column: string;
+      events: boolean;
+      da?: { k: number; entity: string; column: string };
+    };
+    type Plan = {
+      queries: string[];
+      pts: Pt[];
+      /** How many of the queries are point queries; the field and the fleet follow. */
+      n: number;
+      /** Operators that sit this market out, for the note under the switch. */
+      left: string[];
+      /**
+       * The streams the time scale asks how far ahead they run: the
+       * market's own, so a day-ahead map runs into tomorrow and a spread no
+       * further than real time does. The fleet is left out — a positions
+       * feed has no future to scrub into.
+       */
+      probe: string[];
+      scale: ReturnType<typeof pointScale> | typeof SPREAD_SCALE;
+      title: string;
+      sub: string | null;
+    };
+    const plans = Object.fromEntries(
+      markets.map((m): [Market, Plan] => {
+        const queries: string[] = [];
+        const pts: Pt[] = [];
+        const left: string[] = [];
+        const probe: string[] = [];
+        const add = (read: Read, subset: DataRef["subset"]) => {
+          queries.push(pointQuery(read, subset, scrubWindow(read.grain), 2));
+          probe.push(read.dataset);
+          return queries.length - 1;
+        };
+        locatedSets.forEach((set, n) => {
+          const p = pairs[n];
+          if (!p) {
+            if (m !== native) {
+              left.push(isoOf(set.schema) ?? set.ref.label);
+              return;
+            }
+            const read = ownRead(set);
+            pts.push({ k: add(read, set.subset), entity: read.entity, column: read.column, events: set.events });
+            return;
+          }
+          if (m !== "spread") {
+            const read = p[m];
+            pts.push({ k: add(read, set.subset), entity: read.entity, column: read.column, events: false });
+            return;
+          }
+          const k = add(p.rt, set.subset);
+          // The day-ahead hour a real-time reading falls in can be the one
+          // before the cursor's, so its window reaches two hours back and its
+          // limit holds three hours of nodes. Not probed: a spread has no
+          // future however far the day-ahead runs.
+          queries.push(pointQuery(p.da, set.subset, "-2h", 3));
+          pts.push({
+            k,
+            entity: p.rt.entity,
+            column: p.rt.column,
+            events: false,
+            da: { k: queries.length - 1, entity: p.da.entity, column: p.da.column },
+          });
+        });
+        if (!locatedSets.length && nodes.length) {
+          queries.push(`{ dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 }`);
+          probe.push(s[0]?.dataset ?? "");
+        }
+        const n = queries.length;
+        if (showField) {
+          queries.push(fieldQuery);
+          probe.push(fieldDataset);
+        }
+        if (motionRef) queries.push(motionQuery);
+        return [
+          m,
+          {
+            queries,
+            pts,
+            n,
+            left,
+            probe: [...new Set(probe)].filter(Boolean),
+            scale:
+              m === "spread"
+                ? SPREAD_SCALE
+                : m === native || !firstPair
+                  ? nativeScale
+                  : (scaleOf(m === "rt" ? firstPair.rtSchema : firstPair.daSchema, firstPair[m].column) ??
+                    nativeScale),
+            title:
+              m === native
+                ? mapTitle
+                : m === "spread"
+                  ? "DA − RT by location"
+                  : single
+                    ? `${single.other.name} by location`
+                    : mapTitle,
+            sub:
+              m === native
+                ? subFor(refs, mapTitle)
+                : !single
+                  ? null
+                  : m === "spread"
+                    ? isoOf(locatedSets[0].schema)
+                    : (single.other.short ?? single.other.name),
+          },
+        ];
+      }),
+    ) as Record<Market, Plan>;
+    const planMeta = Object.fromEntries(
+      markets.map((m) => {
+        const { queries: _queries, ...meta } = plans[m];
+        return [m, meta];
+      }),
+    );
+    const querySets = markets
+      .map(
+        (m) =>
+          `    ${m}: [\n${plans[m].queries.map((q) => `      ${q},`).join("\n")}\n    ],`,
+      )
+      .join("\n");
 
     return {
       imports: [],
@@ -3000,16 +3256,33 @@ const map: ComponentDef = {
           entity: locatedSets[0].entity,
           label: locatedRef.label,
           dense,
-          // One query per set, in this order; the placed memo reads each by its own entity column.
-          sets: locatedSets.map((set) => ({ entity: set.entity, label: set.ref.label, events: set.entity === set.schema.tally?.key })),
         })
       : "null"
   };
-  // Absolute color stops for the point layer's measure, when its variable
-  // declares them. Null falls back to percentiles of whatever is on screen.
-  const SCALE = ${JSON.stringify(pointScale(pointRefs.length ? pointRefs : refs))};
   const FIELD = ${showField ? JSON.stringify({ dataset: fieldDataset, column: fieldColumn, unit: fieldUnit, mode: fieldMode, label: fieldRef!.label, entity: fieldEntity, direction: vector?.direction ?? null }) : "null"};
   const MOTION = ${motionRef ? JSON.stringify({ dataset: motionDataset, trails, label: motionRef.label }) : "null"};
+
+  /*
+    Which market the pins read, for a price stream collected in both: real
+    time, the day-ahead price at the same nodes, or the day-ahead less real
+    time. Per viewer and never a revision, like the layer toggles — switching
+    markets is looking, not editing. Each market is its own query set (the
+    plan says which row slot is which), and an operator with no day-ahead
+    stream sits out the two that need one.
+  */
+  const MARKETS = ${JSON.stringify(markets)};
+  const MARKET_NAMES = { rt: "RT", da: "DA", spread: "DA/RT" };
+  const MARKET_TITLES = {
+    rt: "Real-time price",
+    da: "Day-ahead price",
+    spread: "Day-ahead less real-time, at each node, in the hour of its newest real-time reading",
+  };
+  const PLANS = ${JSON.stringify(planMeta)};
+  const QUERY_SETS = {
+${querySets}
+  };
+  const SIGS = React.useMemo(() => MARKETS.map((m) => JSON.stringify(QUERY_SETS[m])), []);
+  const [market, setMarket] = React.useState(${JSON.stringify(native)});
 
   /*
     The scrubber's instant, scoped to this map alone.
@@ -3056,9 +3329,10 @@ const map: ComponentDef = {
     One tiny query per stream, re-asked every quarter hour; a failure leaves
     the scale at now, which is the conservative reading.
   */
-  const PROBE = ${JSON.stringify(probeDatasets)};
+  const PROBE = PLANS[market].probe;
   const [horizon, setHorizon] = React.useState(null);
   React.useEffect(() => {
+    setHorizon(null);
     if (NAKED || !PROBE.length) return;
     let live = true;
     const look = () =>
@@ -3074,7 +3348,7 @@ const map: ComponentDef = {
     look();
     const id = setInterval(look, 15 * 60000);
     return () => { live = false; clearInterval(id); };
-  }, []);
+  }, [PROBE.join()]);
   // How much future the scale offers: none unless a row sits past the wall
   // clock, and never more than two days however far a forecast runs. The
   // clock, not the grid — a real-time row stamped 13:20 is after 13:00 and
@@ -3090,74 +3364,26 @@ const map: ComponentDef = {
   const tz = useTz(${JSON.stringify(sourceTz(refs))});
 
   // Named, because playback asks for these same requests a few frames ahead.
-  const QUERIES = [
-${
-  locatedSets.length
-    ? /*
-         A whole-stream reference carries no node filter: a located stream
-         fans out, so the query asks for everything and the pins are whatever
-         came back — everything the map can draw, that is, for a partial
-         table (`located`), so the limit is sized to the placed count rather
-         than to the stream. A subset chip filters at the server instead —
-         nine hubs' rows, not 1,118 thinned after delivery — and its limit is
-         sized to the subset. `end` is the load-bearing half either way — a
-         forecast's newest row is seven days out, and a map of "now" that
-         drew next Sunday would be wrong in a way nobody would catch by
-         looking at it. Bounded at now, the newest row is the current one
-         for observations and forecasts alike.
-      */
-      locatedSets
-        .map(
-          (set) =>
-            `      { dataset: ${JSON.stringify(set.dataset)}, ${
-              // A tally's filter narrows the pins as it narrows a count:
-              // re-roofs on the map are the re-roofs in the chart.
-              Object.entries(tallyFilter(set.ref))
-                .map(([k, v]) => `${k}: ${JSON.stringify(v)}, `)
-                .join("")
-            }${
-              set.subset
-                ? `node: ${JSON.stringify(set.subset.entities)}, `
-                : set.partial
-                  ? "located: true, "
-                  : ""
-            }scrubStart: ${JSON.stringify(scrubWindow(set.ref))}, end: "-0m", limit: ${Math.min(
-              DRAW_CAP,
-              Math.max(set.subset ? 30 : 60, set.count * 2),
-            )} },`,
-        )
-        .join("\n")
-    : nodes.length
-      ? `      { dataset: ${JSON.stringify(s[0]?.dataset ?? "")}, node: NODES, limit: 1 },`
-      : ""
-}
-${
-  showField
-    ? /*
-         The whole newest hour of the field, not one row. `limit: 1` was right
-         when a field was a handful of mock cells; a real grid needs every cell
-         of one hour, so the limit is the cell count with headroom and the
-         newest row per cell wins. `end` bounds it at now for the same reason
-         the point layer does — a forecast field's newest interval is two days
-         out, and a wind map of the day after tomorrow looks exactly like a
-         wind map of now.
-      */
-      `      { dataset: ${JSON.stringify(fieldDataset)}, scrubStart: ${JSON.stringify(scrubWindow(fieldRef!))}, end: "-0m", limit: ${Math.min(4000, (fieldSchema?.entities.count ?? 200) * 2)} },`
-    : ""
-}
-${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m", limit: ${motionLimit} },` : ""}
-  ];
-  const { rows, error, loading, at: rowsAt } = useSeries(QUERIES, ${refreshMs(refs)}, cursorAt);
+  const QUERIES = QUERY_SETS[market];
+  const { rows, error, loading, at: rowsAt, sig: rowsSig } = useSeries(QUERIES, ${refreshMs(refs)}, cursorAt);
+  /*
+    The market the rows on screen answer, which is not always the one
+    pressed: a new query set keeps the old rows up until it lands, and
+    reading real-time rows through the spread's plan would take one stream's
+    slot for another's. So everything drawn — the plan, the scale, the
+    title — follows the rows, the switch alone follows the press, and the
+    loading shade covers the round trip between them.
+  */
+  const drawn = MARKETS[SIGS.indexOf(rowsSig)] || market;
+  const PLAN = PLANS[drawn];
+  // Absolute color stops for the point layer's measure in this market, when
+  // its variable declares them; the spread's are its own. Null falls back to
+  // percentiles of whatever is on screen.
+  const SCALE = PLAN.scale;
 
-  const pointRows = ${
-    locatedSets.length
-      ? `[${locatedSets.map((_, k) => `...(rows[${k}] || [])`).join(", ")}]`
-      : nodes.length
-        ? "rows[0] || []"
-        : "[]"
-  };
-  const fieldRows = ${showField ? `rows[${pointQueries}] || []` : "[]"};
-  const flightRows = ${motionRef ? `rows[${pointQueries + (showField ? 1 : 0)}] || []` : "[]"};
+  const pointRows = [].concat(...rows.slice(0, PLAN.n).map((r) => r || []));
+  const fieldRows = ${showField ? "rows[PLAN.n] || []" : "[]"};
+  const flightRows = ${motionRef ? `rows[PLAN.n + ${showField ? 1 : 0}] || []` : "[]"};
 
   /*
     Loading, shown on the map rather than said in words: a bar sliding along
@@ -3166,7 +3392,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     scrubbing, the live rows on their way back after Go live. Only after a
     beat, so a frame that comes from the cache does not flicker the map.
   */
-  const pending = rowsAt !== cursorAt || (loading && !rows.some((r) => r && r.length));
+  const pending = rowsAt !== cursorAt || drawn !== market || (loading && !rows.some((r) => r && r.length));
   const [busyShown, setBusyShown] = React.useState(false);
   React.useEffect(() => {
     if (!pending) { setBusyShown(false); return; }
@@ -3200,21 +3426,46 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   const placed = React.useMemo(() => {
     const out = {};
     if (LOCATED) {
-      LOCATED.sets.forEach((set, k) => (rows[k] || []).forEach((r) => {
-        const id = r[set.entity];
-        if (id == null || out[id]) return;
-        // The row's own coordinate first; an aggregate row (a hub, a zone)
-        // carries none and takes the centroid compiled in, which is not exact
-        // and says so in its popup.
-        let lon = r.lon, lat = r.lat, exact = true;
-        if ((typeof lat !== "number" || typeof lon !== "number") && POINTS[id]) {
-          lat = POINTS[id].lat; lon = POINTS[id].lon; exact = false;
-        }
-        if (typeof lat !== "number" || typeof lon !== "number") return;
-        // An event pin has no measure of its own — one permit is one mark —
-        // so it carries 1, and the ramp below draws every one alike.
-        out[id] = { lon, lat, label: String(id), value: set.events ? 1 : r[COLUMN], exact, at: Date.parse(r.interval_start_utc) || null };
-      }));
+      PLAN.pts.forEach((set) => {
+        /*
+          A spread is the day-ahead hour each node's newest real-time reading
+          falls in, less that reading. Hours are whole UTC hours at every
+          operator, so the reading's hour is its own start floored to one. A
+          node with no day-ahead price for that hour is left off rather than
+          drawn against a neighbouring hour's.
+        */
+        const ahead = {};
+        if (set.da) (rows[set.da.k] || []).forEach((r) => {
+          const id = r[set.da.entity], v = r[set.da.column], t = Date.parse(r.interval_start_utc);
+          if (id == null || typeof v !== "number" || !t) return;
+          (ahead[id] = ahead[id] || {})[t] = v;
+        });
+        const seen = {};
+        (rows[set.k] || []).forEach((r) => {
+          const id = r[set.entity];
+          if (id == null || out[id] || seen[id]) return;
+          seen[id] = true;
+          // The row's own coordinate first; an aggregate row (a hub, a zone)
+          // carries none and takes the centroid compiled in, which is not exact
+          // and says so in its popup.
+          let lon = r.lon, lat = r.lat, exact = true;
+          if ((typeof lat !== "number" || typeof lon !== "number") && POINTS[id]) {
+            lat = POINTS[id].lat; lon = POINTS[id].lon; exact = false;
+          }
+          if (typeof lat !== "number" || typeof lon !== "number") return;
+          const at = Date.parse(r.interval_start_utc) || null;
+          // An event pin has no measure of its own — one permit is one mark —
+          // so it carries 1, and the ramp below draws every one alike.
+          let value = set.events ? 1 : r[set.column], da = null, rt = null;
+          if (set.da) {
+            da = at && ahead[id] ? ahead[id][Math.floor(at / HOUR) * HOUR] : undefined;
+            if (typeof da !== "number" || typeof value !== "number") return;
+            rt = value;
+            value = da - rt;
+          }
+          out[id] = { lon, lat, label: String(id), value, exact, at, da, rt };
+        });
+      });
     } else {
       NODES.forEach((n) => {
         const row = pointRows.find((r) => r.node === n);
@@ -3223,7 +3474,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
       });
     }
     return out;
-  }, [rows]);
+  }, [rows, drawn]);
 
   /*
     The legend, which is also the layer switch.
@@ -3417,6 +3668,14 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     if (playing) { setPlaying(false); return; }
     if (cursorMs + step > scaleTo) setCursorAt(toIso(scaleFrom));
     setPlaying(true);
+  };
+  const pickMarket = (m) => {
+    if (m === market) return;
+    setPlaying(false);
+    // Only the day-ahead has a tomorrow; a handle parked there goes live
+    // rather than asking real time for an hour it does not have.
+    if (m !== "da" && cursorAt && Date.parse(cursorAt) > Date.now()) setCursorAt(null);
+    setMarket(m);
   };
   React.useEffect(() => {
     if (!playing) return;
@@ -3789,7 +4048,21 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
     window.__dryosHover = !readout
       ? null
       : readout.kind === "point"
-        ? { when: null, label: readout.id, entity: readout.id, values: [{ name: readout.id, value: readout.value, unit: UNIT }] }
+        ? {
+            when: null,
+            label: readout.id + (MARKETS.length > 1 ? " · " + MARKET_NAMES[drawn] : ""),
+            entity: readout.id,
+            values: [
+              { name: drawn === "spread" ? "DA − RT" : readout.id, value: readout.value, unit: UNIT },
+              // A spread carries its two halves, so the ask can say which moved.
+              ...(placed[readout.id] && placed[readout.id].da != null
+                ? [
+                    { name: "day-ahead", value: placed[readout.id].da, unit: UNIT },
+                    { name: "real-time", value: placed[readout.id].rt, unit: UNIT },
+                  ]
+                : []),
+            ],
+          }
         : {
             when: null,
             label: "wind at " + readout.lat.toFixed(2) + ", " + readout.lon.toFixed(2),
@@ -4532,7 +4805,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
   }
 
   return (
-    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title=${JSON.stringify(mapTitle)} sub={${JSON.stringify(subFor(refs, mapTitle))}} unit={FIELD ? FIELD.unit : UNIT} error={error}>
+    <Section index={${i}} sourceTz={${JSON.stringify(sourceTz(refs))}} w={w} h={h} fill title={PLAN.title} sub={PLAN.sub} unit={FIELD ? FIELD.unit : UNIT} error={error}>
       {/* Mapbox stacks its corner controls one under another; side by side
           they are one row, which is the band the layer panel steps below.
           Both drawn smaller than Mapbox's own 88px wordmark and 24px button
@@ -4570,8 +4843,40 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           both are already said — the tile's header names the stream and its
           unit, and a map of several layers lists them in the layer panel —
           so the row was a second caption spending the map's corner. */}
-      {!NAKED && SCALE && shown("points") ? (
-        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", left: 4, padding: "5px 7px", position: "absolute", top: 4, zIndex: 3 }}>
+      {/* The market switch heads the corner the key sits in, since it says
+          which prices the key is coloring. */}
+      {!NAKED && (MARKETS.length > 1 || (SCALE && shown("points"))) ? (
+      <div style={{ alignItems: "flex-start", display: "flex", flexDirection: "column", gap: 4, left: 4, pointerEvents: "none", position: "absolute", top: 4, zIndex: 3 }}>
+      {MARKETS.length > 1 ? (
+        <div data-nopick role="group" aria-label="Market" style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", padding: 2, pointerEvents: "auto" }}>
+          {MARKETS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => pickMarket(m)}
+              aria-pressed={m === market}
+              title={MARKET_TITLES[m]}
+              style={{
+                background: m === market ? "var(--surface-3)" : "transparent", border: "none", borderRadius: 3,
+                color: m === market ? "var(--ink)" : "var(--faint)", cursor: "pointer", font: "inherit",
+                fontSize: 10, fontWeight: m === market ? 600 : 400, padding: "2px 7px", whiteSpace: "nowrap",
+              }}
+            >
+              {MARKET_NAMES[m]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {PLANS[market].left.length ? (
+        <p style={{ background: "var(--bg)", borderRadius: 4, color: "var(--faint)", fontSize: 9.5, margin: 0, padding: "1px 5px" }}>
+          no day-ahead: {PLANS[market].left.join(", ")}
+        </p>
+      ) : null}
+      {SCALE && shown("points") ? (
+        <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 5, display: "flex", flexDirection: "column", padding: "5px 7px" }}>
+          {drawn === "spread" ? (
+            <span style={{ color: "var(--muted)", fontSize: 8.5, letterSpacing: ".06em", marginBottom: 1 }}>DA − RT</span>
+          ) : null}
           {/*
             The ramp itself, because "a hundred dollars stands out" only helps
             somebody who can tell that this red is a hundred dollars. A
@@ -4587,9 +4892,13 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           {SCALE && shown("points") ? (
             <div style={{ alignItems: "center", columnGap: 5, display: "grid", gridTemplateColumns: "auto auto", justifyContent: "start", marginTop: 2, rowGap: 1 }}>
               {SCALE.map((s, i) => {
-                const k = (v) => (Math.abs(v) >= 1000 ? v / 1000 + "k" : String(v));
+                const k = (v) => (v < 0 ? "−" : "") + (Math.abs(v) >= 1000 ? Math.abs(v) / 1000 + "k" : String(Math.abs(v)));
                 const next = SCALE[i + 1];
-                const range = s.label === "negative" ? "< 0" : !next ? "≥ " + k(s.at) : k(s.at) + "–" + k(next.at);
+                // The first band is everything under the second stop: "< 0"
+                // for a price, "< −50" for a spread.
+                const range = i === 0 && next && (s.label === "negative" || s.label === "below")
+                  ? "< " + k(next.at)
+                  : !next ? "≥ " + k(s.at) : k(s.at) + "–" + k(next.at);
                 return { at: s.at, color: s.color, range };
               }).reverse().map((b) => (
                 <React.Fragment key={b.at}>
@@ -4600,6 +4909,8 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
             </div>
           ) : null}
         </div>
+      ) : null}
+      </div>
       ) : null}
 
       {/* ── Layers, top right. Visibility and draw order — the two things you
@@ -4849,7 +5160,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
                 <div style={{ background: "repeating-linear-gradient(135deg, transparent 0 4px, var(--line) 4px 5px)", bottom: 0, left: pct(cursorNow) + "%", pointerEvents: "none", position: "absolute", right: 0, top: 0 }} />
                 <div style={{ background: "var(--accent)", bottom: 0, left: pct(cursorNow) + "%", opacity: 0.75, pointerEvents: "none", position: "absolute", top: 0, width: 1 }} />
                 <span style={{ ...TAG, color: "var(--accent)", paddingRight: 4, right: 100 - pct(cursorNow) + "%" }}>Live</span>
-                <span style={{ ...TAG, color: "var(--faint)", left: pct(cursorNow) + "%", paddingLeft: 4 }}>Forecast</span>
+                <span style={{ ...TAG, color: "var(--faint)", left: pct(cursorNow) + "%", paddingLeft: 4 }}>{market === "da" ? "Day-ahead" : "Forecast"}</span>
               </>
             ) : null}
             {HOURS.map((t) => (
@@ -4921,7 +5232,7 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
           <div style={{ alignItems: "baseline", display: "flex", gap: 5 }}>
             <span style={{ color: "var(--ink)", fontSize: 19, fontWeight: 600, lineHeight: 1.15 }}>
               {readout.kind === "point"
-                ? (typeof readout.value === "number" ? readout.value.toFixed(2) : "—")
+                ? (typeof readout.value === "number" ? (drawn === "spread" && readout.value > 0 ? "+" : "") + readout.value.toFixed(2) : "—")
                 : readout.spd.toFixed(1)}
             </span>
             {/* Each layer's own unit. A single UNIT for both read "6.3 $/MWh"
@@ -4939,6 +5250,12 @@ ${motionRef ? `      { dataset: ${JSON.stringify(motionDataset)}, start: "-30m",
               <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
                 {readout.id}
               </div>
+              {/* A spread's two halves, so the number says which market moved. */}
+              {placed[readout.id] && placed[readout.id].da != null ? (
+                <div style={{ color: "var(--muted)", fontSize: 10, marginTop: 2, whiteSpace: "nowrap" }}>
+                  DA {placed[readout.id].da.toFixed(2)} · RT {placed[readout.id].rt.toFixed(2)}
+                </div>
+              ) : null}
               {/* When this node's reading is from — its own row's interval,
                   read from the current rows so a poll moves it with the value.
                   Nodes on one map need not share an interval: a late operator
