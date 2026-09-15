@@ -80,12 +80,23 @@ function spanOf(rel) {
 /*
   \`scrubStart\` is a window that applies only at a cursor: a map's frame needs
   the newest reading at the instant, and asked with no start the source sent
-  two intervals of every node and took half as long again to do it. Live
-  queries keep no bound, so a collector running late never empties the map.
+  two intervals of every node and took half as long again to do it.
+
+  Live, the same query gets a day's reach instead. Unbounded, the API ranked
+  a stream's whole history for the newest few thousand rows: PJM's bus
+  stream answered in 4–18s live and in 0.7s bounded to 24 hours, the same
+  rows either way, and a map waits for its slowest stream. A day is far
+  wider than a reading, so a collector running late still never empties the
+  map; one a day behind shows "No readings", which is then the truth.
 */
+const LIVE_REACH = 24 * 3600000;
 function atInstant(q, cursor) {
   const at = cursor ? Date.parse(cursor) : NaN;
-  if (!at) return q;
+  if (!at) {
+    if (!("scrubStart" in q)) return q;
+    const { scrubStart, ...rest } = q;
+    return rest.start ? rest : { ...rest, start: new Date(Date.now() - LIVE_REACH).toISOString() };
+  }
   const { scrubStart, ...rest } = q;
   const out = { ...rest, end: cursor };
   const span = spanOf(scrubStart) || spanOf(q.start);
