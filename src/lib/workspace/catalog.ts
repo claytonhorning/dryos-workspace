@@ -3756,6 +3756,262 @@ export const SCHEMAS: Schema[] = [
   // NYISO's MIS: public files, no key, a day to a file and the newest
   // interval at a fixed path. Eastern prevailing, which `sourceTzOf` knows;
   // no row carries UTC, so the collector localises every stamp itself.
+  // NYISO's binding constraints (`nyiso_constraints.py`): a row only while a
+  // facility binds, keyed on facility, contingency and interval.
+  {
+    id: "energy.nyiso.constraintsrt",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "NYISO real-time binding constraints",
+    short: "Constraints · RT",
+    dataset: "nyiso-rt-shadow-prices",
+    availability: "live",
+    cadence: { label: "every 5 min, when bound", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 4,
+      label: "constraints",
+      sample: ["SCRIBA   345 VOLNEY   345 1", "MEYER    230 MEYER      1 1"],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "Every transmission facility NYISO's real-time dispatch was up against, five " +
+      "minutes at a time, with the contingency it bound for and its constraint cost. " +
+      "Empty when nothing binds, which is a fact and not a gap.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Constraint cost",
+        unit: "$/MWh",
+        availability: "live",
+        description: "NYISO's constraint cost for the interval, in its own sign.",
+        mock: { base: 20, swing: 80, noise: 20 },
+      },
+    ],
+  },
+  {
+    id: "energy.nyiso.constraintsdam",
+    path: ["Energy", "Pricing", "Shadow prices"],
+    name: "NYISO day-ahead binding constraints",
+    short: "Constraints · DA",
+    dataset: "nyiso-dam-shadow-prices",
+    availability: "live",
+    cadence: { label: "daily, morning ET", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: {
+      count: 11,
+      label: "constraints",
+      sample: ["DUNWODIE 345 SHORE_RD 345 1", "SPRNBRK  345 UNIONHBS 345 1"],
+    },
+    entityColumn: "constraint_name",
+    blurb:
+      "Every transmission facility that bound in NYISO's day-ahead market, hour by " +
+      "hour, with the contingency it bound for and its constraint cost, posted for " +
+      "tomorrow each morning.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "shadow_price",
+        label: "Constraint cost",
+        unit: "$/MWh",
+        availability: "live",
+        description: "NYISO's constraint cost for the hour, in its own sign.",
+        mock: { base: -20, swing: 80, noise: 15 },
+      },
+    ],
+  },
+  // NYISO's reserve prices (`nyiso_ancillary.py`): a row per zone, a column per
+  // product. The eleven zones price nearly alike — the reserve regions show
+  // through the zones they cover.
+  {
+    id: "energy.nyiso.asrt",
+    path: ["Energy", "Ancillary", "RT prices"],
+    name: "NYISO real-time ancillary prices",
+    short: "AS · RT",
+    dataset: "nyiso-rt-as",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: { count: 11, label: "load zones", sample: ["N.Y.C.", "LONGIL", "WEST"] },
+    entityKey: "zone",
+    blurb:
+      "Five-minute clearing prices for NYISO's reserves and regulation — ten-minute " +
+      "spinning and non-synchronous, thirty-minute operating, regulation capacity and " +
+      "movement — in each of its eleven zones.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "spin_10min_mcp", label: "10-min spinning", unit: "$/MWh", availability: "live",
+        description: "Ten-minute spinning reserve clearing price.", mock: { base: 5, swing: 6, noise: 2, floor: 0 } },
+      { key: "nonsync_10min_mcp", label: "10-min non-sync", unit: "$/MWh", availability: "live",
+        description: "Ten-minute non-synchronous reserve clearing price.", mock: { base: 3, swing: 4, noise: 1, floor: 0 } },
+      { key: "operating_30min_mcp", label: "30-min operating", unit: "$/MWh", availability: "live",
+        description: "Thirty-minute operating reserve clearing price.", mock: { base: 2, swing: 3, noise: 1, floor: 0 } },
+      { key: "reg_capacity_mcp", label: "Regulation capacity", unit: "$/MWh", availability: "live",
+        description: "Regulation capacity clearing price.", mock: { base: 10, swing: 8, noise: 2, floor: 0 } },
+      { key: "reg_movement_mcp", label: "Regulation movement", unit: "$/MW", availability: "live",
+        description: "Regulation movement price, per MW moved.", mock: { base: 0.1, swing: 0.2, noise: 0.05, floor: 0 } },
+    ],
+  },
+  {
+    id: "energy.nyiso.asdam",
+    path: ["Energy", "Ancillary", "DAM prices"],
+    name: "NYISO day-ahead ancillary prices",
+    short: "AS · DA",
+    dataset: "nyiso-dam-as",
+    availability: "live",
+    cadence: { label: "daily, morning ET", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: { count: 11, label: "load zones", sample: ["N.Y.C.", "LONGIL", "WEST"] },
+    entityKey: "zone",
+    blurb:
+      "Hourly day-ahead clearing prices for NYISO's reserves and regulation capacity in " +
+      "each of its eleven zones, posted for tomorrow each morning.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "spin_10min_mcp", label: "10-min spinning", unit: "$/MWh", availability: "live",
+        description: "Ten-minute spinning reserve clearing price.", mock: { base: 6, swing: 5, noise: 1, floor: 0 } },
+      { key: "nonsync_10min_mcp", label: "10-min non-sync", unit: "$/MWh", availability: "live",
+        description: "Ten-minute non-synchronous reserve clearing price.", mock: { base: 5, swing: 4, noise: 1, floor: 0 } },
+      { key: "operating_30min_mcp", label: "30-min operating", unit: "$/MWh", availability: "live",
+        description: "Thirty-minute operating reserve clearing price.", mock: { base: 4, swing: 3, noise: 1, floor: 0 } },
+      { key: "reg_capacity_mcp", label: "Regulation capacity", unit: "$/MWh", availability: "live",
+        description: "Regulation capacity clearing price.", mock: { base: 10, swing: 8, noise: 2, floor: 0 } },
+    ],
+  },
+  {
+    id: "energy.nyiso.load",
+    path: ["Energy", "Load", "System demand"],
+    name: "NYISO load by zone",
+    short: "Load",
+    dataset: "nyiso-system-load",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: { count: 11, label: "load zones", sample: ["N.Y.C.", "LONGIL", "WEST"] },
+    entityKey: "zone",
+    blurb:
+      "Actual load every five minutes in each of NYISO's eleven zones — New York City, " +
+      "Long Island, the Hudson Valley and the rest of the state.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "load_mw", label: "Load", unit: "MW", availability: "live",
+        description: "Actual load in the zone for the interval.",
+        mock: { base: 1_500, swing: 1_200, noise: 60 } },
+    ],
+  },
+  {
+    id: "energy.nyiso.loadfc",
+    path: ["Energy", "Load", "Six-day forecast"],
+    name: "NYISO load forecast",
+    short: "Load fc · 6d",
+    dataset: "nyiso-load-forecast-6day",
+    availability: "live",
+    cadence: { label: "daily, morning ET", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.25,
+    entities: { count: 12, label: "zones and the state", sample: ["N.Y.C.", "LONGIL", "NYISO"] },
+    entityKey: "zone",
+    // NYISO is the eleven zones summed to the megawatt; stacked on them it counts twice.
+    entityOmit: ["NYISO"],
+    blurb:
+      "NYISO's hourly load forecast six days ahead for each of its eleven zones and the " +
+      "state, issued each morning — every issue kept.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "load_forecast_mw", label: "Load forecast", unit: "MW", availability: "live",
+        description: "NYISO's forecast of the zone's load for the hour.",
+        mock: { base: 1_500, swing: 1_200, noise: 40 } },
+    ],
+  },
+  {
+    id: "energy.nyiso.genmix",
+    path: ["Energy", "Generation", "Fuel mix"],
+    name: "NYISO fuel mix",
+    short: "Fuel mix",
+    dataset: "nyiso-fuel-mix",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.5,
+    entities: {
+      count: 7,
+      label: "fuel categories",
+      sample: ["NATURAL_GAS", "DUAL_FUEL", "HYDRO"],
+    },
+    entityKey: "fuel",
+    blurb:
+      "What is generating across New York every five minutes — natural gas, dual-fuel " +
+      "units, nuclear, hydro, wind, other renewables and other fossil fuels — from " +
+      "NYISO's real-time fuel mix.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "gen_mw",
+        label: "Output",
+        unit: "MW",
+        availability: "live",
+        description: "Generation from the category in the dispatch interval.",
+        mock: { base: 2_500, swing: 1_800, noise: 100 },
+      },
+    ],
+  },
+  {
+    id: "energy.nyiso.dayahead",
+    path: ["Energy", "Pricing", "Day-ahead"],
+    name: "NYISO day-ahead LMP",
+    short: "DA · LMP",
+    dataset: "nyiso-dam-lmp",
+    availability: "live",
+    cadence: { label: "daily, late morning ET", seconds: 86_400 },
+    intervalSeconds: 3_600,
+    tokens: 0.5,
+    entities: {
+      count: 763,
+      label: "pricing points",
+      sample: ["N.Y.C.", "LONGIL", "WEST"],
+    },
+    // The real-time stream's 763 points and node table: the same 561 placed.
+    located: true,
+    locatedBy: "NYISO's own generator reference, which gives each bus its coordinate",
+    locatedCount: 561,
+    blurb:
+      "Hourly day-ahead prices at NYISO's eleven load zones, its proxies with Quebec, " +
+      "New England, Ontario and PJM, and every generator bus, with the energy, " +
+      "congestion and loss components, posted for the whole of tomorrow each morning.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      {
+        key: "lmp_total",
+        label: "Total LMP",
+        unit: "$/MWh",
+        availability: "live",
+        description: "The hourly day-ahead price at the zone or bus — NYISO calls it the LBMP.",
+        scale: [
+          { at: -50, color: "#2166ac", label: "negative" },
+          { at: 0, color: "#4393c3" },
+          { at: 20, color: "#92c5de" },
+          { at: 30, color: "#c9c9c9" },
+          { at: 45, color: "#f4a582" },
+          { at: 70, color: "#e5795e" },
+          { at: 100, color: "#d6604d" },
+          { at: 250, color: "#e0243a" },
+          { at: 500, color: "#ff2fd0" },
+        ],
+        mock: { base: 40, swing: 15, noise: 2 },
+      },
+      { key: "lmp_congestion", label: "Congestion", unit: "$/MWh", availability: "live",
+        description: "Marginal congestion component, stored in the shared sign — NYISO " +
+          "publishes it the other way round.",
+        mock: { base: 0, swing: 8, noise: 2 } },
+      { key: "lmp_loss", label: "Losses", unit: "$/MWh", availability: "live",
+        description: "Marginal loss component.", mock: { base: 0, swing: 2, noise: 0.5 } },
+      { key: "lmp_energy", label: "Energy", unit: "$/MWh", availability: "live",
+        description: "Energy component, derived: NYISO publishes none. One number " +
+          "across the state each hour.",
+        mock: { base: 40, swing: 12, noise: 2 } },
+    ],
+  },
   {
     id: "energy.nyiso.realtime",
     path: ["Energy", "Pricing", "Real-time"],
