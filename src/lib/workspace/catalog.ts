@@ -3774,6 +3774,36 @@ export const SCHEMAS: Schema[] = [
   // NYISO's MIS: public files, no key, a day to a file and the newest
   // interval at a fixed path. Eastern prevailing, which `sourceTzOf` knows;
   // no row carries UTC, so the collector localises every stamp itself.
+  // NYISO's interfaces (`nyiso_interfaces.py`): a row per interface per
+  // interval; a limit NYISO codes ±9999 ("none that way") is null.
+  {
+    id: "energy.nyiso.interfaces",
+    path: ["Energy", "Grid", "Transfer interfaces"],
+    name: "NYISO interface flows",
+    short: "Interfaces",
+    dataset: "nyiso-interface-flows",
+    availability: "live",
+    cadence: { label: "every 5 min", seconds: 300 },
+    tokens: 0.25,
+    entities: { count: 19, label: "interfaces", sample: ["TOTAL EAST", "CENTRAL EAST - VC", "SCH - PJ - NY"] },
+    entityKey: "interface",
+    blurb:
+      "Flow every five minutes across each of NYISO's transfer interfaces — Total East, " +
+      "Central East, UPNY-ConEd and the ties with PJM, New England, Ontario and " +
+      "Quebec — against the limits it is held to.",
+    maintainer: { name: "Dryos", since: Date.UTC(2026, 8, 14) },
+    variables: [
+      { key: "flow_mw", label: "Flow", unit: "MW", availability: "live",
+        description: "Flow across the interface in the interval, in NYISO's sign.",
+        mock: { base: 1_000, swing: 1_500, noise: 80 } },
+      { key: "positive_limit_mw", label: "Limit (+)", unit: "MW", availability: "live",
+        description: "The limit in the positive direction; null where NYISO sets none.",
+        mock: { base: 3_000, swing: 500, noise: 20 } },
+      { key: "negative_limit_mw", label: "Limit (−)", unit: "MW", availability: "live",
+        description: "The limit in the negative direction; null where NYISO sets none.",
+        mock: { base: -1_200, swing: 300, noise: 20 } },
+    ],
+  },
   // NYISO's binding constraints (`nyiso_constraints.py`): a row only while a
   // facility binds, keyed on facility, contingency and interval.
   {
