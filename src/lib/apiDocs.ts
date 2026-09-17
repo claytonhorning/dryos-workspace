@@ -227,11 +227,11 @@ export const SITE = "https://www.dryos.ai";
  * way, at several addresses that link back here. `sameAs` on the
  * Organization is where a search engine reads that set.
  *
- * Empty until the profiles exist. An entry pointing at a page that does not
- * load is worse than none, because it is the one claim in the structured
- * data a crawler can check and find false.
+ * Only profiles that actually load belong here. An entry pointing at a page
+ * that does not is worse than none, because it is the one claim in the
+ * structured data a crawler can check and find false.
  */
-export const PROFILES: string[] = [];
+export const PROFILES: string[] = ["https://github.com/claytonhorning/dryos-workspace"];
 
 /** What Dryos is, in the words the entity should be known by — distinct from
     the camera operating system that shares the name. */
@@ -240,11 +240,13 @@ export const ORG_DESCRIPTION =
 
 /**
  * The public repo people clone to build on Dryos data from their own
- * infrastructure. Not created yet: until GitHub answers for it as a public
- * repo, the clone block renders nothing (`lib/github.ts`), so the site never
- * links to a 404. Set `DRYOS_GITHUB_REPO` to point somewhere else.
+ * infrastructure: the workspace itself, mirrored out of this monorepo with
+ * `git subtree split` (see "The public mirror" in the root CLAUDE.md). The
+ * clone block renders nothing while GitHub does not answer for it as a public
+ * repo (`lib/github.ts`), so the site never links to a 404. Set
+ * `DRYOS_GITHUB_REPO` to point somewhere else.
  */
-export const GITHUB_REPO = process.env.DRYOS_GITHUB_REPO || "claytonhorning/dryos-starter";
+export const GITHUB_REPO = process.env.DRYOS_GITHUB_REPO || "claytonhorning/dryos-workspace";
 
 /** The operators the power streams cover, in the order the product names them. */
 export const OPERATORS = ["ERCOT", "MISO", "PJM", "SPP", "CAISO", "NYISO", "ISO-NE"];

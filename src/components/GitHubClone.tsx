@@ -18,8 +18,8 @@ export async function GitHubClone({ className }: { className?: string }) {
         <div>
           <h3 className="text-[15px] font-semibold text-ink">Build it on your own infrastructure</h3>
           <p className="mt-1 text-[13.5px] text-muted">
-            Clone the starter, point your agent at the MCP server, deploy it anywhere — your
-            stack, production-quality data.
+            The workspace is open source. Clone it, point it at the MCP server, deploy it
+            anywhere — your stack, the same live data.
           </p>
         </div>
         <a
