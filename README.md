@@ -112,6 +112,8 @@ behalf — which is also the one place every query can be metered.
 
 ## Licence
 
-Not yet chosen. Until a `LICENSE` file is added, default copyright applies and
-nobody has permission to reuse this — which is the opposite of the intent, so
-it is the first thing to fix.
+MIT — see [`LICENSE`](LICENSE). Use it, fork it, ship it.
+
+The data itself is a separate question: it is served from the Dryos API under
+whatever terms each publisher sets, and this licence covers the code here and
+nothing else.
