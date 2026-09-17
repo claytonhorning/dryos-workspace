@@ -288,6 +288,13 @@ body {
   animation: dr-rise 0.42s ease-out both;
 }
 
+/* A nav dropdown arriving. Faster than `dr-rise` and with less travel: the
+   panel is already under the pointer when it appears, and anything slower
+   reads as lag rather than as motion. */
+.dr-menu-in {
+  animation: dr-rise 0.14s ease-out both;
+}
+
 /* A drop target, while something is over the canvas. */
 @keyframes dr-seam {
   0%,

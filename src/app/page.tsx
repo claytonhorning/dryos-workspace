@@ -7,7 +7,6 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
 import { Domains } from "@/components/landing/Domains";
-import { Tiers } from "@/components/landing/Tiers";
 import { WhoWeAre } from "@/components/landing/WhoWeAre";
 
 /**
@@ -72,7 +71,6 @@ export default function LandingPage() {
       <Domains />
       <HowItWorks />
       <ForAgents />
-      <Tiers />
       <WhoWeAre />
     </div>
   );

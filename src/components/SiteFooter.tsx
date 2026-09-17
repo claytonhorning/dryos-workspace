@@ -95,11 +95,6 @@ export function SiteFooter() {
                 </Link>
               </li>
               <li>
-                <Link href="/#pricing" className="text-[13px] text-muted transition-colors hover:text-ink">
-                  Pricing
-                </Link>
-              </li>
-              <li>
                 <a
                   href={PUBLIC_API}
                   className="text-[13px] text-muted transition-colors hover:text-ink"

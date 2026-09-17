@@ -17,7 +17,7 @@ export function ForAgents() {
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-14">
         <Reveal when="view">
           <Eyebrow>MCP server · no key</Eyebrow>
-          <Heading>Give your agent the grid.</Heading>
+          <Heading>Give your agent live data.</Heading>
           <Lead>
             One line puts live prices, load, generation and forecasts from{" "}
             {OPERATORS.join(", ")} — plus weather and building permits — in Claude, ChatGPT,
