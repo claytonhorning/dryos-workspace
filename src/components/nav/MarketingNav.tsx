@@ -14,12 +14,14 @@ import { MobileStrip, NavLink, Shell } from "./shared";
  * page too. One action, because a marketing page has exactly one job here: get
  * someone into the workspace. The previous "Get early access" is gone; there is
  * a running product behind this link, and asking people to queue for something
- * they can open is worse than not asking. "The data" went when the catalogue
- * pages did: the data is browsed inside the workspace now.
+ * they can open is worse than not asking. "The data" points at the public
+ * catalogue, which is a page again — and the one a search engine reaches.
  */
 const LINKS = [
   { href: "/#try", label: "Try it" },
-  { href: "/#data", label: "The data" },
+  // "The data" is a real destination again: the public catalogue, which is
+  // where a search lands and where every stream has an address of its own.
+  { href: "/data", label: "The data" },
   { href: "/#how-it-works", label: "How it works" },
   { href: "/mcp", label: "MCP server" },
   { href: "/#pricing", label: "Pricing" },

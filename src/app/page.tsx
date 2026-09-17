@@ -2,7 +2,7 @@ import { Hero } from "@/components/hero/Hero";
 import { JsonLd } from "@/components/JsonLd";
 import { ForAgents } from "@/components/landing/ForAgents";
 import { HowItWorks } from "@/components/landing/HowItWorks";
-import { MCP_URL, OPERATORS, PUBLIC_API, SITE } from "@/lib/apiDocs";
+import { MCP_URL, ORG_DESCRIPTION, OPERATORS, PROFILES, PUBLIC_API, SITE } from "@/lib/apiDocs";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
@@ -28,14 +28,29 @@ export default function LandingPage() {
               "@type": "Organization",
               "@id": `${SITE}/#org`,
               name: "Dryos",
+              // The bare word belongs to Canon's camera operating system in
+              // every index. What tells two entities of one name apart is a
+              // description and a set of corroborating profiles, not a
+              // louder claim — see `PROFILES`.
+              alternateName: "Dryos AI",
+              description: ORG_DESCRIPTION,
               url: SITE,
               logo: `${SITE}/web-app-manifest-512x512.png`,
+              ...(PROFILES.length ? { sameAs: PROFILES } : {}),
             },
             {
               "@type": "WebSite",
               name: "Dryos",
               url: SITE,
               publisher: { "@id": `${SITE}/#org` },
+            },
+            {
+              "@type": "WebPage",
+              "@id": `${SITE}/#webpage`,
+              url: SITE,
+              name: "Dryos: a data marketplace for energy, weather and property",
+              description: ORG_DESCRIPTION,
+              isPartOf: { "@id": `${SITE}/#org` },
             },
             {
               "@type": "Dataset",

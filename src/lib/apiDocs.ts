@@ -218,6 +218,27 @@ export const MCP_TOOLS: { name: string; summary: string }[] = [
 export const SITE = "https://www.dryos.ai";
 
 /**
+ * The profiles that are unmistakably this Dryos.
+ *
+ * "DRYOS" is also Canon's real-time operating system, which has a Wikipedia
+ * article and therefore owns the bare word in every index. Nothing on this
+ * site can outrank that by asserting harder — what separates two entities
+ * sharing a name is corroboration: the same organisation, described the same
+ * way, at several addresses that link back here. `sameAs` on the
+ * Organization is where a search engine reads that set.
+ *
+ * Empty until the profiles exist. An entry pointing at a page that does not
+ * load is worse than none, because it is the one claim in the structured
+ * data a crawler can check and find false.
+ */
+export const PROFILES: string[] = [];
+
+/** What Dryos is, in the words the entity should be known by — distinct from
+    the camera operating system that shares the name. */
+export const ORG_DESCRIPTION =
+  "A marketplace for live energy, weather and property data. Maintainers collect and publish data streams and are paid for them; buyers consume them through an API, an MCP server or a dashboard.";
+
+/**
  * The public repo people clone to build on Dryos data from their own
  * infrastructure. Not created yet: until GitHub answers for it as a public
  * repo, the clone block renders nothing (`lib/github.ts`), so the site never

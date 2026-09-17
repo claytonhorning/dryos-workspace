@@ -5,9 +5,10 @@
  */
 export type Shell = "marketing" | "space" | "community" | "app" | "none";
 
-/** Still selling something: the landing page, the maintainer pitch, and the
-    MCP server's page, which is read mostly by people who have no account. */
-const MARKETING = ["/", "/maintainers", "/mcp"];
+/** Still selling something: the landing page, the maintainer pitch, the MCP
+    server's page, and the public catalogue — all read mostly by people who
+    have no account, and the catalogue by search engines before anyone. */
+const MARKETING = ["/", "/maintainers", "/mcp", "/data"];
 
 /**
  * The door is still outside. A signed-out visitor who pressed "Open Dryos"

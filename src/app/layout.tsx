@@ -4,6 +4,7 @@ import { Geist, Geist_Mono, Sora } from "next/font/google";
 import Script from "next/script";
 import { AppFrame } from "@/components/AppFrame";
 import { Nav } from "@/components/Nav";
+import { SiteFooter } from "@/components/SiteFooter";
 import { THEME_INIT_SCRIPT } from "@/components/ThemeToggle";
 import { SITE } from "@/lib/apiDocs";
 import "./globals.css";
@@ -25,20 +26,32 @@ const sora = Sora({
 
 const GA_ID = "G-EGBSDY4DE3";
 
+/*
+  Written to the length a search result actually shows, which is the whole
+  point of it: the previous title ran to 68 characters and the description to
+  224, so Google truncated the first at "APIs and …" and threw the second away
+  in favour of a sentence it lifted off the page. A description Google
+  rewrites is a description nobody wrote.
+
+  Both lead with the brand and then the category, the shape every result on
+  the page around it has. The claim is the marketplace: people collect the
+  data and are paid for it, and you consume it — which is the product, and
+  says more to someone who has never heard of Dryos than the provenance
+  argument did.
+*/
+const TITLE = "Dryos: a data marketplace for energy, weather and property";
 const DESCRIPTION =
-  "Live, reconciled US power market data — ERCOT, MISO, PJM, SPP, CAISO, NYISO and ISO-NE prices, load, generation and forecasts, plus weather and building permits — in dashboards, a public API, and an MCP server for AI agents.";
+  "Maintainers collect live data streams and get paid for them. Consume 134 of them — grid prices, weather, permits — by API, MCP server or dashboard.";
 
 export const metadata: Metadata = {
   // Every relative URL below — canonicals, Open Graph images — resolves
   // against the real domain, never whichever host served the build.
   metadataBase: new URL(SITE),
-  title: {
-    default: "Dryos — live US power market data for dashboards, APIs and AI agents",
-    template: "%s — Dryos",
-  },
+  title: { default: TITLE, template: "%s — Dryos" },
   description: DESCRIPTION,
   applicationName: "Dryos",
   keywords: [
+    "data marketplace",
     "power market data",
     "electricity prices",
     "LMP",
@@ -56,13 +69,8 @@ export const metadata: Metadata = {
   // does not set its own, and a canonical of "/" on /maintainers tells a
   // search engine the page is a duplicate of the home page. Each page names
   // its own address.
-  openGraph: {
-    type: "website",
-    siteName: "Dryos",
-    title: "Dryos — live US power market data",
-    description: DESCRIPTION,
-  },
-  twitter: { card: "summary_large_image", title: "Dryos — live US power market data", description: DESCRIPTION },
+  openGraph: { type: "website", siteName: "Dryos", title: TITLE, description: DESCRIPTION },
+  twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION },
   /*
     Declared here rather than by the `app/icon.*` file convention, because the
     generated package is a set that has to agree with itself: the webmanifest
@@ -116,7 +124,7 @@ export default function RootLayout({
         <Suspense fallback={<div className="h-14 border-b border-line" />}>
           <Nav />
         </Suspense>
-        <AppFrame>{children}</AppFrame>
+        <AppFrame footer={<SiteFooter />}>{children}</AppFrame>
         {/* Google Analytics — after hydration, so it never delays the page. */}
         <Script
           src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}

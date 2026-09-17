@@ -47,14 +47,28 @@ function parse(argv: string[]): Record<string, string> {
 
 /* ── Supabase, as the service ──────────────────────────────────────────── */
 
-/** Only these two are read from backend/.env; nothing else there is wanted. */
+/**
+ * The service credentials, from the environment or from a dotenv beside it.
+ *
+ * Only ever these two names; nothing else in any of those files is wanted.
+ * The search order is what lets this script work in both trees: the process
+ * environment first, then `.env.local` here, then `../backend/.env` — which
+ * exists only in the monorepo, and whose absence in a standalone frontend
+ * checkout is not an error, just the next candidate.
+ */
 function credentials(): { url: string; key: string } | null {
-  const file = join(process.cwd(), "../backend/.env");
-  if (!existsSync(file)) return null;
   const env: Record<string, string> = {};
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    const m = line.match(/^(SUPABASE_URL|SUPABASE_SECRET_KEY)=(.*)$/);
-    if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
+  for (const name of ["SUPABASE_URL", "SUPABASE_SECRET_KEY"]) {
+    const v = process.env[name];
+    if (v) env[name] = v;
+  }
+  for (const file of [join(process.cwd(), ".env.local"), join(process.cwd(), "../backend/.env")]) {
+    if (env.SUPABASE_URL && env.SUPABASE_SECRET_KEY) break;
+    if (!existsSync(file)) continue;
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      const m = line.match(/^(SUPABASE_URL|SUPABASE_SECRET_KEY)=(.*)$/);
+      if (m && !env[m[1]]) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
+    }
   }
   return env.SUPABASE_URL && env.SUPABASE_SECRET_KEY
     ? { url: env.SUPABASE_URL, key: env.SUPABASE_SECRET_KEY }
@@ -79,7 +93,7 @@ async function rest(c: Creds, method: string, path: string, body?: unknown): Pro
 async function resolveUser(c: Creds | null, who: string): Promise<string> {
   if (/^[0-9a-f-]{36}$/.test(who)) return who;
   if (!who.includes("@")) die(`--user takes a uuid or an email, not "${who}"`);
-  if (!c) die("an email needs SUPABASE_SECRET_KEY in backend/.env to look up; pass the uuid instead");
+  if (!c) die("an email needs SUPABASE_SECRET_KEY in the environment, .env.local or backend/.env to look up; pass the uuid instead");
   for (let page = 1; ; page++) {
     const r = (await rest(c, "GET", `/auth/v1/admin/users?per_page=1000&page=${page}`)) as {
       users: { id: string; email?: string }[];
@@ -160,11 +174,11 @@ async function main() {
   const user = await resolveUser(creds ?? credentials(), a.user);
 
   if (a.remove || a["remove-space"]) {
-    if (!creds) die("removing needs SUPABASE_SECRET_KEY in backend/.env");
+    if (!creds) die("removing needs SUPABASE_SECRET_KEY in the environment, .env.local or backend/.env");
     return remove(creds, user, a);
   }
   if (a.space && a.name) die("--space files into an existing workspace; --name makes a new one. Not both.");
-  if (!creds && !a.sql) die("no SUPABASE_SECRET_KEY in backend/.env — pass --sql <file> to write the statements instead");
+  if (!creds && !a.sql) die("no SUPABASE_SECRET_KEY in the environment, .env.local or backend/.env — pass --sql <file> to write the statements instead");
 
   const { name, manifest } = source(a);
   const placed = packLayout(manifest);

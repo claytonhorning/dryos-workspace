@@ -9,8 +9,22 @@ import { shellFor } from "@/lib/shell";
  * have one. The sidebar is fixed, so nothing else knows it is there; this
  * is the one place that does.
  */
-export function AppFrame({ children }: { children: React.ReactNode }) {
-  const app = shellFor(usePathname()) === "app";
+export function AppFrame({
+  children,
+  footer,
+}: {
+  children: React.ReactNode;
+  /*
+    Rendered in the server layout and handed down, because this component is
+    a client one and cannot import a server component — only receive one.
+    Shown on the public routes alone: a launched workspace page is a screen
+    on a wall and carries no chrome, and the product's own routes have the
+    sidebar for the same job.
+  */
+  footer?: React.ReactNode;
+}) {
+  const shell = shellFor(usePathname());
+  const app = shell === "app";
   return (
     <main
       className={cx(
@@ -19,6 +33,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
       )}
     >
       {children}
+      {shell === "marketing" && footer}
     </main>
   );
 }
